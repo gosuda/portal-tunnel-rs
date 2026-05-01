@@ -16,9 +16,12 @@ The current Rust relay implements the main relay-server compatibility surface:
 - Admin JSON API for login/logout/status, snapshot, approval mode, landing-page setting, UDP/TCP policy, identity approval/deny/ban/BPS, and IP ban.
 - Discovery endpoints and signed relay descriptors.
 - Experimental `tokio-wireguard` overlay and HopMux wiring.
+- ECDSA P-256/P-384 and RSA keyless signing for the upstream signrpc algorithm set.
+- Cloudflare-managed ACME DNS-01 certificate provisioning, DNS A/TXT sync, and on-disk renewal.
 - Installer script endpoints, with binary downloads redirected to upstream release assets.
 - Static frontend serving when `FRONTEND_DIST` points at a built upstream frontend dist.
-- Built-in minimal landing page when `FRONTEND_DIST` is absent and `LANDING_PAGE_ENABLED=true`.
+- Built-in minimal landing page that lists public tunnels and discovered public relays when `FRONTEND_DIST` is absent and `LANDING_PAGE_ENABLED=true`.
+- Distroless non-root container runtime image and tag-triggered Forgejo container image publishing.
 
 ## Unsupported Or Partial Features
 
@@ -33,23 +36,23 @@ The current Rust relay implements the main relay-server compatibility surface:
 | CLI self-update and background update notice | Not implemented | Upstream `portal update` and periodic update checks are not available. |
 | Full frontend source and embedded frontend artifact packaging | Not included | The Rust relay can serve an externally supplied `FRONTEND_DIST`, but this repo does not include the upstream React app source, Vite build, or embedded dist packaging. |
 | Full admin UI | Not included by default | Admin JSON APIs exist, but `/admin` is not a built-in browser UI unless an external upstream frontend dist is provided. |
-| Full public landing/listing UI | Partially implemented | The built-in Rust page is a minimal server-rendered tunnel list. It is not the upstream React landing/list/detail/search/filter command-generator UI. |
+| Full public landing/listing UI | Partially implemented | The built-in Rust page is a minimal server-rendered tunnel and public relay list. It is not the upstream React landing/list/detail/search/filter command-generator UI. |
 | `/thumbnail/<hostname>` endpoint | Not implemented | Thumbnail URLs can be accepted as metadata, but relay-generated thumbnails are unavailable. |
 | `HEADLESS_SHELL_URL` thumbnail capture | Explicitly rejected | Setting `HEADLESS_SHELL_URL` fails startup because headless Chrome/CDP screenshot capture and cache are not ported. |
-| Managed ACME DNS-01 automation | Explicitly rejected | `ACME_DNS_PROVIDER=cloudflare`, `gcloud`, or `route53` and related provider credentials fail startup. Use manually provisioned `fullchain.pem` and `privatekey.pem` under `IDENTITY_PATH`. |
-| DNS A/TXT sync for managed zones | Not implemented | Upstream Cloudflare, Google Cloud DNS, and Route53 record management is unavailable. |
+| Managed ACME DNS-01 automation | Partially implemented | `ACME_DNS_PROVIDER=cloudflare` is supported. `ACME_DNS_PROVIDER=gcloud` and `ACME_DNS_PROVIDER=route53` still fail startup. |
+| DNS A/TXT sync for managed zones | Partially implemented | Cloudflare root/wildcard A records and ACME TXT records are managed. Google Cloud DNS and Route53 record management are unavailable. |
 | ENS gasless DNSSEC/TXT automation | Explicitly rejected | `ENS_GASLESS_ENABLED=true` and related DNSSEC/KMS settings fail startup. |
-| RSA certificate keyless signer parity | Not supported | TLS PEM parsing can read RSA keys, but the current keyless signer requires an ECDSA P-256 private key. Use ECDSA P-256 certificates for production. |
 | Production-grade relay mesh/multi-hop parity | Experimental only | Overlay identity, discovery metadata, peer config, `tokio-wireguard`, and HopMux are wired, but multi-hop mesh mode still lacks relay-pair smoke coverage, NAT/keepalive validation, MTU validation, peer churn testing, and Go v2.1.8 mesh interop validation. Treat it as not production-supported. |
 | Upstream docs site | Not ported | The SvelteKit docs site, static examples, package manifests, and docs build workflow are not included. |
 | VS Code extension | Not ported | Upstream `extensions/vscode` is absent. |
 | Demo app | Not ported | Upstream `cmd/demo-app` is absent. |
-| Release asset build matrix | Not implemented | This repo has Docker/local verification scripts, but no upstream-equivalent GitHub release workflow or Rust `portal` client assets. |
+| Release asset build matrix | Partially implemented | Tag pushes publish a relay container image to the Forgejo registry. There is still no upstream-equivalent GitHub release workflow or Rust `portal` client assets. |
 | Relay-hosted binary assets | Redirect-only | `/install/bin/*` redirects to the official upstream GitHub release assets, so a relay-hosted install script installs the upstream Go client, not a Rust client. |
 
 ## Known Compatibility Notes
 
-- Managed production certificates should be generated outside the relay and mounted as `fullchain.pem` and `privatekey.pem`.
-- For the current keyless signer, use an ECDSA P-256 private key. RSA certificates can cause startup failure even though rustls can parse RSA TLS keys.
+- Managed Cloudflare certificates are written to `fullchain.pem` and `privatekey.pem`; manually provisioned PEM files are still supported and are treated as an override when they cover the root and wildcard relay domains.
+- ACME renewal updates certificate files on disk. The current running TLS acceptor and QUIC config load renewed material after relay restart.
+- The keyless signer supports ECDSA P-256/P-384 and RSA private keys.
 - `LANDING_PAGE_ENABLED=true` only provides the built-in minimal HTML page when no persisted admin setting overrides it.
 - Existing Go v2.1.8 compatibility coverage focuses on relay basics: HTTP SNI passthrough, lifecycle, JWT verification, raw TCP, UDP, and selected API/discovery response shapes.
