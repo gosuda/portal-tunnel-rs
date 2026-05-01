@@ -6,13 +6,17 @@ use std::time::Duration;
 
 use anyhow::{bail, Context};
 use p256::ecdsa::signature::hazmat::PrehashSigner;
-use p256::ecdsa::SigningKey;
+use p256::ecdsa::SigningKey as P256SigningKey;
 use p256::pkcs8::DecodePrivateKey;
+use p384::ecdsa::SigningKey as P384SigningKey;
 use quinn::crypto::rustls::QuicServerConfig;
 use rcgen::generate_simple_self_signed;
+use rsa::pkcs1::DecodeRsaPrivateKey;
+use rsa::{Pkcs1v15Sign, Pss, RsaPrivateKey};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
 use sec1::DecodeEcPrivateKey;
+use sha2::{Sha256, Sha384, Sha512};
 
 pub struct TlsMaterial {
     pub config: ServerConfig,
@@ -22,19 +26,111 @@ pub struct TlsMaterial {
 
 #[derive(Clone)]
 pub struct KeylessSigner {
-    ecdsa_p256: SigningKey,
+    kind: KeylessSignerKind,
+}
+
+#[derive(Clone)]
+enum KeylessSignerKind {
+    EcdsaP256(P256SigningKey),
+    EcdsaP384(P384SigningKey),
+    Rsa(RsaPrivateKey),
 }
 
 impl KeylessSigner {
     pub fn sign_ecdsa_sha256(&self, digest: &[u8]) -> anyhow::Result<Vec<u8>> {
-        if digest.len() != 32 {
-            bail!("invalid argument: ECDSA_SHA256 digest must be 32 bytes");
+        self.sign_ecdsa("ECDSA_SHA256", digest, 32)
+    }
+
+    pub fn sign_ecdsa_sha384(&self, digest: &[u8]) -> anyhow::Result<Vec<u8>> {
+        self.sign_ecdsa("ECDSA_SHA384", digest, 48)
+    }
+
+    pub fn sign_ecdsa_sha512(&self, digest: &[u8]) -> anyhow::Result<Vec<u8>> {
+        self.sign_ecdsa("ECDSA_SHA512", digest, 64)
+    }
+
+    pub fn sign_rsa_pkcs1v15_sha256(&self, digest: &[u8]) -> anyhow::Result<Vec<u8>> {
+        self.sign_rsa_pkcs1v15("RSA_PKCS1V15_SHA256", digest, Pkcs1v15Sign::new::<Sha256>())
+    }
+
+    pub fn sign_rsa_pkcs1v15_sha384(&self, digest: &[u8]) -> anyhow::Result<Vec<u8>> {
+        self.sign_rsa_pkcs1v15("RSA_PKCS1V15_SHA384", digest, Pkcs1v15Sign::new::<Sha384>())
+    }
+
+    pub fn sign_rsa_pkcs1v15_sha512(&self, digest: &[u8]) -> anyhow::Result<Vec<u8>> {
+        self.sign_rsa_pkcs1v15("RSA_PKCS1V15_SHA512", digest, Pkcs1v15Sign::new::<Sha512>())
+    }
+
+    pub fn sign_rsa_pss_sha256(&self, digest: &[u8]) -> anyhow::Result<Vec<u8>> {
+        self.sign_rsa_pss("RSA_PSS_SHA256", digest, Pss::new::<Sha256>())
+    }
+
+    pub fn sign_rsa_pss_sha384(&self, digest: &[u8]) -> anyhow::Result<Vec<u8>> {
+        self.sign_rsa_pss("RSA_PSS_SHA384", digest, Pss::new::<Sha384>())
+    }
+
+    pub fn sign_rsa_pss_sha512(&self, digest: &[u8]) -> anyhow::Result<Vec<u8>> {
+        self.sign_rsa_pss("RSA_PSS_SHA512", digest, Pss::new::<Sha512>())
+    }
+
+    fn sign_ecdsa(
+        &self,
+        algorithm: &'static str,
+        digest: &[u8],
+        expected_len: usize,
+    ) -> anyhow::Result<Vec<u8>> {
+        if digest.len() != expected_len {
+            bail!("invalid argument: {algorithm} digest must be {expected_len} bytes");
         }
-        let signature: p256::ecdsa::Signature = self
-            .ecdsa_p256
-            .sign_prehash(digest)
-            .context("sign ECDSA_SHA256 digest")?;
-        Ok(signature.to_der().as_bytes().to_vec())
+        match &self.kind {
+            KeylessSignerKind::EcdsaP256(signing_key) => {
+                let signature: p256::ecdsa::Signature = signing_key
+                    .sign_prehash(digest)
+                    .with_context(|| format!("sign {algorithm} digest"))?;
+                Ok(signature.to_der().as_bytes().to_vec())
+            }
+            KeylessSignerKind::EcdsaP384(signing_key) => {
+                let signature: p384::ecdsa::Signature = signing_key
+                    .sign_prehash(digest)
+                    .with_context(|| format!("sign {algorithm} digest"))?;
+                Ok(signature.to_der().as_bytes().to_vec())
+            }
+            KeylessSignerKind::Rsa(_) => {
+                bail!("invalid argument: {algorithm} requires an ECDSA private key")
+            }
+        }
+    }
+
+    fn sign_rsa_pkcs1v15(
+        &self,
+        algorithm: &'static str,
+        digest: &[u8],
+        padding: Pkcs1v15Sign,
+    ) -> anyhow::Result<Vec<u8>> {
+        match &self.kind {
+            KeylessSignerKind::Rsa(key) => key
+                .sign_with_rng(&mut rand_core::OsRng, padding, digest)
+                .with_context(|| format!("sign {algorithm} digest")),
+            KeylessSignerKind::EcdsaP256(_) | KeylessSignerKind::EcdsaP384(_) => {
+                bail!("invalid argument: {algorithm} requires an RSA private key")
+            }
+        }
+    }
+
+    fn sign_rsa_pss(
+        &self,
+        algorithm: &'static str,
+        digest: &[u8],
+        padding: Pss,
+    ) -> anyhow::Result<Vec<u8>> {
+        match &self.kind {
+            KeylessSignerKind::Rsa(key) => key
+                .sign_with_rng(&mut rand_core::OsRng, padding, digest)
+                .with_context(|| format!("sign {algorithm} digest")),
+            KeylessSignerKind::EcdsaP256(_) | KeylessSignerKind::EcdsaP384(_) => {
+                bail!("invalid argument: {algorithm} requires an RSA private key")
+            }
+        }
     }
 }
 
@@ -90,7 +186,7 @@ fn write_self_signed_tls_material(
 
     fs::write(cert_path, generated.cert.pem())
         .with_context(|| format!("write certificate {}", cert_path.display()))?;
-    fs::write(key_path, generated.key_pair.serialize_pem())
+    fs::write(key_path, generated.signing_key.serialize_pem())
         .with_context(|| format!("write private key {}", key_path.display()))?;
     Ok(())
 }
@@ -144,11 +240,23 @@ fn parse_keyless_signer(raw: &[u8]) -> anyhow::Result<KeylessSigner> {
         .transpose()
         .context("parse pkcs8 private key pem for keyless signer")?
     {
-        let signing_key = SigningKey::from_pkcs8_der(key.secret_pkcs8_der())
-            .context("parse p256 pkcs8 keyless private key")?;
-        return Ok(KeylessSigner {
-            ecdsa_p256: signing_key,
-        });
+        let der = key.secret_pkcs8_der();
+        if let Ok(signing_key) = P256SigningKey::from_pkcs8_der(der) {
+            return Ok(KeylessSigner {
+                kind: KeylessSignerKind::EcdsaP256(signing_key),
+            });
+        }
+        if let Ok(signing_key) = P384SigningKey::from_pkcs8_der(der) {
+            return Ok(KeylessSigner {
+                kind: KeylessSignerKind::EcdsaP384(signing_key),
+            });
+        }
+        if let Ok(signing_key) = RsaPrivateKey::from_pkcs8_der(der) {
+            return Ok(KeylessSigner {
+                kind: KeylessSignerKind::Rsa(signing_key),
+            });
+        }
+        bail!("keyless signer pkcs8 private key is not ECDSA P-256/P-384 or RSA");
     }
 
     let mut reader = BufReader::new(raw);
@@ -157,14 +265,34 @@ fn parse_keyless_signer(raw: &[u8]) -> anyhow::Result<KeylessSigner> {
         .transpose()
         .context("parse ec private key pem for keyless signer")?
     {
-        let signing_key = SigningKey::from_sec1_der(key.secret_sec1_der())
-            .context("parse p256 sec1 keyless private key")?;
+        let der = key.secret_sec1_der();
+        if let Ok(signing_key) = P256SigningKey::from_sec1_der(der) {
+            return Ok(KeylessSigner {
+                kind: KeylessSignerKind::EcdsaP256(signing_key),
+            });
+        }
+        if let Ok(signing_key) = P384SigningKey::from_sec1_der(der) {
+            return Ok(KeylessSigner {
+                kind: KeylessSignerKind::EcdsaP384(signing_key),
+            });
+        }
+        bail!("keyless signer sec1 private key is not ECDSA P-256/P-384");
+    }
+
+    let mut reader = BufReader::new(raw);
+    if let Some(key) = rustls_pemfile::rsa_private_keys(&mut reader)
+        .next()
+        .transpose()
+        .context("parse rsa private key pem for keyless signer")?
+    {
+        let signing_key = RsaPrivateKey::from_pkcs1_der(key.secret_pkcs1_der())
+            .context("parse rsa pkcs1 keyless private key")?;
         return Ok(KeylessSigner {
-            ecdsa_p256: signing_key,
+            kind: KeylessSignerKind::Rsa(signing_key),
         });
     }
 
-    bail!("keyless signer currently requires an ECDSA P-256 private key")
+    bail!("keyless signer requires an ECDSA P-256/P-384 or RSA private key")
 }
 
 fn parse_quic_server_config(
@@ -196,4 +324,34 @@ fn parse_quic_server_config(
     transport.max_concurrent_bidi_streams(16u32.into());
     config.transport_config(Arc::new(transport));
     Ok(config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rsa::pkcs1::EncodeRsaPrivateKey;
+    use rsa::pkcs8::LineEnding;
+    use rsa::RsaPublicKey;
+    use sha2::Digest;
+
+    #[test]
+    fn keyless_signer_accepts_rsa_pkcs1_private_key() {
+        let key = RsaPrivateKey::new(&mut rand_core::OsRng, 2048).unwrap();
+        let key_pem = key.to_pkcs1_pem(LineEnding::LF).unwrap();
+        let signer = parse_keyless_signer(key_pem.as_bytes()).unwrap();
+        let digest = Sha256::digest(b"portal-tunnel-rsa-keyless");
+        let public_key = RsaPublicKey::from(&key);
+
+        let pkcs1_sig = signer.sign_rsa_pkcs1v15_sha256(&digest).unwrap();
+        public_key
+            .verify(Pkcs1v15Sign::new::<Sha256>(), &digest, &pkcs1_sig)
+            .unwrap();
+
+        let pss_sig = signer.sign_rsa_pss_sha256(&digest).unwrap();
+        public_key
+            .verify(Pss::new::<Sha256>(), &digest, &pss_sig)
+            .unwrap();
+
+        assert!(signer.sign_ecdsa_sha256(&digest).is_err());
+    }
 }

@@ -7,6 +7,14 @@ use crate::state::tls_material::KeylessSigner;
 
 pub const RELAY_KEY_ID: &str = "relay-cert";
 const ALGORITHM_ECDSA_SHA256: &str = "ECDSA_SHA256";
+const ALGORITHM_ECDSA_SHA384: &str = "ECDSA_SHA384";
+const ALGORITHM_ECDSA_SHA512: &str = "ECDSA_SHA512";
+const ALGORITHM_RSA_PKCS1V15_SHA256: &str = "RSA_PKCS1V15_SHA256";
+const ALGORITHM_RSA_PKCS1V15_SHA384: &str = "RSA_PKCS1V15_SHA384";
+const ALGORITHM_RSA_PKCS1V15_SHA512: &str = "RSA_PKCS1V15_SHA512";
+const ALGORITHM_RSA_PSS_SHA256: &str = "RSA_PSS_SHA256";
+const ALGORITHM_RSA_PSS_SHA384: &str = "RSA_PSS_SHA384";
+const ALGORITHM_RSA_PSS_SHA512: &str = "RSA_PSS_SHA512";
 const ALLOWED_SKEW_SECS: i64 = 30;
 
 #[derive(Debug, Deserialize)]
@@ -54,6 +62,14 @@ pub fn sign(req: SignRequest, signer: &KeylessSigner) -> anyhow::Result<SignResp
 
     let signature = match req.algorithm.as_str() {
         ALGORITHM_ECDSA_SHA256 => signer.sign_ecdsa_sha256(&req.digest)?,
+        ALGORITHM_ECDSA_SHA384 => signer.sign_ecdsa_sha384(&req.digest)?,
+        ALGORITHM_ECDSA_SHA512 => signer.sign_ecdsa_sha512(&req.digest)?,
+        ALGORITHM_RSA_PKCS1V15_SHA256 => signer.sign_rsa_pkcs1v15_sha256(&req.digest)?,
+        ALGORITHM_RSA_PKCS1V15_SHA384 => signer.sign_rsa_pkcs1v15_sha384(&req.digest)?,
+        ALGORITHM_RSA_PKCS1V15_SHA512 => signer.sign_rsa_pkcs1v15_sha512(&req.digest)?,
+        ALGORITHM_RSA_PSS_SHA256 => signer.sign_rsa_pss_sha256(&req.digest)?,
+        ALGORITHM_RSA_PSS_SHA384 => signer.sign_rsa_pss_sha384(&req.digest)?,
+        ALGORITHM_RSA_PSS_SHA512 => signer.sign_rsa_pss_sha512(&req.digest)?,
         other => bail!("invalid argument: unsupported algorithm: {other}"),
     };
 

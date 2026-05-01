@@ -17,7 +17,7 @@ async fn main() -> anyhow::Result<()> {
     init_tracing();
 
     let cfg = RelayConfig::parse().normalize()?;
-    let server = Server::new(cfg).context("initialize relay server")?;
+    let server = Server::new(cfg).await.context("initialize relay server")?;
 
     info!(
         api_addr = %server.api_addr(),

@@ -5,6 +5,8 @@ use anyhow::{bail, Context};
 use clap::Parser;
 use url::Url;
 
+use crate::state::acme::AcmeCloudflareConfig;
+
 #[derive(Debug, Clone, Parser)]
 #[command(name = "portal-relay")]
 #[command(about = "Portal relay server implemented in Rust")]
@@ -103,7 +105,7 @@ impl RelayConfig {
         if !self.headless_shell_url.is_empty() {
             bail!("thumbnail generation via HEADLESS_SHELL_URL is not implemented");
         }
-        self.normalize_unsupported_acme_config()?;
+        self.normalize_acme_config()?;
 
         let has_port_range = self.min_port > 0 && self.max_port > 0;
         if self.udp_enabled || self.tcp_enabled {
@@ -120,7 +122,7 @@ impl RelayConfig {
         Ok(self)
     }
 
-    fn normalize_unsupported_acme_config(&mut self) -> anyhow::Result<()> {
+    fn normalize_acme_config(&mut self) -> anyhow::Result<()> {
         self.acme_dns_provider = self.acme_dns_provider.trim().to_ascii_lowercase();
         self.cloudflare_token = self.cloudflare_token.trim().to_string();
         self.gcp_project_id = self.gcp_project_id.trim().to_string();
@@ -132,21 +134,36 @@ impl RelayConfig {
         self.aws_hosted_zone_id = self.aws_hosted_zone_id.trim().to_string();
         self.aws_dnssec_kms_key_arn = self.aws_dnssec_kms_key_arn.trim().to_string();
 
-        let acme_requested = !self.acme_dns_provider.is_empty()
-            || self.ens_gasless_enabled
-            || !self.cloudflare_token.is_empty()
-            || !self.gcp_project_id.is_empty()
-            || !self.gcp_managed_zone.is_empty()
-            || !self.aws_access_key_id.is_empty()
+        if self.ens_gasless_enabled {
+            bail!("ENS gasless automation is not implemented");
+        }
+        if !self.gcp_project_id.is_empty() || !self.gcp_managed_zone.is_empty() {
+            bail!("ACME_DNS_PROVIDER=gcloud is not implemented");
+        }
+        if !self.aws_access_key_id.is_empty()
             || !self.aws_secret_access_key.is_empty()
             || !self.aws_session_token.is_empty()
             || !self.aws_region.is_empty()
             || !self.aws_hosted_zone_id.is_empty()
-            || !self.aws_dnssec_kms_key_arn.is_empty();
-        if acme_requested {
-            bail!(
-                "managed ACME DNS providers and ENS gasless automation are not implemented; use manual fullchain.pem/privatekey.pem in IDENTITY_PATH"
-            );
+            || !self.aws_dnssec_kms_key_arn.is_empty()
+        {
+            bail!("ACME_DNS_PROVIDER=route53 is not implemented");
+        }
+
+        match self.acme_dns_provider.as_str() {
+            "" => {
+                if !self.cloudflare_token.is_empty() {
+                    bail!("CLOUDFLARE_TOKEN requires ACME_DNS_PROVIDER=cloudflare");
+                }
+            }
+            "cloudflare" => {
+                if self.cloudflare_token.is_empty() {
+                    bail!("CLOUDFLARE_TOKEN is required when ACME_DNS_PROVIDER=cloudflare");
+                }
+            }
+            "gcloud" => bail!("ACME_DNS_PROVIDER=gcloud is not implemented"),
+            "route53" => bail!("ACME_DNS_PROVIDER=route53 is not implemented"),
+            other => bail!("unsupported ACME_DNS_PROVIDER: {other}"),
         }
         Ok(())
     }
@@ -161,6 +178,14 @@ impl RelayConfig {
 
     pub fn root_host(&self) -> anyhow::Result<String> {
         root_host(&self.portal_url)
+    }
+
+    pub fn acme_cloudflare_config(&self, base_domain: &str) -> Option<AcmeCloudflareConfig> {
+        (self.acme_dns_provider == "cloudflare").then(|| AcmeCloudflareConfig {
+            identity_path: self.identity_path.clone(),
+            base_domain: base_domain.to_string(),
+            token: self.cloudflare_token.clone(),
+        })
     }
 }
 
@@ -256,7 +281,18 @@ mod tests {
     }
 
     #[test]
-    fn config_rejects_unimplemented_managed_acme_config() {
+    fn config_accepts_cloudflare_acme_config() {
+        let mut cfg = base_config();
+        cfg.acme_dns_provider = "cloudflare".to_string();
+        cfg.cloudflare_token = "cf-token".to_string();
+
+        let cfg = cfg.normalize().unwrap();
+        assert_eq!(cfg.acme_dns_provider, "cloudflare");
+        assert_eq!(cfg.cloudflare_token, "cf-token");
+    }
+
+    #[test]
+    fn config_rejects_cloudflare_acme_without_token() {
         let mut cfg = base_config();
         cfg.acme_dns_provider = "cloudflare".to_string();
 
@@ -264,7 +300,15 @@ mod tests {
             .normalize()
             .unwrap_err()
             .to_string()
-            .contains("managed ACME"));
+            .contains("CLOUDFLARE_TOKEN"));
+    }
+
+    #[test]
+    fn config_rejects_unimplemented_acme_provider() {
+        let mut cfg = base_config();
+        cfg.acme_dns_provider = "route53".to_string();
+
+        assert!(cfg.normalize().unwrap_err().to_string().contains("route53"));
     }
 
     fn base_config() -> RelayConfig {

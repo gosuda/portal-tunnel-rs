@@ -29,6 +29,7 @@ use crate::relay::stream::MARKER_TLS_START;
 use crate::relay::udp_datagram::{
     read_control_message, write_control_response, QuicBackhaulControlResponse,
 };
+use crate::state::acme::AcmeManager;
 use crate::state::identity::{load_or_create_relay_identity, RelayIdentity};
 use crate::state::tls_material::{load_or_create_tls_material, KeylessSigner};
 
@@ -57,15 +58,27 @@ pub struct Server {
     sni_addr: SocketAddr,
     tls_acceptor: TlsAcceptor,
     quic_config: Option<quinn::ServerConfig>,
+    acme_manager: Option<AcmeManager>,
     state: Arc<AppState>,
 }
 
 impl Server {
-    pub fn new(cfg: RelayConfig) -> anyhow::Result<Self> {
+    pub async fn new(cfg: RelayConfig) -> anyhow::Result<Self> {
         let root_host = cfg.root_host()?;
         let identity =
             load_or_create_relay_identity(&cfg.identity_path, &root_host, cfg.discovery_enabled)
                 .context("load or create relay identity")?;
+        let acme_manager = cfg
+            .acme_cloudflare_config(&root_host)
+            .map(AcmeManager::new)
+            .transpose()
+            .context("configure acme manager")?;
+        if let Some(manager) = &acme_manager {
+            manager
+                .ensure_certificate()
+                .await
+                .context("ensure acme tls certificate")?;
+        }
         let tls_material = load_or_create_tls_material(&cfg.identity_path, &root_host)
             .context("load or create api tls material")?;
         let api_addr = cfg.api_listen_addr();
@@ -155,6 +168,7 @@ impl Server {
             frontend_enabled = frontend.is_some(),
             trust_proxy_headers = cfg.trust_proxy_headers,
             bootstrap_count = cfg.bootstraps.len(),
+            acme_dns_provider = %cfg.acme_dns_provider,
             "relay runtime configured"
         );
         let state = Arc::new(AppState {
@@ -178,6 +192,7 @@ impl Server {
             sni_addr,
             tls_acceptor,
             quic_config,
+            acme_manager,
             state,
         })
     }
@@ -220,6 +235,10 @@ impl Server {
         info!(sni_addr = %sni_local_addr, "sni listener ready");
 
         let quic_task = self.start_quic_backhaul_listener()?;
+        let acme_task = self
+            .acme_manager
+            .take()
+            .map(|manager| AbortOnDrop(manager.start_maintenance()));
         let janitor_task = start_registry_janitor(Arc::clone(&self.state.leases));
         let overlay_hop_mux_task = match (&self.state.overlay, &self.state.hop_mux) {
             (Some(overlay), Some(hop_mux)) => Some(
@@ -278,6 +297,9 @@ impl Server {
                     signal.context("install ctrl-c handler")?;
                     info!("shutdown signal received");
                     if let Some(task) = &quic_task {
+                        task.abort();
+                    }
+                    if let Some(task) = &acme_task {
                         task.abort();
                     }
                     janitor_task.abort();
