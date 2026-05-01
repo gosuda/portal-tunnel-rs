@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::bail;
-use chrono::SecondsFormat;
+use chrono::{SecondsFormat, Utc};
 use hyper::StatusCode;
 use serde::Serialize;
 use url::form_urlencoded;
@@ -9,6 +9,7 @@ use url::form_urlencoded;
 use crate::api::paths::{PATH_APP, PATH_APP_PREFIX, PATH_ASSETS_PREFIX, PATH_TUNNEL_STATUS};
 use crate::api::{api_error_reply, json_ok, method_not_allowed, ApiReply};
 use crate::auth::identity::normalize_hostname;
+use crate::relay::discovery::RelayDescriptor;
 use crate::relay::leases::LeaseView;
 use crate::relay::AppState;
 
@@ -164,6 +165,7 @@ async fn serve_builtin_landing_page(state: &AppState, method: &str) -> ApiReply 
     }
     let mut leases = state.leases.public_leases().await;
     leases.sort_by(|a, b| a.hostname.cmp(&b.hostname));
+    let relays = public_relays(state);
 
     let mut cards = String::new();
     for lease in &leases {
@@ -174,6 +176,7 @@ async fn serve_builtin_landing_page(state: &AppState, method: &str) -> ApiReply 
             "<section class=\"empty\"><h2>No public tunnels are listed</h2><p>Registered public tunnels will appear here when they are online.</p></section>",
         );
     }
+    let relay_section = relay_section(state.discovery.is_some(), &state.portal_url, &relays);
 
     let html = format!(
         concat!(
@@ -191,6 +194,7 @@ async fn serve_builtin_landing_page(state: &AppState, method: &str) -> ApiReply 
             "<div class=\"stats\"><span>{count} tunnel{plural}</span><span>{version}</span></div>",
             "</header>",
             "<section class=\"grid\">{cards}</section>",
+            "{relay_section}",
             "</main>",
             "</body></html>"
         ),
@@ -200,6 +204,7 @@ async fn serve_builtin_landing_page(state: &AppState, method: &str) -> ApiReply 
         plural = if leases.len() == 1 { "" } else { "s" },
         version = escape_html(crate::api::sdk::RELEASE_VERSION),
         cards = cards,
+        relay_section = relay_section,
     );
 
     ApiReply {
@@ -215,6 +220,108 @@ async fn serve_builtin_landing_page(state: &AppState, method: &str) -> ApiReply 
             ),
         ],
         body: body_for_method(method, html.into_bytes()),
+    }
+}
+
+fn public_relays(state: &AppState) -> Vec<RelayDescriptor> {
+    let Some(discovery) = &state.discovery else {
+        return Vec::new();
+    };
+    discovery
+        .response(Utc::now())
+        .map(|response| response.relays)
+        .unwrap_or_default()
+}
+
+fn relay_section(discovery_enabled: bool, portal_url: &str, relays: &[RelayDescriptor]) -> String {
+    if !discovery_enabled {
+        return String::new();
+    }
+
+    let mut cards = String::new();
+    for relay in relays {
+        cards.push_str(&relay_card(portal_url, relay));
+    }
+    if cards.is_empty() {
+        cards.push_str(
+            "<section class=\"empty\"><h2>No public relays are listed</h2><p>Known public relays will appear here after discovery syncs.</p></section>",
+        );
+    }
+
+    format!(
+        concat!(
+            "<section class=\"section\" aria-labelledby=\"public-relays-title\">",
+            "<div class=\"section-head\">",
+            "<div>",
+            "<p class=\"eyebrow\">Relays</p>",
+            "<h2 id=\"public-relays-title\" class=\"section-title\">Public relays</h2>",
+            "</div>",
+            "<a class=\"plain-link\" href=\"/discovery\">Open discovery JSON</a>",
+            "</div>",
+            "<div class=\"relay-grid\">{cards}</div>",
+            "</section>"
+        ),
+        cards = cards,
+    )
+}
+
+fn relay_card(portal_url: &str, relay: &RelayDescriptor) -> String {
+    let issued_at = relay.issued_at.to_rfc3339_opts(SecondsFormat::Secs, true);
+    let mut tags = String::new();
+    if relay.api_https_addr == portal_url {
+        tags.push_str("<span>local</span>");
+    }
+    if relay.supports_overlay {
+        tags.push_str("<span>overlay</span>");
+    }
+    if relay.supports_udp {
+        tags.push_str("<span>UDP</span>");
+    }
+    if relay.supports_tcp {
+        tags.push_str("<span>TCP</span>");
+    }
+    if relay.active_connections > 0 {
+        tags.push_str("<span>");
+        tags.push_str(&escape_html(&format!(
+            "{} active",
+            relay.active_connections
+        )));
+        tags.push_str("</span>");
+    }
+    if relay.tcp_bps > 0.0 {
+        tags.push_str("<span>");
+        tags.push_str(&escape_html(&format_bps(relay.tcp_bps)));
+        tags.push_str("</span>");
+    }
+    if tags.is_empty() {
+        tags.push_str("<span>discovered</span>");
+    }
+
+    format!(
+        concat!(
+            "<article class=\"relay-card\">",
+            "<a class=\"relay-url\" href=\"{url}/\">{url}</a>",
+            "<p class=\"relay-address\">{address}</p>",
+            "<div class=\"meta\"><time datetime=\"{issued_at}\">{issued_at}</time></div>",
+            "<div class=\"tags\">{tags}</div>",
+            "</article>"
+        ),
+        url = escape_html(&relay.api_https_addr),
+        address = escape_html(&relay.address),
+        issued_at = escape_html(&issued_at),
+        tags = tags,
+    )
+}
+
+fn format_bps(bps: f64) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = KIB * 1024.0;
+    if bps >= MIB {
+        format!("{:.1} MiB/s", bps / MIB)
+    } else if bps >= KIB {
+        format!("{:.1} KiB/s", bps / KIB)
+    } else {
+        format!("{:.0} B/s", bps)
     }
 }
 
@@ -387,10 +494,18 @@ h1{margin:0;font-size:clamp(38px,8vw,88px);line-height:.95;letter-spacing:0;over
 .stats{display:flex;flex-wrap:wrap;gap:10px;margin-top:24px}
 .stats span,.tags span{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:6px 10px;color:var(--muted);font-size:13px}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-top:24px}
-.card,.empty{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:18px;min-width:0}
+.section{margin-top:40px;padding-top:28px;border-top:1px solid var(--line)}
+.section-head{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;justify-content:space-between}
+.section-title{margin:0;font-size:32px;line-height:1.1;letter-spacing:0}
+.plain-link{display:inline-flex;align-items:center;min-height:38px;color:var(--accent);font-size:14px;font-weight:700;text-decoration:none}
+.plain-link:hover{text-decoration:underline}
+.relay-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-top:18px}
+.card,.relay-card,.empty{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:18px;min-width:0}
 .host{display:block;color:var(--ink);font-weight:760;font-size:18px;text-decoration:none;overflow-wrap:anywhere}
-.host:hover{color:var(--accent)}
-.url{margin:6px 0 0;color:var(--muted);font-size:14px;overflow-wrap:anywhere}
+.host:hover,.relay-url:hover{color:var(--accent)}
+.relay-url{display:block;color:var(--ink);font-weight:760;font-size:15px;text-decoration:none;overflow-wrap:anywhere}
+.url,.relay-address{margin:6px 0 0;color:var(--muted);font-size:14px;overflow-wrap:anywhere}
+.relay-address{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;font-size:12px}
 .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;color:var(--muted);font-size:12px}
 .owner{font-weight:700;color:var(--ink)}
 .tags{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}

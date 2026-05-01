@@ -364,6 +364,7 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
 
+    use chrono::TimeDelta;
     use k256::ecdsa::SigningKey;
     use rand_core::OsRng;
     use serde_json::json;
@@ -372,6 +373,10 @@ mod tests {
     use crate::api::paths::{PATH_APP, PATH_SDK_HOP, PATH_SDK_REGISTER_CHALLENGE};
     use crate::auth::identity::{address_from_signing_key, compressed_public_key_hex};
     use crate::policy::PolicyRuntime;
+    use crate::relay::discovery::{
+        sign_relay_descriptor, DiscoveryResponse, DiscoveryState, RelayDescriptor,
+        DISCOVERY_VERSION,
+    };
     use crate::relay::leases::{LeaseRegistry, LeaseRegistryConfig};
     use crate::relay::AppState;
     use crate::state::identity::RelayIdentity;
@@ -541,6 +546,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn builtin_landing_lists_public_relays_when_discovery_is_enabled() {
+        let discovery = test_discovery_with_peer("https://localhost:4017");
+        let state = test_state_with_frontend_and_discovery(None, Some(discovery));
+        state.admin.policy.set_landing_page_enabled(true);
+
+        let response =
+            handle_request(state, "GET", "/", &[], "127.0.0.1".to_string(), Vec::new()).await;
+
+        assert_eq!(response.status, StatusCode::OK);
+        let body = String::from_utf8(response.body).unwrap();
+        assert!(body.contains("Public relays"));
+        assert!(body.contains("https://localhost:4017"));
+        assert!(body.contains("https://peer.example"));
+        assert!(body.contains("TCP"));
+    }
+
+    #[tokio::test]
     async fn builtin_landing_head_has_no_body() {
         let state = test_state();
         state.admin.policy.set_landing_page_enabled(true);
@@ -611,16 +633,15 @@ mod tests {
     }
 
     fn test_state_with_frontend(frontend: Option<Arc<frontend::FrontendState>>) -> Arc<AppState> {
+        test_state_with_frontend_and_discovery(frontend, None)
+    }
+
+    fn test_state_with_frontend_and_discovery(
+        frontend: Option<Arc<frontend::FrontendState>>,
+        discovery: Option<Arc<DiscoveryState>>,
+    ) -> Arc<AppState> {
         let signing_key = SigningKey::random(&mut OsRng);
-        let relay = RelayIdentity {
-            name: "localhost".to_string(),
-            address: address_from_signing_key(&signing_key),
-            public_key: compressed_public_key_hex(&signing_key),
-            private_key: hex::encode(signing_key.to_bytes()),
-            admin_secret_key: "admin".to_string(),
-            wireguard_public_key: String::new(),
-            wireguard_private_key: String::new(),
-        };
+        let relay = test_relay_identity(&signing_key, "localhost");
         let unique = format!(
             "portal-api-test-{}-{}",
             std::process::id(),
@@ -651,11 +672,68 @@ mod tests {
                 crate::api::admin::AdminState::new("admin".to_string(), policy).unwrap(),
             ),
             frontend,
-            discovery: None,
+            discovery,
             overlay: None,
             hop_mux: None,
             metrics: Arc::new(crate::relay::bridge::RelayMetrics::default()),
         })
+    }
+
+    fn test_discovery_with_peer(portal_url: &str) -> Arc<DiscoveryState> {
+        let self_key = SigningKey::random(&mut OsRng);
+        let peer_key = SigningKey::random(&mut OsRng);
+        let now = Utc::now();
+        let discovery = Arc::new(DiscoveryState::new(
+            test_relay_identity(&self_key, "localhost"),
+            portal_url.to_string(),
+            Vec::new(),
+            true,
+            true,
+        ));
+        let peer = sign_relay_descriptor(
+            RelayDescriptor {
+                address: address_from_signing_key(&peer_key),
+                version: DISCOVERY_VERSION.to_string(),
+                issued_at: now,
+                expires_at: now + TimeDelta::minutes(5),
+                api_https_addr: "https://peer.example".to_string(),
+                wireguard_public_key: String::new(),
+                wireguard_port: 0,
+                supports_overlay: false,
+                supports_udp: false,
+                supports_tcp: true,
+                active_connections: 3,
+                tcp_bps: 2048.0,
+                signature: String::new(),
+            },
+            &hex::encode(peer_key.to_bytes()),
+        )
+        .unwrap();
+
+        discovery
+            .apply_response(
+                None,
+                DiscoveryResponse {
+                    protocol_version: DISCOVERY_VERSION.to_string(),
+                    generated_at: now,
+                    relays: vec![peer],
+                },
+                now,
+            )
+            .unwrap();
+        discovery
+    }
+
+    fn test_relay_identity(signing_key: &SigningKey, name: &str) -> RelayIdentity {
+        RelayIdentity {
+            name: name.to_string(),
+            address: address_from_signing_key(signing_key),
+            public_key: compressed_public_key_hex(signing_key),
+            private_key: hex::encode(signing_key.to_bytes()),
+            admin_secret_key: "admin".to_string(),
+            wireguard_public_key: String::new(),
+            wireguard_private_key: String::new(),
+        }
     }
 
     fn write_frontend_dist() -> PathBuf {
