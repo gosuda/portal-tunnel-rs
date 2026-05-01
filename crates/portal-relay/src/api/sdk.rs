@@ -1,7 +1,7 @@
 use serde::Serialize;
 
 pub const SDK_VERSION: &str = "6";
-pub const RELEASE_VERSION: &str = "v2.1.8-rs.dev2";
+pub const RELEASE_VERSION: &str = "v2.1.8-rs.dev3";
 
 #[derive(Debug, Serialize)]
 pub struct DomainResponse {
