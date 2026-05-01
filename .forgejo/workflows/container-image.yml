@@ -25,15 +25,17 @@ jobs:
 
       - name: Prepare registry authentication
         shell: sh
+        env:
+          REGISTRY_USER: gofix
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
         run: |
           set -eu
-          token="${FORGEJO_TOKEN:-${GITHUB_TOKEN:-}}"
-          if [ -z "$token" ]; then
-            echo "FORGEJO_TOKEN/GITHUB_TOKEN is not available" >&2
+          if [ -z "$REGISTRY_TOKEN" ]; then
+            echo "REGISTRY_TOKEN secret is not configured" >&2
             exit 1
           fi
           mkdir -p "$DOCKER_CONFIG"
-          auth="$(printf '%s:%s' "${GITHUB_ACTOR:-gofix}" "$token" | base64 | tr -d '\n')"
+          auth="$(printf '%s:%s' "$REGISTRY_USER" "$REGISTRY_TOKEN" | base64 | tr -d '\n')"
           cat > "$DOCKER_CONFIG/config.json" <<JSON
           {"auths":{"$REGISTRY":{"auth":"$auth"}}}
           JSON
