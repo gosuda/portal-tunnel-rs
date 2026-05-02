@@ -526,6 +526,9 @@ mod tests {
         let body = String::from_utf8(response.body).unwrap();
         assert!(body.contains("<!doctype html>"));
         assert!(body.contains("Portal Tunnel Relay"));
+        assert!(body.contains("Relay is a Rust port of the original portal-tunnel project."));
+        assert!(body.contains("https://github.com/gosuda/portal-tunnel"));
+        assert!(body.contains("https://code.rly.best/gofix/portal-tunnel-rs"));
         assert!(body.contains("localhost"));
         assert!(body.contains(sdk::RELEASE_VERSION));
         assert!(body.contains("No public tunnels are listed"));

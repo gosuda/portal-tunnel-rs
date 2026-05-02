@@ -187,6 +187,11 @@ async fn serve_builtin_landing_page(state: &AppState, method: &str) -> ApiReply 
             "<style>{style}</style>",
             "</head><body>",
             "<main>",
+            "<section class=\"porting-note\" aria-label=\"Rust port notice\">",
+            "<span>Relay is a Rust port of the original portal-tunnel project.</span>",
+            "<span>Original <a href=\"https://github.com/gosuda/portal-tunnel\">portal-tunnel</a></span>",
+            "<span>Rust port <a href=\"https://code.rly.best/gofix/portal-tunnel-rs\">portal-tunnel-rs</a></span>",
+            "</section>",
             "<header class=\"hero\">",
             "<p class=\"eyebrow\">Portal Tunnel Relay</p>",
             "<h1>{root}</h1>",
@@ -487,6 +492,9 @@ const BUILTIN_LANDING_CSS: &str = r#"
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.5}
 main{width:min(1120px,calc(100% - 32px));margin:0 auto;padding:56px 0}
+.porting-note{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;margin:0 0 24px;padding-bottom:14px;border-bottom:1px solid var(--line);color:var(--muted);font-size:14px}
+.porting-note a{color:var(--accent);font-weight:700;text-decoration:none;overflow-wrap:anywhere}
+.porting-note a:hover{text-decoration:underline}
 .hero{padding:0 0 28px;border-bottom:1px solid var(--line)}
 .eyebrow{margin:0 0 10px;color:var(--accent);font-weight:700;text-transform:uppercase;font-size:12px;letter-spacing:0}
 h1{margin:0;font-size:clamp(38px,8vw,88px);line-height:.95;letter-spacing:0;overflow-wrap:anywhere}
