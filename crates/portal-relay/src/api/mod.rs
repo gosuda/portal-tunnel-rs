@@ -393,14 +393,13 @@ pub async fn handle_request(
         (_, PATH_SDK_HOP) => method_not_allowed(),
 
         _ => {
-            if let Some(frontend) = &state.frontend {
-                if let Some(reply) = frontend
+            if let Some(frontend) = &state.frontend
+                && let Some(reply) = frontend
                     .handle_request(state.as_ref(), method, path, query)
                     .await
                 {
                     return reply;
                 }
-            }
             api_error_reply(StatusCode::NOT_FOUND, "not_found", "not found")
         }
     }

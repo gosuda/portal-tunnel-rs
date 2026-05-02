@@ -74,8 +74,8 @@ fn relay_powershell_script(portal_url: &str, script: &str) -> String {
 }
 
 fn insert_after_shebang(script: &str, prefix: &str) -> String {
-    if script.starts_with("#!") {
-        if let Some(newline) = script.find('\n') {
+    if script.starts_with("#!")
+        && let Some(newline) = script.find('\n') {
             return format!(
                 "{}{}{}",
                 &script[..newline + 1],
@@ -83,7 +83,6 @@ fn insert_after_shebang(script: &str, prefix: &str) -> String {
                 &script[newline + 1..]
             );
         }
-    }
     format!("{prefix}{script}")
 }
 

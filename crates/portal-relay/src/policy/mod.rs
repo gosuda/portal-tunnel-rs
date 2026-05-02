@@ -396,11 +396,10 @@ impl PolicyRuntime {
                     return ip;
                 }
             }
-            if let Some(xri) = header_value(headers, "x-real-ip") {
-                if let Some(ip) = normalize_client_ip_candidate(&xri) {
+            if let Some(xri) = header_value(headers, "x-real-ip")
+                && let Some(ip) = normalize_client_ip_candidate(&xri) {
                     return ip;
                 }
-            }
         }
 
         remote_addr.ip().to_string()

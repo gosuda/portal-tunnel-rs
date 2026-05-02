@@ -243,12 +243,11 @@ impl HopMux {
         }
         {
             let mut outbound = self.outbound.lock().await;
-            if let Some(existing) = outbound.get(session_key) {
-                if !existing.driver.is_finished() {
+            if let Some(existing) = outbound.get(session_key)
+                && !existing.driver.is_finished() {
                     debug!(session_key, "reusing hop mux outbound session");
                     return Ok(existing.commands.clone());
                 }
-            }
             outbound.remove(session_key);
         }
 
@@ -272,12 +271,11 @@ impl HopMux {
         };
 
         let mut outbound = self.outbound.lock().await;
-        if let Some(existing) = outbound.get(session_key) {
-            if !existing.driver.is_finished() {
+        if let Some(existing) = outbound.get(session_key)
+            && !existing.driver.is_finished() {
                 debug!(session_key, "using concurrent hop mux outbound session");
                 return Ok(existing.commands.clone());
             }
-        }
         outbound.insert(session_key.to_string(), candidate);
         debug!(session_key, "hop mux outbound session ready");
         Ok(commands)
