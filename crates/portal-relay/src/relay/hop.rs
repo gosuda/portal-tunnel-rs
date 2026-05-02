@@ -324,4 +324,43 @@ mod tests {
             -6795364608871345152
         );
     }
+
+    #[test]
+    fn verifies_delete_hop_route_with_go_zero_expiry() {
+        let now = Utc::now();
+        let zero = chrono::NaiveDate::from_ymd_opt(1, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc();
+        let owner = SigningKey::random(&mut OsRng);
+        let (forward_relay, _) = signed_overlay_descriptor(now);
+        let route = HopRoute {
+            owner_public_key: String::new(),
+            relay_url: "https://relay.example".to_string(),
+            match_hostname: String::new(),
+            match_token: "hpt_previous".to_string(),
+            metadata: LeaseMetadata::default(),
+            forward_relay,
+            forward_token: "hpt_next".to_string(),
+            first_seen_at: zero - Duration::seconds(30),
+            expires_at: zero,
+            signature: String::new(),
+        };
+
+        let signed = sign_hop_route("DELETE", route, &owner, zero).unwrap();
+        let wire = serde_json::to_vec(&signed).unwrap();
+        assert!(std::str::from_utf8(&wire)
+            .unwrap()
+            .contains("\"expires_at\":\"0001-01-01T00:00:00Z\""));
+        assert!(std::str::from_utf8(&wire)
+            .unwrap()
+            .contains("\"first_seen_at\":\"0000-12-31T23:59:30Z\""));
+
+        let decoded: HopRoute = serde_json::from_slice(&wire).unwrap();
+        let verified = verify_hop_route("DELETE", decoded).unwrap();
+        assert_eq!(verified.expires_at, zero);
+        assert_eq!(verified.first_seen_at, zero - Duration::seconds(30));
+        assert_eq!(verified.match_token, "hpt_previous");
+    }
 }
