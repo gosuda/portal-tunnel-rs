@@ -20,8 +20,10 @@ mod tests;
 
 pub use descriptor::{RelayDescriptor, canonical_descriptor_bytes, verify_relay_descriptor};
 
-#[allow(unused_imports)]
-pub use descriptor::{normalize_relay_descriptor, sign_relay_descriptor};
+// sign_relay_descriptor is test-only: service.rs imports from super::descriptor directly;
+// external callers (api/mod.rs, relay/hop.rs) use it only in #[cfg(test)] modules.
+#[cfg(test)]
+pub use descriptor::sign_relay_descriptor;
 
 pub const DISCOVERY_VERSION: &str = "7";
 pub const DISCOVERY_POLL_INTERVAL: Duration = Duration::from_secs(30);

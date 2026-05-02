@@ -20,36 +20,28 @@ impl LeaseRegistry {
         let now = Utc::now();
         let expires_at = now + lease_ttl(req.ttl);
 
-        // Read identity without mutating — validates lease exists before issuing a token
-        let identity = {
-            let inner = self.inner.lock().expect("lease registry lock poisoned");
-            inner
-                .leases
-                .get(&identity_key)
-                .ok_or(LeaseError::LeaseNotFound)?
-                .identity
-                .clone()
-        };
-
-        // Issue token BEFORE any mutation — if this fails, lease state is untouched
-        let (access_token, _) =
-            issue_lease_access_token(&self.relay, &self.issuer, &identity, expires_at, now)
-                .map_err(|err| LeaseError::InvalidRequest(err.to_string()))?;
-
-        // Token issued successfully — commit state mutation
-        {
+        // Single critical section: lookup + token issuance + state mutation + policy update.
+        // Token issuance (ECDSA) is fast CPU-only work — holding the lock is safe.
+        // If issuance fails the `?` exits before any mutations, leaving state pristine.
+        // policy.register_identity_ip acquires only the policy-internal mutex; no lease-lock
+        // re-entry possible, so lock ordering (LEASE → POLICY) is safe.
+        let access_token = {
             let mut inner = self.inner.lock().expect("lease registry lock poisoned");
             let lease = inner
                 .leases
                 .get_mut(&identity_key)
                 .ok_or(LeaseError::LeaseNotFound)?;
+            let (access_token, _) =
+                issue_lease_access_token(&self.relay, &self.issuer, &lease.identity, expires_at, now)
+                    .map_err(|err| LeaseError::InvalidRequest(err.to_string()))?;
             lease.expires_at = expires_at;
             lease.last_seen_at = now;
             lease.client_ip.clone_from(&client_ip);
             lease.reported_ip = req.reported_ip;
-        }
+            self.policy.register_identity_ip(&identity_key, &client_ip);
+            access_token
+        };
 
-        self.policy.register_identity_ip(&identity_key, &client_ip);
         Ok(RenewResponse {
             expires_at,
             access_token,

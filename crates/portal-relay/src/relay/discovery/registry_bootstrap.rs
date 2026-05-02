@@ -19,7 +19,7 @@ impl DiscoveryState {
             if *loaded {
                 return;
             }
-            *loaded = true;
+            *loaded = true; // optimistic: prevents concurrent fetch storms
         }
 
         match self.fetch_relay_registry().await {
@@ -29,7 +29,15 @@ impl DiscoveryState {
                 Err(err) => warn!(error = %err, "relay discovery registry bootstraps rejected"),
             },
             Ok(_) => {}
-            Err(err) => debug!(error = %err, "relay discovery registry fetch failed"),
+            Err(err) => {
+                debug!(error = %err, "relay discovery registry fetch failed");
+                // Reset so the next poll can retry — a transient network error must not
+                // permanently disable bootstrap loading for the process lifetime.
+                *self
+                    .registry_bootstraps_loaded
+                    .lock()
+                    .expect("discovery registry bootstrap lock poisoned") = false;
+            }
         }
     }
 
