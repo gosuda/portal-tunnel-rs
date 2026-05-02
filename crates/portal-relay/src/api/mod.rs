@@ -866,12 +866,7 @@ mod tests {
     ) -> Arc<AppState> {
         let signing_key = SigningKey::random(&mut OsRng);
         let relay = test_relay_identity(&signing_key, "localhost");
-        let unique = format!(
-            "portal-api-test-{}-{}",
-            std::process::id(),
-            Utc::now().timestamp_nanos_opt().unwrap()
-        );
-        let identity_path = std::env::temp_dir().join(unique);
+        let identity_path = test_temp_dir("portal-api-test");
         let tls_material = load_or_create_tls_material(&identity_path, "localhost").unwrap();
         let policy = Arc::new(PolicyRuntime::load(&identity_path, false, false).unwrap());
         let leases = Arc::new(LeaseRegistry::new(LeaseRegistryConfig {
@@ -961,12 +956,7 @@ mod tests {
     }
 
     fn write_frontend_dist() -> PathBuf {
-        let unique = format!(
-            "portal-frontend-test-{}-{}",
-            std::process::id(),
-            Utc::now().timestamp_nanos_opt().unwrap()
-        );
-        let dist = std::env::temp_dir().join(unique);
+        let dist = test_temp_dir("portal-frontend-test");
         let app = dist.join("app");
         fs::create_dir_all(app.join("assets")).unwrap();
         fs::write(
@@ -976,6 +966,26 @@ mod tests {
         .unwrap();
         fs::write(app.join("assets/app.js"), "console.log('portal');").unwrap();
         dist
+    }
+
+    fn test_temp_dir(prefix: &str) -> PathBuf {
+        let unique = format!(
+            "{}-{}-{}",
+            prefix,
+            std::process::id(),
+            Utc::now().timestamp_nanos_opt().unwrap()
+        );
+        let base = std::env::var_os("CARGO_TARGET_TMPDIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../..")
+                    .join("target")
+                    .join("test-tmp")
+            });
+        let path = base.join(unique);
+        fs::create_dir_all(&path).unwrap();
+        path
     }
 
     fn read_fixture(path: &str) -> serde_json::Value {

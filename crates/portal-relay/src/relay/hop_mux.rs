@@ -4,13 +4,10 @@ use anyhow::{bail, Context};
 use futures_util::future::{poll_fn, BoxFuture};
 use std::collections::HashMap;
 use std::future::Future;
-use std::io;
 use std::net::{IpAddr, SocketAddr};
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context as TaskContext, Poll};
 use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
@@ -31,224 +28,6 @@ impl<T> HopMuxIo for T where T: AsyncRead + AsyncWrite + Unpin + Send + 'static 
 pub(crate) type BoxedHopMuxIo = Box<dyn HopMuxIo>;
 pub(crate) type StreamHandle = Compat<YamuxStream>;
 type YamuxIo = Compat<BoxedHopMuxIo>;
-
-struct TracedHopMuxIo<I> {
-    inner: I,
-    peer: String,
-    role: &'static str,
-    read_total: u64,
-    write_total: u64,
-    read_frames: Vec<u8>,
-    write_frames: Vec<u8>,
-}
-
-impl<I> TracedHopMuxIo<I> {
-    fn new(inner: I, peer: String, role: &'static str) -> Self {
-        Self {
-            inner,
-            peer,
-            role,
-            read_total: 0,
-            write_total: 0,
-            read_frames: Vec::new(),
-            write_frames: Vec::new(),
-        }
-    }
-}
-
-impl<I> AsyncRead for TracedHopMuxIo<I>
-where
-    I: AsyncRead + Unpin,
-{
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut TaskContext<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<io::Result<()>> {
-        let before = buf.filled().len();
-        match Pin::new(&mut self.inner).poll_read(cx, buf) {
-            Poll::Ready(Ok(())) => {
-                let n = buf.filled().len().saturating_sub(before);
-                if n > 0 {
-                    self.read_total += n as u64;
-                    let bytes = &buf.filled()[before..];
-                    self.read_frames.extend_from_slice(bytes);
-                    let peer = self.peer.clone();
-                    let role = self.role;
-                    parse_hop_mux_frames(&mut self.read_frames, &peer, role, "read");
-                    debug!(
-                        peer = %self.peer,
-                        role = self.role,
-                        bytes = n,
-                        total = self.read_total,
-                        "hop mux raw read"
-                    );
-                } else {
-                    debug!(
-                        peer = %self.peer,
-                        role = self.role,
-                        total = self.read_total,
-                        "hop mux raw read eof"
-                    );
-                }
-                Poll::Ready(Ok(()))
-            }
-            Poll::Ready(Err(err)) => {
-                debug!(
-                    peer = %self.peer,
-                    role = self.role,
-                    total = self.read_total,
-                    error = %err,
-                    "hop mux raw read failed"
-                );
-                Poll::Ready(Err(err))
-            }
-            Poll::Pending => Poll::Pending,
-        }
-    }
-}
-
-impl<I> AsyncWrite for TracedHopMuxIo<I>
-where
-    I: AsyncWrite + Unpin,
-{
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        cx: &mut TaskContext<'_>,
-        buf: &[u8],
-    ) -> Poll<io::Result<usize>> {
-        match Pin::new(&mut self.inner).poll_write(cx, buf) {
-            Poll::Ready(Ok(n)) => {
-                if n > 0 {
-                    self.write_total += n as u64;
-                    self.write_frames.extend_from_slice(&buf[..n]);
-                    let peer = self.peer.clone();
-                    let role = self.role;
-                    parse_hop_mux_frames(&mut self.write_frames, &peer, role, "write");
-                    debug!(
-                        peer = %self.peer,
-                        role = self.role,
-                        bytes = n,
-                        total = self.write_total,
-                        "hop mux raw write"
-                    );
-                }
-                Poll::Ready(Ok(n))
-            }
-            Poll::Ready(Err(err)) => {
-                debug!(
-                    peer = %self.peer,
-                    role = self.role,
-                    total = self.write_total,
-                    error = %err,
-                    "hop mux raw write failed"
-                );
-                Poll::Ready(Err(err))
-            }
-            Poll::Pending => Poll::Pending,
-        }
-    }
-
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<io::Result<()>> {
-        match Pin::new(&mut self.inner).poll_flush(cx) {
-            Poll::Ready(Ok(())) => {
-                debug!(
-                    peer = %self.peer,
-                    role = self.role,
-                    total = self.write_total,
-                    "hop mux raw flush"
-                );
-                Poll::Ready(Ok(()))
-            }
-            Poll::Ready(Err(err)) => {
-                debug!(
-                    peer = %self.peer,
-                    role = self.role,
-                    total = self.write_total,
-                    error = %err,
-                    "hop mux raw flush failed"
-                );
-                Poll::Ready(Err(err))
-            }
-            Poll::Pending => Poll::Pending,
-        }
-    }
-
-    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<io::Result<()>> {
-        match Pin::new(&mut self.inner).poll_shutdown(cx) {
-            Poll::Ready(Ok(())) => {
-                debug!(
-                    peer = %self.peer,
-                    role = self.role,
-                    total = self.write_total,
-                    "hop mux raw shutdown"
-                );
-                Poll::Ready(Ok(()))
-            }
-            Poll::Ready(Err(err)) => {
-                debug!(
-                    peer = %self.peer,
-                    role = self.role,
-                    total = self.write_total,
-                    error = %err,
-                    "hop mux raw shutdown failed"
-                );
-                Poll::Ready(Err(err))
-            }
-            Poll::Pending => Poll::Pending,
-        }
-    }
-}
-
-fn parse_hop_mux_frames(
-    buf: &mut Vec<u8>,
-    peer: &str,
-    role: &'static str,
-    direction: &'static str,
-) {
-    const HEADER: usize = 12;
-    let mut offset = 0usize;
-    while buf.len().saturating_sub(offset) >= HEADER {
-        let header = &buf[offset..offset + HEADER];
-        let version = header[0];
-        let frame_type = header[1];
-        let flags = u16::from_be_bytes([header[2], header[3]]);
-        let stream_id = u32::from_be_bytes([header[4], header[5], header[6], header[7]]);
-        let length = u32::from_be_bytes([header[8], header[9], header[10], header[11]]);
-        let body_len = if frame_type == 0 { length as usize } else { 0 };
-        let frame_len = HEADER.saturating_add(body_len);
-        if buf.len().saturating_sub(offset) < frame_len {
-            break;
-        }
-        debug!(
-            peer,
-            role,
-            direction,
-            version,
-            frame_type,
-            flags,
-            stream_id,
-            length,
-            frame_len,
-            "hop mux raw frame"
-        );
-        offset += frame_len;
-    }
-
-    if offset > 0 {
-        buf.drain(..offset);
-    }
-    if buf.len() > 1024 * 1024 {
-        debug!(
-            peer,
-            role,
-            direction,
-            buffered = buf.len(),
-            "hop mux raw frame parser buffer cleared"
-        );
-        buf.clear();
-    }
-}
 
 pub(crate) trait HopMuxConnector: Send + Sync + 'static {
     fn connect(&self, overlay_ipv4: &str) -> BoxFuture<'static, anyhow::Result<BoxedHopMuxIo>>;
@@ -336,8 +115,7 @@ impl HopMux {
         I: HopMuxIo,
     {
         debug!(%remote_addr, "hop mux inbound session accepted");
-        let traced = TracedHopMuxIo::new(conn, remote_addr.clone(), "inbound");
-        serve_inbound_session(traced, remote_addr, self.incoming_tx.clone()).await;
+        serve_inbound_session(conn, remote_addr, self.incoming_tx.clone()).await;
     }
 
     pub async fn accept(&self) -> Option<HopStream> {
@@ -482,11 +260,6 @@ impl HopMux {
                 return Err(err);
             }
         };
-        let conn = Box::new(TracedHopMuxIo::new(
-            conn,
-            session_key.to_string(),
-            "outbound",
-        )) as BoxedHopMuxIo;
         let session = YamuxConnection::new(conn.compat(), hop_yamux_config(), Mode::Client);
         let (commands, command_rx) = mpsc::channel(32);
         let driver_session_key = session_key.to_string();

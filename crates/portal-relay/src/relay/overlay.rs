@@ -123,9 +123,8 @@ impl OverlayRuntime {
             .context("wireguard overlay requires a Tokio runtime")?;
         let private_key = normalize_wireguard_private_key(&config.private_key)
             .context("normalize overlay wireguard private key")?;
-        let interface_name = WgInterfaceName::from_str(OVERLAY_INTERFACE_NAME).map_err(|err| {
-            anyhow::anyhow!("invalid wireguard interface name: {err}")
-        })?;
+        let interface_name = WgInterfaceName::from_str(OVERLAY_INTERFACE_NAME)
+            .map_err(|err| anyhow::anyhow!("invalid wireguard interface name: {err}"))?;
 
         // Configure kernel WireGuard. wireguard-control's apply() will create
         // the link via netlink RTM_NEWLINK if it doesn't exist yet, then push
@@ -625,8 +624,7 @@ async fn configure_overlay_link_address(
     interface_name: &WgInterfaceName,
     overlay_ipv4: Ipv4Addr,
 ) -> anyhow::Result<()> {
-    let (connection, handle, _) =
-        rtnetlink::new_connection().context("open netlink connection")?;
+    let (connection, handle, _) = rtnetlink::new_connection().context("open netlink connection")?;
     tokio::spawn(connection);
 
     let name = interface_name.as_str_lossy().to_string();

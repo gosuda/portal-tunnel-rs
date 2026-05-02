@@ -8,12 +8,10 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::time;
-use tracing::{debug, warn};
 
 use crate::policy::PolicyRuntime;
 
 const COPY_BUF_SIZE: usize = 16 * 1024;
-const TRACE_WRITE_CHUNK_SIZE: usize = 1200;
 
 #[derive(Default)]
 pub struct RelayMetrics {
@@ -133,26 +131,6 @@ where
     copy_bidirectional_counting(a, b, metrics).await
 }
 
-pub async fn copy_bidirectional_with_metrics_and_trace<A, B>(
-    a: &mut A,
-    b: &mut B,
-    metrics: &RelayMetrics,
-    a_to_b_label: &'static str,
-    b_to_a_label: &'static str,
-) -> std::io::Result<(u64, u64)>
-where
-    A: AsyncRead + AsyncWrite + Unpin,
-    B: AsyncRead + AsyncWrite + Unpin,
-{
-    let _active = metrics.begin_connection();
-    let (mut ar, mut aw) = io::split(a);
-    let (mut br, mut bw) = io::split(b);
-    tokio::try_join!(
-        tracing_counting_copy(&mut ar, &mut bw, metrics, a_to_b_label),
-        tracing_counting_copy(&mut br, &mut aw, metrics, b_to_a_label)
-    )
-}
-
 async fn copy_bidirectional_counting<A, B>(
     a: &mut A,
     b: &mut B,
@@ -168,106 +146,6 @@ where
         counting_copy(&mut ar, &mut bw, metrics),
         counting_copy(&mut br, &mut aw, metrics)
     )
-}
-
-async fn tracing_counting_copy<R, W>(
-    reader: &mut R,
-    writer: &mut W,
-    metrics: &RelayMetrics,
-    direction: &'static str,
-) -> std::io::Result<u64>
-where
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
-{
-    let mut copied = 0u64;
-    let mut chunks = 0u64;
-    let mut buf = vec![0u8; COPY_BUF_SIZE];
-
-    loop {
-        let n = match reader.read(&mut buf).await {
-            Ok(n) => n,
-            Err(err) => {
-                warn!(direction, copied, chunks, error = %err, "relay trace read failed");
-                return Err(err);
-            }
-        };
-        if n == 0 {
-            debug!(direction, copied, chunks, "relay trace read eof");
-            if let Err(err) = writer.shutdown().await {
-                warn!(
-                    direction,
-                    copied,
-                    chunks,
-                    error = %err,
-                    "relay trace shutdown failed"
-                );
-                return Err(err);
-            }
-            debug!(
-                direction,
-                copied, chunks, "relay trace write shutdown complete"
-            );
-            return Ok(copied);
-        }
-
-        chunks += 1;
-        copied += n as u64;
-        debug!(
-            direction,
-            chunk = chunks,
-            bytes = n,
-            copied,
-            "relay trace read chunk"
-        );
-        let mut written = 0usize;
-        while written < n {
-            let end = n.min(written + TRACE_WRITE_CHUNK_SIZE);
-            let write_bytes = end - written;
-            if let Err(err) = writer.write_all(&buf[written..end]).await {
-                warn!(
-                    direction,
-                    chunk = chunks,
-                    write_offset = written,
-                    bytes = write_bytes,
-                    copied,
-                    error = %err,
-                    "relay trace write failed"
-                );
-                return Err(err);
-            }
-            debug!(
-                direction,
-                chunk = chunks,
-                write_offset = written,
-                bytes = write_bytes,
-                copied,
-                "relay trace write complete"
-            );
-            if let Err(err) = writer.flush().await {
-                warn!(
-                    direction,
-                    chunk = chunks,
-                    write_offset = written,
-                    bytes = write_bytes,
-                    copied,
-                    error = %err,
-                    "relay trace flush failed"
-                );
-                return Err(err);
-            }
-            debug!(
-                direction,
-                chunk = chunks,
-                write_offset = written,
-                bytes = write_bytes,
-                copied,
-                "relay trace flush complete"
-            );
-            written = end;
-        }
-        metrics.record_tcp_bytes(n as u64);
-    }
 }
 
 async fn counting_copy<R, W>(
@@ -289,7 +167,6 @@ where
             return Ok(copied);
         }
         writer.write_all(&buf[..n]).await?;
-        writer.flush().await?;
         copied += n as u64;
         metrics.record_tcp_bytes(n as u64);
     }
@@ -325,7 +202,6 @@ where
             }
             let chunk_size = reservation.chunk_size.min(data.len()).max(1);
             writer.write_all(&data[..chunk_size]).await?;
-            writer.flush().await?;
             copied += chunk_size as u64;
             if let Some(metrics) = metrics {
                 metrics.record_tcp_bytes(chunk_size as u64);
