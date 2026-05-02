@@ -37,6 +37,9 @@ fn signed_descriptor(key: &SigningKey, url: &str, issued_at: DateTime<Utc>) -> R
             active_connections: 0,
             tcp_bps: 0.0,
             signature: String::new(),
+            family: String::new(),
+            subnet16: String::new(),
+            supports_reservation: false,
         },
         &hex::encode(key.to_bytes()),
     )
@@ -63,6 +66,9 @@ fn signed_overlay_descriptor(
             active_connections: 0,
             tcp_bps: 0.0,
             signature: String::new(),
+            family: String::new(),
+            subnet16: String::new(),
+            supports_reservation: false,
         },
         &hex::encode(key.to_bytes()),
     )
@@ -71,6 +77,9 @@ fn signed_overlay_descriptor(
 
 #[test]
 fn canonical_descriptor_uses_go_field_order_and_unix_nano() {
+    // Populate `family`, `subnet16`, and `supports_reservation` with non-default values to
+    // prove that canonical_descriptor_bytes intentionally EXCLUDES them (Go parity: these
+    // fields are unsigned wire metadata and must not affect the descriptor signature).
     let desc = RelayDescriptor {
         address: "0xabc".to_string(),
         version: "7".to_string(),
@@ -85,11 +94,27 @@ fn canonical_descriptor_uses_go_field_order_and_unix_nano() {
         active_connections: 0,
         tcp_bps: 0.0,
         signature: String::new(),
+        family: "production-eu".to_string(),
+        subnet16: "10.42.0.0/16".to_string(),
+        supports_reservation: true,
     };
 
+    let canonical = String::from_utf8(canonical_descriptor_bytes(&desc).unwrap()).unwrap();
     assert_eq!(
-        String::from_utf8(canonical_descriptor_bytes(&desc).unwrap()).unwrap(),
+        canonical,
         "{\"address\":\"0xabc\",\"version\":\"7\",\"issued_at_unix_nano\":1000000002,\"expires_at_unix_nano\":3000000004,\"api_https_addr\":\"https://relay.example\",\"wireguard_public_key\":\"\",\"wireguard_port\":0,\"supports_overlay\":false,\"supports_udp\":true,\"supports_tcp\":false,\"active_connections\":0,\"tcp_bps\":0}"
+    );
+    assert!(
+        !canonical.contains("family"),
+        "family must not appear in canonical signing bytes: {canonical}"
+    );
+    assert!(
+        !canonical.contains("subnet16"),
+        "subnet16 must not appear in canonical signing bytes: {canonical}"
+    );
+    assert!(
+        !canonical.contains("supports_reservation"),
+        "supports_reservation must not appear in canonical signing bytes: {canonical}"
     );
 }
 
@@ -109,6 +134,9 @@ fn canonical_descriptor_formats_tcp_bps_like_go_json() {
         active_connections: 0,
         tcp_bps: 45_270.148_289_023_724,
         signature: String::new(),
+        family: String::new(),
+        subnet16: String::new(),
+        supports_reservation: false,
     };
 
     let canonical = String::from_utf8(canonical_descriptor_bytes(&desc).unwrap()).unwrap();
@@ -141,6 +169,9 @@ fn signs_and_verifies_relay_descriptor() {
         active_connections: 0,
         tcp_bps: 0.0,
         signature: String::new(),
+        family: String::new(),
+        subnet16: String::new(),
+        supports_reservation: false,
     };
     let signed = sign_relay_descriptor(desc, &hex::encode(key.to_bytes())).unwrap();
     let verified = verify_relay_descriptor(signed).unwrap();

@@ -291,5 +291,8 @@ fn overlay_descriptor_with_key(
         active_connections: 0,
         tcp_bps: 0.0,
         signature: String::new(),
+        family: String::new(),
+        subnet16: String::new(),
+        supports_reservation: false,
     }
 }

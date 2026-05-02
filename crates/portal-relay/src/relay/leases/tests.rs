@@ -565,5 +565,8 @@ fn test_overlay_descriptor(now: DateTime<Utc>) -> RelayDescriptor {
         active_connections: 0,
         tcp_bps: 0.0,
         signature: String::new(),
+        family: String::new(),
+        subnet16: String::new(),
+        supports_reservation: false,
     }
 }

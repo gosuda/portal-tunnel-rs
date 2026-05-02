@@ -5,18 +5,20 @@ use std::time::{Duration, Instant};
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use chrono::Duration as ChronoDuration;
 use hyper::StatusCode;
 use rand_core_06::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 
 use crate::api::{ApiReply, api_error_reply, decode_json, json_ok, method_not_allowed};
 use crate::auth::identity::{Identity, normalize_identity};
+use crate::auth::voucher::{ReservationVoucher, sign_reservation_voucher};
 use crate::policy::{ApprovalMode, PolicyRuntime};
 use crate::relay::AppState;
 use crate::wire::paths::{
     PATH_ADMIN, PATH_ADMIN_APPROVAL, PATH_ADMIN_AUTH_STATUS, PATH_ADMIN_IPS_PREFIX,
     PATH_ADMIN_LANDING_PAGE, PATH_ADMIN_LEASES_PREFIX, PATH_ADMIN_LOGIN, PATH_ADMIN_LOGOUT,
-    PATH_ADMIN_SNAPSHOT, PATH_ADMIN_TCP_PORT, PATH_ADMIN_UDP,
+    PATH_ADMIN_RESERVE, PATH_ADMIN_SNAPSHOT, PATH_ADMIN_TCP_PORT, PATH_ADMIN_UDP,
 };
 
 const ADMIN_COOKIE_NAME: &str = "portal_admin";
@@ -158,6 +160,8 @@ pub async fn handle_admin_request(
         (_, PATH_ADMIN_UDP) => method_not_allowed(),
         ("POST", PATH_ADMIN_TCP_PORT) => handle_port_settings(&state, body, PortKind::Tcp),
         (_, PATH_ADMIN_TCP_PORT) => method_not_allowed(),
+        ("POST", PATH_ADMIN_RESERVE) => handle_reserve(&state, body),
+        (_, PATH_ADMIN_RESERVE) => method_not_allowed(),
         _ if path.starts_with(PATH_ADMIN_LEASES_PREFIX) => {
             handle_identity_action(&state, method, path, body)
         }
@@ -265,6 +269,68 @@ fn handle_port_settings(state: &AppState, body: &[u8], kind: PortKind) -> ApiRep
             },
         )
     })
+}
+
+/// EXPERIMENTAL: Issues a signed `ReservationVoucher` for a given client address.
+/// Mirrors Go's `POST /admin/reserve`.
+///
+/// Issuance is capped by a process-lifetime budget
+/// (see [`MAX_VOUCHER_BUDGET`](crate::relay::server::MAX_VOUCHER_BUDGET)): each *successful*
+/// issuance permanently consumes one slot for the lifetime of the process. Failed attempts
+/// (validation errors, signing errors) do NOT consume a slot — the acquired permit is
+/// released so callers cannot exhaust the budget by replaying invalid requests.
+fn handle_reserve(state: &AppState, body: &[u8]) -> ApiReply {
+    let req = match decode_json::<AdminReserveRequest>(body) {
+        Ok(req) => req,
+        Err(err) => return api_error_reply(StatusCode::BAD_REQUEST, "invalid_request", &err),
+    };
+    if req.client_address.trim().is_empty() {
+        return api_error_reply(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "client_address is required",
+        );
+    }
+    // Normalize duration: clamp to [60s, 24h], default to 60s if unset or non-positive.
+    let duration_secs = if req.requested_duration_seconds <= 0 {
+        60_i64
+    } else {
+        req.requested_duration_seconds.clamp(60, 86_400)
+    };
+    // Acquire one slot from the process-lifetime issuance budget. The guard will release the
+    // slot on drop; on success we explicitly forget it so the slot stays consumed for the
+    // remainder of the process.
+    let Some(guard) = state.voucher_budget.acquire() else {
+        return api_error_reply(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "capacity_exhausted",
+            "reservation budget exhausted",
+        );
+    };
+    let now = chrono::Utc::now();
+    let voucher = ReservationVoucher {
+        client_address: req.client_address.trim().to_string(),
+        relay_url: state.portal_url.clone(),
+        issued_at: now,
+        expires_at: now + ChronoDuration::seconds(duration_secs),
+        signature: Vec::new(),
+    };
+    match sign_reservation_voucher(voucher, &state.relay_identity.private_key) {
+        Ok(signed) => {
+            // Permanently consume the slot for this successful issuance.
+            guard.consume();
+            json_ok(StatusCode::OK, &signed)
+        }
+        Err(err) => {
+            // Failed issuance: drop releases the slot so the budget is not depleted by errors.
+            drop(guard);
+            api_error_reply(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal",
+                &err.to_string(),
+            )
+        }
+    }
 }
 
 fn handle_identity_action(state: &AppState, method: &str, path: &str, body: &[u8]) -> ApiReply {
@@ -447,6 +513,13 @@ struct PortSettingsResponse {
 #[derive(Debug, Deserialize)]
 struct AdminBpsRequest {
     bps: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminReserveRequest {
+    client_address: String,
+    #[serde(default)]
+    requested_duration_seconds: i64,
 }
 
 #[derive(Clone, Copy)]

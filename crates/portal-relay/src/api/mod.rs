@@ -879,7 +879,7 @@ mod tests {
         let policy = Arc::new(PolicyRuntime::load(&identity_path, false, false).unwrap());
         let leases = Arc::new(LeaseRegistry::new(LeaseRegistryConfig {
             root_host: "localhost".to_string(),
-            relay,
+            relay: relay.clone(),
             issuer: "https://localhost:4017".to_string(),
             sni_port: 443,
             udp_enabled: false,
@@ -893,6 +893,7 @@ mod tests {
             root_host: "localhost".to_string(),
             portal_host: "localhost".to_string(),
             portal_url: "https://localhost:4017".to_string(),
+            relay_identity: Arc::new(relay),
             leases,
             keyless_signer: tls_material.keyless_signer,
             admin: Arc::new(
@@ -903,6 +904,9 @@ mod tests {
             overlay: None,
             hop_mux: None,
             metrics: Arc::new(crate::relay::bridge::RelayMetrics::default()),
+            voucher_budget: Arc::new(crate::relay::server::VoucherBudget::new(
+                crate::relay::server::MAX_VOUCHER_BUDGET,
+            )),
         })
     }
 
@@ -932,6 +936,9 @@ mod tests {
                 active_connections: 3,
                 tcp_bps: 2048.0,
                 signature: String::new(),
+                family: String::new(),
+                subnet16: String::new(),
+                supports_reservation: false,
             },
             &hex::encode(peer_key.to_bytes()),
         )

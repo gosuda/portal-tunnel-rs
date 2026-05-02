@@ -28,3 +28,5 @@ pub const PATH_SDK_RENEW: &str = "/sdk/renew";
 pub const PATH_SDK_UNREGISTER: &str = "/sdk/unregister";
 pub const PATH_SDK_HOP: &str = "/sdk/hop";
 pub const PATH_SDK_CONNECT: &str = "/sdk/connect";
+pub const PATH_ADMIN_RESERVE: &str = "/admin/reserve";
+pub const PATH_ADMIN_METRICS: &str = "/admin/metrics";

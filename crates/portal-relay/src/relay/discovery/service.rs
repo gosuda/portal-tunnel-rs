@@ -163,6 +163,9 @@ impl DiscoveryState {
                 active_connections: self.metrics.active_connection_count(),
                 tcp_bps: self.metrics.current_tcp_bps(now),
                 signature: String::new(),
+                family: String::new(),
+                subnet16: String::new(),
+                supports_reservation: false,
             },
             &self.relay.private_key,
         )

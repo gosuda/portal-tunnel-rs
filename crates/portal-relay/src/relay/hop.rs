@@ -212,6 +212,9 @@ mod tests {
             active_connections: 0,
             tcp_bps: 0.0,
             signature: String::new(),
+            family: String::new(),
+            subnet16: String::new(),
+            supports_reservation: false,
         };
         (
             sign_relay_descriptor(desc, &hex::encode(key.to_bytes())).unwrap(),
@@ -236,6 +239,9 @@ mod tests {
             active_connections: 0,
             tcp_bps: 0.0,
             signature: String::new(),
+            family: String::new(),
+            subnet16: String::new(),
+            supports_reservation: false,
         };
         let route = HopRoute {
             owner_public_key: "02abcdef".to_string(),

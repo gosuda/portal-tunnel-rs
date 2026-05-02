@@ -40,6 +40,12 @@ pub struct RelayDescriptor {
     pub tcp_bps: f64,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub signature: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub family: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub subnet16: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub supports_reservation: bool,
 }
 
 impl RelayDescriptor {
@@ -129,6 +135,25 @@ pub fn normalize_relay_descriptor(mut desc: RelayDescriptor) -> anyhow::Result<R
     desc.api_https_addr = desc.api_https_addr.trim().to_string();
     desc.wireguard_public_key = desc.wireguard_public_key.trim().to_string();
     desc.signature = desc.signature.trim().to_string();
+    // family/subnet16 are unsigned wire metadata (Go parity): they MUST NOT participate in
+    // canonical_descriptor_bytes, but we still trim+lowercase and validate shape so callers
+    // cannot smuggle arbitrary content. supports_reservation is a plain bool.
+    desc.family = desc.family.trim().to_ascii_lowercase();
+    desc.subnet16 = desc.subnet16.trim().to_string();
+    if !desc.family.is_empty() && desc.family.len() > 64 {
+        bail!("family is too long");
+    }
+    if !desc.family.is_empty()
+        && !desc
+            .family
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        bail!("family must contain only ascii alphanumerics, '-' or '_'");
+    }
+    if !desc.subnet16.is_empty() {
+        validate_subnet16(&desc.subnet16)?;
+    }
     if desc.version.is_empty() {
         desc.version = DISCOVERY_VERSION.to_string();
     }
@@ -189,6 +214,33 @@ fn validate_wireguard_public_key(raw: &str) -> anyhow::Result<()> {
         .context("wireguard_public_key must be base64 encoded")?;
     if decoded.len() != 32 {
         bail!("wireguard_public_key must be 32 bytes");
+    }
+    Ok(())
+}
+
+/// Validates a `/16` IPv4 subnet expressed as `a.b.0.0/16`. Mirrors the lightweight shape check
+/// used on the Go side; full CIDR canonicalization is left to consumers that route on it.
+fn validate_subnet16(raw: &str) -> anyhow::Result<()> {
+    let (network, prefix) = raw
+        .split_once('/')
+        .context("subnet16 must be in CIDR form a.b.0.0/16")?;
+    if prefix != "16" {
+        bail!("subnet16 prefix length must be /16");
+    }
+    let octets: Vec<&str> = network.split('.').collect();
+    if octets.len() != 4 {
+        bail!("subnet16 network must have four octets");
+    }
+    for octet in &octets {
+        let parsed: u16 = octet
+            .parse()
+            .context("subnet16 octet must be an unsigned integer")?;
+        if parsed > 255 {
+            bail!("subnet16 octet out of range");
+        }
+    }
+    if octets[2] != "0" || octets[3] != "0" {
+        bail!("subnet16 must zero the host portion (a.b.0.0/16)");
     }
     Ok(())
 }

@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU32;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -37,10 +38,104 @@ const REGISTRY_JANITOR_INTERVAL: Duration = Duration::from_secs(5);
 const HOP_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 const HOP_OPEN_RETRY_WAIT: Duration = Duration::from_millis(250);
 
+/// Process-lifetime cap on outstanding reservation vouchers (Go parity: 100-slot semaphore).
+pub const MAX_VOUCHER_BUDGET: u32 = 100;
+
+/// Bounded counter that mediates issuance of reservation vouchers under [`MAX_VOUCHER_BUDGET`].
+///
+/// Enforces a checked acquire/release contract so callers cannot accidentally desync the
+/// in-flight count: every successful [`acquire`] MUST be paired with exactly one [`release`].
+/// A dropped [`VoucherBudgetGuard`] releases automatically.
+///
+/// [`acquire`]: VoucherBudget::acquire
+/// [`release`]: VoucherBudget::release
+#[derive(Debug)]
+pub struct VoucherBudget {
+    in_flight: AtomicU32,
+    capacity: u32,
+}
+
+impl VoucherBudget {
+    pub const fn new(capacity: u32) -> Self {
+        Self {
+            in_flight: AtomicU32::new(0),
+            capacity,
+        }
+    }
+
+    /// Reserves one budget slot, returning a guard that releases on drop. Returns `None` when
+    /// the cap is reached (no slot is taken in that case — the failed `fetch_add` is undone).
+    pub fn acquire(self: &Arc<Self>) -> Option<VoucherBudgetGuard> {
+        let prev = self
+            .in_flight
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if prev >= self.capacity {
+            self.in_flight
+                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            return None;
+        }
+        Some(VoucherBudgetGuard {
+            budget: Arc::clone(self),
+            released: false,
+        })
+    }
+
+    fn release(&self) {
+        self.in_flight
+            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    #[cfg(test)]
+    pub fn in_flight(&self) -> u32 {
+        self.in_flight.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// RAII guard returned by [`VoucherBudget::acquire`]. Releases the slot on drop, or earlier via
+/// [`VoucherBudgetGuard::release`] if the caller wants explicit hand-off semantics.
+#[derive(Debug)]
+pub struct VoucherBudgetGuard {
+    budget: Arc<VoucherBudget>,
+    released: bool,
+}
+
+impl VoucherBudgetGuard {
+    /// Releases the slot eagerly. Subsequent drops are no-ops.
+    /// Kept for API symmetry with [`consume`](Self::consume); the same effect is achieved by
+    /// dropping the guard, which the test suite exercises.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "API symmetry with consume(); production sites currently use Drop/consume only"
+        )
+    )]
+    pub fn release(mut self) {
+        self.released = true;
+        self.budget.release();
+    }
+
+    /// Permanently consumes the slot for the lifetime of the process. The slot is NOT released
+    /// on drop after this call. Use this when an operation has succeeded and the issuance
+    /// should count against the process-lifetime budget (Go parity for `POST /admin/reserve`).
+    pub fn consume(mut self) {
+        self.released = true;
+    }
+}
+
+impl Drop for VoucherBudgetGuard {
+    fn drop(&mut self) {
+        if !self.released {
+            self.budget.release();
+        }
+    }
+}
+
 pub struct AppState {
     pub root_host: String,
     pub portal_host: String,
     pub portal_url: String,
+    pub relay_identity: Arc<RelayIdentity>,
     pub leases: Arc<LeaseRegistry>,
     pub keyless_signer: KeylessSigner,
     pub admin: Arc<AdminState>,
@@ -49,6 +144,7 @@ pub struct AppState {
     pub overlay: Option<Arc<OverlayRuntime>>,
     pub hop_mux: Option<Arc<HopMux>>,
     pub metrics: Arc<RelayMetrics>,
+    pub voucher_budget: Arc<VoucherBudget>,
 }
 
 pub struct Server {
@@ -176,6 +272,7 @@ impl Server {
             root_host: identity.name.clone(),
             portal_host: root_host,
             portal_url: cfg.portal_url.clone(),
+            relay_identity: Arc::new(identity.clone()),
             leases,
             keyless_signer: tls_material.keyless_signer,
             admin,
@@ -184,6 +281,7 @@ impl Server {
             overlay,
             hop_mux,
             metrics,
+            voucher_budget: Arc::new(VoucherBudget::new(MAX_VOUCHER_BUDGET)),
         });
 
         Ok(Self {
@@ -785,4 +883,64 @@ async fn handle_quic_backhaul_conn(
     .await?;
     info!(%remote_addr, "quic backhaul connected");
     Ok(())
+}
+
+#[cfg(test)]
+mod voucher_budget_tests {
+    use super::{MAX_VOUCHER_BUDGET, VoucherBudget};
+    use std::sync::Arc;
+
+    #[test]
+    fn release_returns_slot_to_budget() {
+        let budget = Arc::new(VoucherBudget::new(2));
+        let g1 = budget.acquire().expect("first acquire succeeds");
+        assert_eq!(budget.in_flight(), 1);
+        g1.release();
+        assert_eq!(budget.in_flight(), 0);
+    }
+
+    #[test]
+    fn drop_returns_slot_to_budget() {
+        let budget = Arc::new(VoucherBudget::new(2));
+        {
+            let _g = budget.acquire().expect("acquire");
+            assert_eq!(budget.in_flight(), 1);
+        }
+        assert_eq!(budget.in_flight(), 0);
+    }
+
+    #[test]
+    fn consume_permanently_holds_slot() {
+        let budget = Arc::new(VoucherBudget::new(2));
+        let g = budget.acquire().expect("acquire");
+        g.consume();
+        // Slot is not released by drop after consume; in-flight remains 1.
+        assert_eq!(budget.in_flight(), 1);
+    }
+
+    #[test]
+    fn capacity_is_enforced_and_failed_acquire_does_not_burn_slot() {
+        let budget = Arc::new(VoucherBudget::new(2));
+        let _g1 = budget.acquire().expect("first");
+        let _g2 = budget.acquire().expect("second");
+        assert!(budget.acquire().is_none(), "third acquire must fail");
+        // The failed acquire must not have permanently incremented the in-flight counter.
+        assert_eq!(budget.in_flight(), 2);
+    }
+
+    #[test]
+    fn consume_exhausts_budget_after_max_issuances() {
+        let budget = Arc::new(VoucherBudget::new(MAX_VOUCHER_BUDGET));
+        for _ in 0..MAX_VOUCHER_BUDGET {
+            budget
+                .acquire()
+                .expect("within capacity")
+                .consume();
+        }
+        assert_eq!(budget.in_flight(), MAX_VOUCHER_BUDGET);
+        assert!(
+            budget.acquire().is_none(),
+            "budget must be exhausted after consuming MAX_VOUCHER_BUDGET slots"
+        );
+    }
 }
