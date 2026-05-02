@@ -131,6 +131,7 @@ fn extract_sni(buf: &[u8]) -> Option<String> {
         return None;
     }
     let record = &buf[5..5 + record_len];
+    // TLS handshake_type.client_hello (RFC 5246 §7.4) — NOT a portal-tunnel marker; do not unify with wire::markers::*
     if record.len() < 4 || record[0] != 0x01 {
         return None;
     }

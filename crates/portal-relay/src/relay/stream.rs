@@ -11,9 +11,7 @@ const DEFAULT_IDLE_KEEPALIVE: Duration = Duration::from_secs(15);
 const DEFAULT_READY_QUEUE_LIMIT: usize = 8;
 
 pub const MARKER_KEEPALIVE: u8 = 0x00;
-#[allow(dead_code)]
 pub const MARKER_RAW_START: u8 = 0x01;
-#[allow(dead_code)]
 pub const MARKER_TLS_START: u8 = 0x02;
 
 #[derive(Debug, thiserror::Error)]
