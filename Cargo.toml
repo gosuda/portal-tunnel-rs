@@ -30,7 +30,8 @@ quinn = { version = "0.11", default-features = false, features = [
   "runtime-tokio",
   "rustls-ring"
 ] }
-rand_core = { version = "0.6", features = ["getrandom"] }
+rand_core = { version = "0.10" }
+rand_core_06 = { package = "rand_core", version = "0.6", features = ["getrandom"] }
 rcgen = { version = "0.14.7", default-features = false, features = [
   "aws_lc_rs",
   "pem"
@@ -47,11 +48,12 @@ rustls = { version = "0.23", default-features = false, features = [
   "tls12"
 ] }
 rustls-pemfile = "2.2"
-sec1 = "0.7"
+sec1 = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
-sha2 = "0.10"
-sha3 = "0.10"
+sha2 = "0.11"
+sha2_010 = { package = "sha2", version = "0.10" }
+sha3 = "0.11"
 thiserror = "2.0"
 tokio = { version = "1", features = [
   "io-util",
