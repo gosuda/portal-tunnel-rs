@@ -11,7 +11,7 @@ use tracing::debug;
 
 use crate::auth::identity::normalize_hostname;
 use crate::relay::bridge::{
-    copy_bidirectional_with_metrics, copy_bidirectional_with_policy_and_metrics, RelayMetrics,
+    RelayMetrics, copy_bidirectional_with_metrics, copy_bidirectional_with_policy_and_metrics,
 };
 use crate::relay::hop_mux::HopMux;
 use crate::relay::leases::LeaseRegistry;

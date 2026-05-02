@@ -1,48 +1,55 @@
 [package]
-name = "portal-relay"
-version = "0.1.0"
-edition.workspace = true
-license.workspace = true
+name        = "portal-relay"
+version     = "0.1.0"
+edition.workspace    = true
+rust-version.workspace = true
+license.workspace    = true
 repository.workspace = true
+description = "Relay server for the portal-tunnel secure tunneling system"
+keywords    = ["tunnel", "relay", "proxy", "wireguard", "tls"]
+categories  = ["network-programming", "cryptography"]
 
 [dependencies]
-anyhow = "1"
-base64 = "0.22"
-bytes = "1"
-chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4", features = ["derive", "env"] }
-futures-util = "0.3"
-hex = "0.4"
-http-body-util = "0.1"
-hyper = { version = "1", features = ["http1", "server"] }
-hyper-util = { version = "0.1", features = ["tokio"] }
-instant-acme = "0.8.5"
-ipnet = "2"
-k256 = { version = "0.13", features = ["ecdsa"] }
-p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
-p384 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
-quinn = { version = "0.11.9", default-features = false, features = ["log", "runtime-tokio", "rustls-ring"] }
-rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem"] }
-rand_core = { version = "0.6", features = ["getrandom"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-rsa = { version = "0.9.8", features = ["sha2"] }
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
-rustls-pemfile = "2"
-sec1 = "0.7"
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["float_roundtrip"] }
-sha2 = "0.10"
-sha3 = "0.10"
-thiserror = "2"
-tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
-tokio-util = { version = "0.7", features = ["compat"] }
-tokio-rustls = "0.26"
-wireguard-control = "1.7"
-rtnetlink = { version = "0.15", default-features = false, features = ["tokio_socket"] }
-netlink-packet-route = "0.21"
-x25519-dalek = "2"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-url = "2"
-x509-parser = "0.18"
-yamux = "0.13.10"
+anyhow.workspace       = true
+base64.workspace       = true
+bytes.workspace        = true
+chrono.workspace       = true
+clap.workspace         = true
+futures-util.workspace = true
+hex.workspace          = true
+http-body-util.workspace = true
+hyper.workspace        = true
+hyper-util.workspace   = true
+instant-acme.workspace = true
+ipnet.workspace        = true
+k256.workspace         = true
+p256.workspace         = true
+p384.workspace         = true
+quinn.workspace        = true
+rcgen.workspace        = true
+rand_core.workspace    = true
+reqwest.workspace      = true
+rsa.workspace          = true
+rustls.workspace       = true
+rustls-pemfile.workspace = true
+sec1.workspace         = true
+serde.workspace        = true
+serde_json.workspace   = true
+sha2.workspace         = true
+sha3.workspace         = true
+thiserror.workspace    = true
+tokio.workspace        = true
+tokio-util.workspace   = true
+tokio-rustls.workspace = true
+wireguard-control.workspace = true
+rtnetlink.workspace    = true
+netlink-packet-route.workspace = true
+x25519-dalek.workspace = true
+tracing.workspace      = true
+tracing-subscriber.workspace = true
+url.workspace          = true
+x509-parser.workspace  = true
+yamux.workspace        = true
+
+[lints]
+workspace = true

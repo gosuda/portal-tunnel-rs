@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
-use anyhow::{bail, Context};
-use futures_util::future::{poll_fn, BoxFuture};
+use anyhow::{Context, bail};
+use futures_util::future::{BoxFuture, poll_fn};
 use std::collections::HashMap;
 use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time;
 use tokio_util::compat::{Compat, FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
@@ -163,9 +163,7 @@ impl HopMux {
             Ok(Ok(stream)) => Ok(stream),
             Ok(Err(err)) => Err(err),
             Err(_) => {
-                let message = last_err
-                    .map(|err| err.to_string())
-                    .unwrap_or_else(|| "timeout".to_string());
+                let message = last_err.map_or_else(|| "timeout".to_string(), |err| err.to_string());
                 warn!(
                     overlay_ipv4,
                     timeout_ms = timeout.as_millis(),
@@ -244,10 +242,11 @@ impl HopMux {
         {
             let mut outbound = self.outbound.lock().await;
             if let Some(existing) = outbound.get(session_key)
-                && !existing.driver.is_finished() {
-                    debug!(session_key, "reusing hop mux outbound session");
-                    return Ok(existing.commands.clone());
-                }
+                && !existing.driver.is_finished()
+            {
+                debug!(session_key, "reusing hop mux outbound session");
+                return Ok(existing.commands.clone());
+            }
             outbound.remove(session_key);
         }
 
@@ -272,10 +271,11 @@ impl HopMux {
 
         let mut outbound = self.outbound.lock().await;
         if let Some(existing) = outbound.get(session_key)
-            && !existing.driver.is_finished() {
-                debug!(session_key, "using concurrent hop mux outbound session");
-                return Ok(existing.commands.clone());
-            }
+            && !existing.driver.is_finished()
+        {
+            debug!(session_key, "using concurrent hop mux outbound session");
+            return Ok(existing.commands.clone());
+        }
         outbound.insert(session_key.to_string(), candidate);
         debug!(session_key, "hop mux outbound session ready");
         Ok(commands)

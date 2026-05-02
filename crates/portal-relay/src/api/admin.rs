@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use hyper::StatusCode;
 use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
@@ -14,8 +14,8 @@ use crate::api::paths::{
     PATH_ADMIN_LANDING_PAGE, PATH_ADMIN_LEASES_PREFIX, PATH_ADMIN_LOGIN, PATH_ADMIN_LOGOUT,
     PATH_ADMIN_SNAPSHOT, PATH_ADMIN_TCP_PORT, PATH_ADMIN_UDP,
 };
-use crate::api::{api_error_reply, decode_json, json_ok, method_not_allowed, ApiReply};
-use crate::auth::identity::{normalize_identity, Identity};
+use crate::api::{ApiReply, api_error_reply, decode_json, json_ok, method_not_allowed};
+use crate::auth::identity::{Identity, normalize_identity};
 use crate::policy::{ApprovalMode, PolicyRuntime};
 use crate::relay::AppState;
 

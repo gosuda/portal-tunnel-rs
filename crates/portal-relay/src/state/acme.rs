@@ -4,17 +4,17 @@ use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::{bail, Context};
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use anyhow::{Context, bail};
 use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use instant_acme::{
     Account, AuthorizationStatus, ChallengeType, Identifier, Key, LetsEncrypt, NewAccount,
     NewOrder, OrderStatus, RetryPolicy,
 };
-use rcgen::{CertificateParams, DistinguishedName, KeyPair, RsaKeySize, PKCS_RSA_SHA256};
+use rcgen::{CertificateParams, DistinguishedName, KeyPair, PKCS_RSA_SHA256, RsaKeySize};
 use reqwest::Method;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
 use url::Url;

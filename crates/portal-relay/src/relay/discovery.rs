@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use anyhow::{bail, Context};
-use base64::engine::general_purpose::STANDARD;
+use anyhow::{Context, bail};
 use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use chrono::{DateTime, TimeDelta, Utc};
 use k256::ecdsa::{RecoveryId, Signature, SigningKey, VerifyingKey};
 use serde::de::DeserializeOwned;
@@ -559,10 +559,10 @@ where
     if envelope.ok {
         return envelope.data.context("api envelope missing data");
     }
-    let message = envelope
-        .error
-        .map(|err| format!("{}: {}", err.code, err.message))
-        .unwrap_or_else(|| "api request failed".to_string());
+    let message = envelope.error.map_or_else(
+        || "api request failed".to_string(),
+        |err| format!("{}: {}", err.code, err.message),
+    );
     bail!(message)
 }
 
@@ -676,27 +676,27 @@ pub fn normalize_relay_descriptor(mut desc: RelayDescriptor) -> anyhow::Result<R
     }
 
     match () {
-        _ if desc.address.is_empty() => bail!("address is required"),
-        _ if desc.version != DISCOVERY_VERSION => {
+        () if desc.address.is_empty() => bail!("address is required"),
+        () if desc.version != DISCOVERY_VERSION => {
             bail!("unsupported relay descriptor version {:?}", desc.version)
         }
-        _ if desc.api_https_addr.is_empty() => bail!("api_https_addr is required"),
-        _ if desc.supports_overlay && desc.wireguard_public_key.is_empty() => {
+        () if desc.api_https_addr.is_empty() => bail!("api_https_addr is required"),
+        () if desc.supports_overlay && desc.wireguard_public_key.is_empty() => {
             bail!("wireguard_public_key is required when supports_overlay is set")
         }
-        _ if desc.supports_overlay && desc.wireguard_port == 0 => {
+        () if desc.supports_overlay && desc.wireguard_port == 0 => {
             bail!("wireguard_port is required when supports_overlay is set")
         }
-        _ if !desc.supports_overlay
+        () if !desc.supports_overlay
             && (!desc.wireguard_public_key.is_empty() || desc.wireguard_port != 0) =>
         {
             bail!("supports_overlay is required when wireguard metadata is set")
         }
-        _ if desc.expires_at.timestamp_nanos_opt().is_none() => {
+        () if desc.expires_at.timestamp_nanos_opt().is_none() => {
             bail!("expires_at is required")
         }
-        _ if desc.issued_at > desc.expires_at => bail!("issued_at must be before expires_at"),
-        _ => {}
+        () if desc.issued_at > desc.expires_at => bail!("issued_at must be before expires_at"),
+        () => {}
     }
 
     Ok(desc)
@@ -895,7 +895,7 @@ mod tests {
             supports_udp: false,
             supports_tcp: true,
             active_connections: 0,
-            tcp_bps: 45270.148289023724,
+            tcp_bps: 45_270.148_289_023_724,
             signature: String::new(),
         };
 
@@ -990,11 +990,13 @@ mod tests {
             .unwrap();
 
         assert!(changed);
-        assert!(discovery
-            .relays
-            .lock()
-            .expect("discovery relays lock poisoned")
-            .contains_key("https://peer.example"));
+        assert!(
+            discovery
+                .relays
+                .lock()
+                .expect("discovery relays lock poisoned")
+                .contains_key("https://peer.example")
+        );
         assert_eq!(
             discovery.poll_targets(now),
             vec![
@@ -1094,8 +1096,9 @@ mod tests {
             )
             .unwrap_err();
 
-        assert!(err
-            .to_string()
-            .contains("target relay descriptor missing from relays"));
+        assert!(
+            err.to_string()
+                .contains("target relay descriptor missing from relays")
+        );
     }
 }

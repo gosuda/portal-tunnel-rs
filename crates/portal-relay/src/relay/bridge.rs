@@ -1,7 +1,7 @@
 #[cfg(test)]
 use std::cmp;
-use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicI64, Ordering};
 #[cfg(test)]
 use std::time::Duration;
 

@@ -1,13 +1,13 @@
-use anyhow::{bail, Context};
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use anyhow::{Context, bail};
 use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{DateTime, Utc};
 use k256::ecdsa::signature::hazmat::{PrehashSigner, PrehashVerifier};
 use k256::ecdsa::{Signature, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::auth::identity::{normalize_identity, Identity};
+use crate::auth::identity::{Identity, normalize_identity};
 use crate::state::identity::RelayIdentity;
 
 const LEASE_ACCESS_TOKEN_AUDIENCE: &str = "portal-sdk";

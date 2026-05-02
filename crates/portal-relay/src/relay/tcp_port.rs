@@ -6,8 +6,8 @@ use tokio::task::JoinHandle;
 use tracing::{debug, warn};
 
 use crate::policy::PolicyRuntime;
-use crate::relay::bridge::{copy_bidirectional_with_policy_and_metrics, RelayMetrics};
-use crate::relay::stream::{RelayStream, MARKER_RAW_START};
+use crate::relay::bridge::{RelayMetrics, copy_bidirectional_with_policy_and_metrics};
+use crate::relay::stream::{MARKER_RAW_START, RelayStream};
 
 pub struct TcpPortRuntime {
     port: u16,

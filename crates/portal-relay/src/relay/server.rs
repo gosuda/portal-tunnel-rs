@@ -7,8 +7,8 @@ use chrono::Utc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
-use tokio_rustls::server::TlsStream;
 use tokio_rustls::TlsAcceptor;
+use tokio_rustls::server::TlsStream;
 use tracing::{debug, error, info, warn};
 
 use crate::api;
@@ -18,20 +18,20 @@ use crate::api::paths::PATH_SDK_CONNECT;
 use crate::config::RelayConfig;
 use crate::policy::PolicyRuntime;
 use crate::relay::bridge::{
-    copy_bidirectional_with_metrics, copy_bidirectional_with_policy_and_metrics, RelayMetrics,
+    RelayMetrics, copy_bidirectional_with_metrics, copy_bidirectional_with_policy_and_metrics,
 };
-use crate::relay::discovery::{DiscoveryState, DISCOVERY_POLL_INTERVAL};
+use crate::relay::discovery::{DISCOVERY_POLL_INTERVAL, DiscoveryState};
 use crate::relay::hop_mux::{HopMux, HopMuxConnector, HopStream};
 use crate::relay::leases::{HopRelayTarget, LeaseRegistry, LeaseRegistryConfig};
 use crate::relay::overlay::{OverlayConfig, OverlayPeer, OverlayRuntime};
 use crate::relay::sni::handle_public_ingress;
 use crate::relay::stream::MARKER_TLS_START;
 use crate::relay::udp_datagram::{
-    read_control_message, write_control_response, QuicBackhaulControlResponse,
+    QuicBackhaulControlResponse, read_control_message, write_control_response,
 };
 use crate::state::acme::AcmeManager;
-use crate::state::identity::{load_or_create_relay_identity, RelayIdentity};
-use crate::state::tls_material::{load_or_create_tls_material, KeylessSigner};
+use crate::state::identity::{RelayIdentity, load_or_create_relay_identity};
+use crate::state::tls_material::{KeylessSigner, load_or_create_tls_material};
 
 const REGISTRY_JANITOR_INTERVAL: Duration = Duration::from_secs(5);
 const HOP_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
@@ -598,7 +598,7 @@ fn log_api_rejection(
     if status.as_u16() < 400 {
         return;
     }
-    let path = path.split_once('?').map(|(path, _)| path).unwrap_or(path);
+    let path = path.split_once('?').map_or(path, |(path, _)| path);
     let sdk_or_relay_api =
         path.starts_with("/sdk/") || path.starts_with("/discovery") || path == "/v1/sign";
     if status.as_u16() >= 500 || sdk_or_relay_api {

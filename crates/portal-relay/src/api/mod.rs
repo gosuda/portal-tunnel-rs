@@ -10,8 +10,8 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use hyper::StatusCode;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use tracing::{debug, warn};
 
 use crate::api::envelope::{api_error, api_ok};
@@ -23,14 +23,14 @@ use crate::api::paths::{
     PATH_SDK_UNREGISTER, PATH_TUNNEL_STATUS, PATH_V1_SIGN,
 };
 use crate::api::sdk::DomainResponse;
+use crate::relay::AppState;
 use crate::relay::discovery::{
-    verify_relay_descriptor, DiscoveryAnnounceRequest, DiscoveryAnnounceResponse, DISCOVERY_VERSION,
+    DISCOVERY_VERSION, DiscoveryAnnounceRequest, DiscoveryAnnounceResponse, verify_relay_descriptor,
 };
-use crate::relay::hop::{verify_hop_route, HopRoute, HopRouteError};
+use crate::relay::hop::{HopRoute, HopRouteError, verify_hop_route};
 use crate::relay::leases::{
     LeaseError, RegisterChallengeRequest, RegisterRequest, RenewRequest, UnregisterRequest,
 };
-use crate::relay::AppState;
 
 pub struct ApiReply {
     pub status: StatusCode,
@@ -227,7 +227,7 @@ pub async fn handle_request(
         },
         (_, PATH_SDK_UNREGISTER) => method_not_allowed(),
 
-        ("POST", PATH_SDK_HOP) | ("DELETE", PATH_SDK_HOP) => {
+        ("POST" | "DELETE", PATH_SDK_HOP) => {
             if state.hop_mux.is_none() {
                 warn!(
                     method = %method,
@@ -397,9 +397,9 @@ pub async fn handle_request(
                 && let Some(reply) = frontend
                     .handle_request(state.as_ref(), method, path, query)
                     .await
-                {
-                    return reply;
-                }
+            {
+                return reply;
+            }
             api_error_reply(StatusCode::NOT_FOUND, "not_found", "not found")
         }
     }
@@ -593,12 +593,12 @@ mod tests {
     use crate::api::paths::{PATH_APP, PATH_SDK_HOP, PATH_SDK_REGISTER_CHALLENGE};
     use crate::auth::identity::{address_from_signing_key, compressed_public_key_hex};
     use crate::policy::PolicyRuntime;
+    use crate::relay::AppState;
     use crate::relay::discovery::{
-        sign_relay_descriptor, DiscoveryResponse, DiscoveryState, RelayDescriptor,
-        DISCOVERY_VERSION,
+        DISCOVERY_VERSION, DiscoveryResponse, DiscoveryState, RelayDescriptor,
+        sign_relay_descriptor,
     };
     use crate::relay::leases::{LeaseRegistry, LeaseRegistryConfig};
-    use crate::relay::AppState;
     use crate::state::identity::RelayIdentity;
     use crate::state::tls_material::load_or_create_tls_material;
 
@@ -763,9 +763,11 @@ mod tests {
         )
         .await;
         assert_eq!(app.status, StatusCode::OK);
-        assert!(String::from_utf8(app.body)
-            .unwrap()
-            .contains("Portal Tunnel Relay"));
+        assert!(
+            String::from_utf8(app.body)
+                .unwrap()
+                .contains("Portal Tunnel Relay")
+        );
     }
 
     #[tokio::test]
@@ -974,14 +976,15 @@ mod tests {
             std::process::id(),
             Utc::now().timestamp_nanos_opt().unwrap()
         );
-        let base = std::env::var_os("CARGO_TARGET_TMPDIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
+        let base = std::env::var_os("CARGO_TARGET_TMPDIR").map_or_else(
+            || {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                     .join("../..")
                     .join("target")
                     .join("test-tmp")
-            });
+            },
+            PathBuf::from,
+        );
         let path = base.join(unique);
         fs::create_dir_all(&path).unwrap();
         path

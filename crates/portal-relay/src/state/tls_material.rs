@@ -4,17 +4,17 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{bail, Context};
-use p256::ecdsa::signature::hazmat::PrehashSigner;
+use anyhow::{Context, bail};
 use p256::ecdsa::SigningKey as P256SigningKey;
+use p256::ecdsa::signature::hazmat::PrehashSigner;
 use p256::pkcs8::DecodePrivateKey;
 use p384::ecdsa::SigningKey as P384SigningKey;
 use quinn::crypto::rustls::QuicServerConfig;
 use rcgen::generate_simple_self_signed;
 use rsa::pkcs1::DecodeRsaPrivateKey;
 use rsa::{Pkcs1v15Sign, Pss, RsaPrivateKey};
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use sec1::DecodeEcPrivateKey;
 use sha2::{Sha256, Sha384, Sha512};
 
@@ -329,9 +329,9 @@ fn parse_quic_server_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rsa::RsaPublicKey;
     use rsa::pkcs1::EncodeRsaPrivateKey;
     use rsa::pkcs8::LineEnding;
-    use rsa::RsaPublicKey;
     use sha2::Digest;
 
     #[test]

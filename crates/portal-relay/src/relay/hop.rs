@@ -1,15 +1,15 @@
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use chrono::{DateTime, Utc};
 use k256::ecdsa::signature::hazmat::PrehashVerifier;
-#[cfg(test)]
-use k256::ecdsa::{signature::hazmat::PrehashSigner, SigningKey};
 use k256::ecdsa::{Signature, VerifyingKey};
+#[cfg(test)]
+use k256::ecdsa::{SigningKey, signature::hazmat::PrehashSigner};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::auth::identity::{address_from_verifying_key, normalize_hostname};
 use crate::config::normalize_relay_url;
-use crate::relay::discovery::{canonical_descriptor_bytes, RelayDescriptor};
+use crate::relay::discovery::{RelayDescriptor, canonical_descriptor_bytes};
 use crate::relay::leases::LeaseMetadata;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -194,7 +194,7 @@ mod tests {
 
     use super::*;
     use crate::auth::identity::address_from_signing_key;
-    use crate::relay::discovery::{sign_relay_descriptor, DISCOVERY_VERSION};
+    use crate::relay::discovery::{DISCOVERY_VERSION, sign_relay_descriptor};
 
     fn signed_overlay_descriptor(now: DateTime<Utc>) -> (RelayDescriptor, SigningKey) {
         let key = SigningKey::random(&mut OsRng);
@@ -318,10 +318,10 @@ mod tests {
             .unwrap()
             .and_utc();
 
-        assert_eq!(go_unix_nano(zero), -6795364578871345152);
+        assert_eq!(go_unix_nano(zero), -6_795_364_578_871_345_152);
         assert_eq!(
             go_unix_nano(zero - Duration::seconds(30)),
-            -6795364608871345152
+            -6_795_364_608_871_345_152
         );
     }
 
@@ -350,12 +350,16 @@ mod tests {
 
         let signed = sign_hop_route("DELETE", route, &owner, zero).unwrap();
         let wire = serde_json::to_vec(&signed).unwrap();
-        assert!(std::str::from_utf8(&wire)
-            .unwrap()
-            .contains("\"expires_at\":\"0001-01-01T00:00:00Z\""));
-        assert!(std::str::from_utf8(&wire)
-            .unwrap()
-            .contains("\"first_seen_at\":\"0000-12-31T23:59:30Z\""));
+        assert!(
+            std::str::from_utf8(&wire)
+                .unwrap()
+                .contains("\"expires_at\":\"0001-01-01T00:00:00Z\"")
+        );
+        assert!(
+            std::str::from_utf8(&wire)
+                .unwrap()
+                .contains("\"first_seen_at\":\"0000-12-31T23:59:30Z\"")
+        );
 
         let decoded: HopRoute = serde_json::from_slice(&wire).unwrap();
         let verified = verify_hop_route("DELETE", decoded).unwrap();

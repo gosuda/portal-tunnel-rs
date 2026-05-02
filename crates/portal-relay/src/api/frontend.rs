@@ -7,11 +7,11 @@ use serde::Serialize;
 use url::form_urlencoded;
 
 use crate::api::paths::{PATH_APP, PATH_APP_PREFIX, PATH_ASSETS_PREFIX, PATH_TUNNEL_STATUS};
-use crate::api::{api_error_reply, json_ok, method_not_allowed, ApiReply};
+use crate::api::{ApiReply, api_error_reply, json_ok, method_not_allowed};
 use crate::auth::identity::normalize_hostname;
+use crate::relay::AppState;
 use crate::relay::discovery::RelayDescriptor;
 use crate::relay::leases::LeaseView;
-use crate::relay::AppState;
 
 const FAVICON_PATHS: &[&str] = &[
     "/favicon.ico",
@@ -107,9 +107,8 @@ impl FrontendState {
     }
 
     async fn serve_portal_html(&self, state: &AppState, method: &str) -> ApiReply {
-        let raw = match std::fs::read_to_string(self.app_root.join("portal.html")) {
-            Ok(raw) => raw,
-            Err(_) => return not_found(),
+        let Ok(raw) = std::fs::read_to_string(self.app_root.join("portal.html")) else {
+            return not_found();
         };
         let leases = state.leases.public_leases().await;
         let leases = serde_json::to_string(&leases).unwrap_or_else(|_| "[]".to_string());
@@ -326,7 +325,7 @@ fn format_bps(bps: f64) -> String {
     } else if bps >= KIB {
         format!("{:.1} KiB/s", bps / KIB)
     } else {
-        format!("{:.0} B/s", bps)
+        format!("{bps:.0} B/s")
     }
 }
 
@@ -448,11 +447,7 @@ fn file_reply(method: &str, path: &str, data: Vec<u8>, cache: bool) -> ApiReply 
 }
 
 fn body_for_method(method: &str, body: Vec<u8>) -> Vec<u8> {
-    if method == "HEAD" {
-        Vec::new()
-    } else {
-        body
-    }
+    if method == "HEAD" { Vec::new() } else { body }
 }
 
 fn not_found() -> ApiReply {

@@ -391,15 +391,16 @@ impl PolicyRuntime {
 
         if trust_proxy_headers && is_trusted_proxy(remote_addr.ip(), &trusted_proxy_cidrs) {
             if let Some(xff) = header_value(headers, "x-forwarded-for") {
-                let first = xff.split_once(',').map(|(first, _)| first).unwrap_or(&xff);
+                let first = xff.split_once(',').map_or(xff.as_str(), |(first, _)| first);
                 if let Some(ip) = normalize_client_ip_candidate(first) {
                     return ip;
                 }
             }
             if let Some(xri) = header_value(headers, "x-real-ip")
-                && let Some(ip) = normalize_client_ip_candidate(&xri) {
-                    return ip;
-                }
+                && let Some(ip) = normalize_client_ip_candidate(&xri)
+            {
+                return ip;
+            }
         }
 
         remote_addr.ip().to_string()

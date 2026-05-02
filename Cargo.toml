@@ -1,9 +1,80 @@
 [workspace]
-members = ["crates/portal-relay"]
-resolver = "2"
+members  = ["crates/portal-relay"]
+resolver = "3"
 
 [workspace.package]
-edition = "2024"
-license = "MIT"
-repository = "https://github.com/gosuda/portal-tunnel"
+edition      = "2024"
+rust-version = "1.87"
+license      = "MIT"
+repository   = "https://github.com/gosuda/portal-tunnel"
 
+[workspace.dependencies]
+anyhow              = "1"
+base64              = "0.22"
+bytes               = "1"
+chrono              = { version = "0.4", features = ["serde"] }
+clap                = { version = "4", features = ["derive", "env"] }
+futures-util        = "0.3"
+hex                 = "0.4"
+http-body-util      = "0.1"
+hyper               = { version = "1", features = ["http1", "server"] }
+hyper-util          = { version = "0.1", features = ["tokio"] }
+instant-acme        = "0.8.5"
+ipnet               = "2"
+k256                = { version = "0.13", features = ["ecdsa"] }
+p256                = { version = "0.13", features = ["ecdsa", "pkcs8"] }
+p384                = { version = "0.13", features = ["ecdsa", "pkcs8"] }
+quinn               = { version = "0.11.9", default-features = false, features = ["log", "runtime-tokio", "rustls-ring"] }
+rcgen               = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem"] }
+rand_core           = { version = "0.6", features = ["getrandom"] }
+reqwest             = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rsa                 = { version = "0.9.8", features = ["sha2"] }
+rustls              = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pemfile      = "2"
+sec1                = "0.7"
+serde               = { version = "1", features = ["derive"] }
+serde_json          = { version = "1", features = ["float_roundtrip"] }
+sha2                = "0.10"
+sha3                = "0.10"
+thiserror           = "2"
+tokio               = { version = "1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-util          = { version = "0.7", features = ["compat"] }
+tokio-rustls        = "0.26"
+tracing             = "0.1"
+tracing-subscriber  = { version = "0.3", features = ["env-filter"] }
+url                 = "2"
+wireguard-control   = "1.7"
+rtnetlink           = { version = "0.15", default-features = false, features = ["tokio_socket"] }
+netlink-packet-route = "0.21"
+x25519-dalek        = "2"
+x509-parser         = "0.18"
+yamux               = "0.13.10"
+
+[workspace.lints.rust]
+unused_must_use = "deny"
+unsafe_code     = "forbid"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+cargo    = { level = "warn", priority = -1 }
+# Per-lint allow entries from triage pass:
+multiple_crate_versions   = "allow"  # REASON: transitive deps pulled by quinn/rustls/rand ecosystem; cannot force single version
+match_same_arms           = "allow"  # REASON: protocol dispatch match arms are intentionally enumerated for readability and future divergence
+needless_pass_by_value    = "allow"  # REASON: API boundary types; changing to &str/&T would cascade across all callers
+too_many_lines            = "allow"  # REASON: large async setup and dispatch functions; splitting is an architectural refactor out of scope
+struct_excessive_bools    = "allow"  # REASON: flag structs map directly to protocol fields and CLI args; enum refactor is out of scope
+cast_possible_truncation  = "allow"  # REASON: intentional casts in bandwidth/frame-length arithmetic where values are bounded by protocol limits
+cast_sign_loss            = "allow"  # REASON: intentional sign-discarding casts in bandwidth arithmetic; values are non-negative by invariant
+cast_precision_loss       = "allow"  # REASON: intentional f64 promotion for bandwidth rate calculations; precision loss is acceptable
+cast_possible_wrap        = "allow"  # REASON: unix epoch seconds fit in i64 for centuries; wrap is impossible in practice
+float_cmp                 = "allow"  # REASON: test assertions compare integer-valued floats (0.0, 512.0) where exact equality is correct
+unchecked_time_subtraction = "allow" # REASON: subtraction is guarded by expected > elapsed check one line earlier; checked_sub().unwrap() adds noise
+trivially_copy_pass_by_ref = "allow" # REASON: is_zero_* functions are serde skip_serializing_if callbacks; serde requires fn(&T) -> bool signature
+cargo_common_metadata     = "allow"  # REASON: package.readme is not yet authored; description/keywords/categories are added in this commit
+duration_suboptimal_units = "allow"  # REASON: from_mins/from_hours are not const-stable until 1.91 but our MSRV is 1.87; all uses are in const context
+
+[profile.release]
+lto           = "thin"
+codegen-units = 1
+strip         = "symbols"
+panic         = "unwind"

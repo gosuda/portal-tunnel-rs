@@ -3,15 +3,15 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use anyhow::{bail, Context};
-use base64::engine::general_purpose::STANDARD;
+use anyhow::{Context, bail};
 use base64::Engine;
-use futures_util::future::BoxFuture;
+use base64::engine::general_purpose::STANDARD;
 use futures_util::TryStreamExt;
+use futures_util::future::BoxFuture;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
 use tokio::time;
@@ -23,10 +23,10 @@ use wireguard_control::{
 };
 
 use crate::relay::discovery::RelayDescriptor;
-use crate::relay::hop_mux::{BoxedHopMuxIo, HopMux, HopMuxConnector, HOP_MUX_PORT};
+use crate::relay::hop_mux::{BoxedHopMuxIo, HOP_MUX_PORT, HopMux, HopMuxConnector};
 use crate::state::identity::{
-    derive_wireguard_overlay_ipv4, normalize_wireguard_private_key, validate_wireguard_public_key,
-    wireguard_public_key_from_private_bytes, RelayIdentity,
+    RelayIdentity, derive_wireguard_overlay_ipv4, normalize_wireguard_private_key,
+    validate_wireguard_public_key, wireguard_public_key_from_private_bytes,
 };
 
 pub const WIREGUARD_MTU: usize = 1420;
@@ -83,7 +83,7 @@ impl OverlayConfig {
 }
 
 /// Kernel-WireGuard backed overlay transport. Interface name (`wg-portal`) is
-/// created via netlink at startup; all hop_mux traffic uses the kernel TCP
+/// created via netlink at startup; all `hop_mux` traffic uses the kernel TCP
 /// stack against the overlay address, which avoids the smoltcp/gvisor interop
 /// failure observed when going through `tokio-wireguard`.
 pub const OVERLAY_INTERFACE_NAME: &str = "wg-portal";
@@ -479,7 +479,7 @@ impl OverlayPeerConfigState {
         let resolved = render_resolved_peer_ipc_config(peers, &self.peer_endpoints).await;
         let changed = self.peer_config != resolved.ipc_config;
         if changed {
-            self.peer_config = resolved.ipc_config.clone();
+            self.peer_config.clone_from(&resolved.ipc_config);
         }
         self.peer_endpoints = resolved.endpoints;
         OverlayPeerConfigUpdate {
@@ -617,7 +617,7 @@ fn wireguard_peer_builder(peer: &OverlayRuntimePeer) -> anyhow::Result<PeerConfi
         .set_persistent_keepalive_interval(DEFAULT_PERSISTENT_KEEPALIVE_SECS))
 }
 
-/// Bring the overlay WireGuard link up and assign the overlay address. Idempotent
+/// Bring the overlay `WireGuard` link up and assign the overlay address. Idempotent
 /// across restarts: removes any pre-existing addresses on the interface and
 /// re-adds the desired one so a stale state from a previous run cannot trap us.
 async fn configure_overlay_link_address(
@@ -737,7 +737,7 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use super::*;
-    use crate::relay::discovery::{RelayDescriptor, DISCOVERY_VERSION};
+    use crate::relay::discovery::{DISCOVERY_VERSION, RelayDescriptor};
 
     #[test]
     fn overlay_defaults_match_go_runtime() {
@@ -845,9 +845,11 @@ mod tests {
             "203.0.113.10:51820"
         );
         assert!(resolved.warnings[0].contains("using current endpoint"));
-        assert!(resolved
-            .ipc_config
-            .contains("endpoint=203.0.113.10:51820\n"));
+        assert!(
+            resolved
+                .ipc_config
+                .contains("endpoint=203.0.113.10:51820\n")
+        );
     }
 
     #[tokio::test]

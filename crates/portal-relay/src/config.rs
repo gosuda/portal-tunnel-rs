@@ -1,7 +1,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use clap::Parser;
 use url::Url;
 
@@ -273,11 +273,12 @@ mod tests {
         let mut cfg = base_config();
         cfg.headless_shell_url = "ws://headless-shell:9222".to_string();
 
-        assert!(cfg
-            .normalize()
-            .unwrap_err()
-            .to_string()
-            .contains("thumbnail"));
+        assert!(
+            cfg.normalize()
+                .unwrap_err()
+                .to_string()
+                .contains("thumbnail")
+        );
     }
 
     #[test]
@@ -296,11 +297,12 @@ mod tests {
         let mut cfg = base_config();
         cfg.acme_dns_provider = "cloudflare".to_string();
 
-        assert!(cfg
-            .normalize()
-            .unwrap_err()
-            .to_string()
-            .contains("CLOUDFLARE_TOKEN"));
+        assert!(
+            cfg.normalize()
+                .unwrap_err()
+                .to_string()
+                .contains("CLOUDFLARE_TOKEN")
+        );
     }
 
     #[test]

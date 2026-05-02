@@ -1,7 +1,7 @@
 use hyper::StatusCode;
 
-use crate::api::paths::PATH_INSTALL_BIN_PREFIX;
 use crate::api::ApiReply;
+use crate::api::paths::PATH_INSTALL_BIN_PREFIX;
 
 const INSTALL_SH: &str = include_str!("install.sh");
 const INSTALL_PS1: &str = include_str!("install.ps1");
@@ -75,14 +75,15 @@ fn relay_powershell_script(portal_url: &str, script: &str) -> String {
 
 fn insert_after_shebang(script: &str, prefix: &str) -> String {
     if script.starts_with("#!")
-        && let Some(newline) = script.find('\n') {
-            return format!(
-                "{}{}{}",
-                &script[..newline + 1],
-                prefix,
-                &script[newline + 1..]
-            );
-        }
+        && let Some(newline) = script.find('\n')
+    {
+        return format!(
+            "{}{}{}",
+            &script[..=newline],
+            prefix,
+            &script[newline + 1..]
+        );
+    }
     format!("{prefix}{script}")
 }
 
@@ -116,11 +117,7 @@ fn not_found(method: &str) -> ApiReply {
 }
 
 fn body_for_method(method: &str, body: Vec<u8>) -> Vec<u8> {
-    if method == "HEAD" {
-        Vec::new()
-    } else {
-        body
-    }
+    if method == "HEAD" { Vec::new() } else { body }
 }
 
 #[cfg(test)]

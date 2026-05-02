@@ -2,9 +2,9 @@ use std::fs;
 use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context};
-use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
+use anyhow::{Context, bail};
 use base64::Engine;
+use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use k256::ecdsa::SigningKey;
 use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
@@ -227,7 +227,7 @@ pub(crate) fn normalize_wireguard_private_key(raw: &str) -> anyhow::Result<[u8; 
 }
 
 fn clamp_wireguard_private_key(private: &mut [u8; 32]) {
-    private[0] &= 248;
+    private[0] &= 0xf8;
     private[31] = (private[31] & 127) | 64;
 }
 

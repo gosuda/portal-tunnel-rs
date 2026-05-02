@@ -8,22 +8,22 @@ use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 
-use crate::auth::identity::{lease_hostname, normalize_identity, Identity};
+use crate::auth::identity::{Identity, lease_hostname, normalize_identity};
 use crate::auth::lease_token::{
-    issue_lease_access_token, verify_lease_access_token, LeaseAccessTokenClaims,
+    LeaseAccessTokenClaims, issue_lease_access_token, verify_lease_access_token,
 };
 use crate::auth::siwe::{build_register_message, verify_personal_signature};
 use crate::policy::PolicyRuntime;
 use crate::relay::bridge::RelayMetrics;
-use crate::relay::hop::{owner_address_from_hop_route, HopRoute};
+use crate::relay::hop::{HopRoute, owner_address_from_hop_route};
 use crate::relay::stream::RelayStream;
 use crate::relay::tcp_port::TcpPortRuntime;
 use crate::relay::udp_datagram::UdpDatagramRuntime;
-use crate::state::identity::{derive_wireguard_overlay_ipv4, RelayIdentity};
+use crate::state::identity::{RelayIdentity, derive_wireguard_overlay_ipv4};
 
 const DEFAULT_LEASE_TTL: Duration = Duration::from_secs(30);
-const DEFAULT_REGISTER_CHALLENGE_TTL: Duration = Duration::from_secs(120);
-const DEFAULT_PORT_RESERVATION_GRACE: Duration = Duration::from_secs(300);
+const DEFAULT_REGISTER_CHALLENGE_TTL: Duration = Duration::from_secs(2 * 60);
+const DEFAULT_PORT_RESERVATION_GRACE: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LeaseMetadata {
@@ -646,7 +646,7 @@ impl LeaseRegistry {
                 .ok_or(LeaseError::LeaseNotFound)?;
             lease.expires_at = expires_at;
             lease.last_seen_at = now;
-            lease.client_ip = client_ip.clone();
+            lease.client_ip.clone_from(&client_ip);
             lease.reported_ip = req.reported_ip;
             lease.identity.clone()
         };
@@ -1307,7 +1307,7 @@ mod tests {
 
     use super::*;
     use crate::auth::identity::{address_from_signing_key, compressed_public_key_hex};
-    use crate::relay::discovery::{RelayDescriptor, DISCOVERY_VERSION};
+    use crate::relay::discovery::{DISCOVERY_VERSION, RelayDescriptor};
 
     #[test]
     fn issues_and_verifies_lease_token() {
@@ -1344,7 +1344,7 @@ mod tests {
 
     #[test]
     fn port_allocator_keeps_sticky_reservation() {
-        let mut allocator = PortAllocator::new(5000, 5001, Duration::from_secs(300));
+        let mut allocator = PortAllocator::new(5000, 5001, Duration::from_secs(5 * 60));
         let alice = allocator.allocate("alice").unwrap();
         assert_eq!(alice, 5000);
         allocator.release(alice);
@@ -1779,7 +1779,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires GO_V218_TOKEN env var set from a real v2.1.8 server run"]
     fn verifies_go_v218_issued_lease_token() {
         let token = std::env::var("GO_V218_TOKEN").expect("GO_V218_TOKEN is required");
         let relay = RelayIdentity {
