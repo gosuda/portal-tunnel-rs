@@ -81,6 +81,7 @@ impl DiscoveryState {
                 .build()
                 .expect("reqwest client configuration is valid"),
             relays: Mutex::new(HashMap::new()),
+            announce_limiter: super::AnnounceLimiter::new(),
         }
     }
 

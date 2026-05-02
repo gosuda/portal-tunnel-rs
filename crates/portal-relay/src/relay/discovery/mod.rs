@@ -9,6 +9,7 @@ use crate::relay::bridge::RelayMetrics;
 use crate::relay::overlay::OverlayDiscoveryInfo;
 use crate::state::identity::RelayIdentity;
 
+pub mod announce_limiter;
 pub mod descriptor;
 pub mod http_client;
 pub mod refresh;
@@ -18,6 +19,7 @@ pub mod service;
 #[cfg(test)]
 mod tests;
 
+pub use announce_limiter::AnnounceLimiter;
 pub use descriptor::{RelayDescriptor, canonical_descriptor_bytes, verify_relay_descriptor};
 
 // sign_relay_descriptor is test-only: service.rs imports from super::descriptor directly;
@@ -39,6 +41,7 @@ pub struct DiscoveryState {
     pub(super) metrics: std::sync::Arc<RelayMetrics>,
     pub(super) client: reqwest::Client,
     pub(super) relays: Mutex<HashMap<String, RelayDescriptor>>,
+    pub(crate) announce_limiter: AnnounceLimiter,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

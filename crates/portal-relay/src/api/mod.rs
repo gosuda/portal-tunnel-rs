@@ -123,23 +123,32 @@ pub async fn handle_request(
         (_, PATH_DISCOVERY) => method_not_allowed(),
 
         ("POST", PATH_DISCOVERY_ANNOUNCE) => match &state.discovery {
-            Some(discovery) => match decode_json::<DiscoveryAnnounceRequest>(&body) {
-                Ok(payload) => match discovery.announce(payload, Utc::now()) {
-                    Ok(()) => json_ok(
-                        StatusCode::ACCEPTED,
-                        &DiscoveryAnnounceResponse {
-                            protocol_version: DISCOVERY_VERSION.to_string(),
-                            accepted: true,
-                        },
-                    ),
-                    Err(err) => api_error_reply(
-                        StatusCode::BAD_REQUEST,
-                        "invalid_request",
-                        &err.to_string(),
-                    ),
-                },
-                Err(err) => invalid_json(err),
-            },
+            Some(discovery) => {
+                if !discovery.announce_limiter.allow(&client_ip) {
+                    return api_error_reply(
+                        StatusCode::TOO_MANY_REQUESTS,
+                        "rate_limited",
+                        "announce rate limit exceeded",
+                    );
+                }
+                match decode_json::<DiscoveryAnnounceRequest>(&body) {
+                    Ok(payload) => match discovery.announce(payload, Utc::now()) {
+                        Ok(()) => json_ok(
+                            StatusCode::ACCEPTED,
+                            &DiscoveryAnnounceResponse {
+                                protocol_version: DISCOVERY_VERSION.to_string(),
+                                accepted: true,
+                            },
+                        ),
+                        Err(err) => api_error_reply(
+                            StatusCode::BAD_REQUEST,
+                            "invalid_request",
+                            &err.to_string(),
+                        ),
+                    },
+                    Err(err) => invalid_json(err),
+                }
+            }
             None => api_error_reply(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "feature_unavailable",
