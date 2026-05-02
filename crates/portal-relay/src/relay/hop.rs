@@ -363,4 +363,25 @@ mod tests {
         assert_eq!(verified.first_seen_at, zero - Duration::seconds(30));
         assert_eq!(verified.match_token, "hpt_previous");
     }
+
+    #[test]
+    fn verifies_go_signed_hop_route_fixture() {
+        let route: HopRoute = serde_json::from_str(r#"{"owner_public_key":"0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798","relay_url":"https://rly.best","match_token":"hpt_prev_synthetic","metadata":{},"forward_relay":{"address":"0x1111111111111111111111111111111111111111","version":"6","issued_at":"2023-11-14T22:13:20.123456789Z","expires_at":"2023-11-14T22:18:20.123457776Z","api_https_addr":"https://s-h.day","wireguard_public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","wireguard_port":51820,"supports_overlay":true,"supports_udp":true,"supports_tcp":true,"active_connections":3,"tcp_bps":12.5,"signature":"descriptor-signature-is-not-canonicalized"},"forward_token":"hpt_forward_synthetic","first_seen_at":"2023-11-14T22:17:50.222333444Z","expires_at":"2023-11-14T22:18:20.222333444Z","signature":"304402205088376396f1005075c6c9d0ae707187a25d2d0bd1c5ab33b92eb60dd9d98e3002204e4e97c01af14fb441a906f2ed9deabcb57fc1da37f653d48ccae92c81ca8849"}"#).unwrap();
+
+        verify_hop_route("POST", route).unwrap();
+    }
+
+    #[test]
+    fn verifies_go_signed_hop_route_with_go_json_float_fixture() {
+        let route: HopRoute = serde_json::from_str(r#"{"owner_public_key":"0240b894395b95163678d6999458063196c488b31bda0fae30577a5c7a2eab605f","relay_url":"https://rly.best","match_token":"hpt_NPfWRDJVJ9QeYSFLWLUSNJuCaL2Uw5awhPxZ3M7GbGw","metadata":{},"forward_relay":{"address":"0x9DfAD4dEdaAe5A083e0025546572689E589528B7","version":"7","issued_at":"2026-05-02T04:44:35.854025467Z","expires_at":"2026-05-02T04:49:35.854025467Z","api_https_addr":"https://s-h.day","wireguard_public_key":"SNQ2hEOy+DERc//XvWNT/+nj2HbleFXuZMdecIZRRhM=","wireguard_port":51820,"supports_overlay":true,"supports_udp":true,"supports_tcp":true,"active_connections":472,"tcp_bps":45270.148289023724,"signature":"H5CQNoPzdzxJvGnBABK2NaK83LxJ0JernAoFPc/1N1wXOQoskv71d/aFuoaIAM9Z22ITnMIURjPHf0J6eV8CPfk="},"forward_token":"hpt_uxyk1J9SJeK2RzPsx4SKvnF3ZK3pm-WYnM3OogY5Pwk","first_seen_at":"2026-05-02T04:44:53.273277152Z","expires_at":"2026-05-02T04:45:23.273277152Z","signature":"304402206da725356c71c4a845028b5043c38254934cf7ef031ac60ea1ca50c114cb058702207822238fcf969d1d3f20bd01ce8c8f7ff347ec2a0efb4752b0e2483157542e7f"}"#).unwrap();
+
+        verify_hop_route("POST", route).unwrap();
+    }
+
+    #[test]
+    fn verifies_go_signed_delete_hop_route_fixture() {
+        let route: HopRoute = serde_json::from_str(r#"{"owner_public_key":"0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798","relay_url":"https://rly.best","match_token":"hpt_prev_synthetic","metadata":{},"forward_relay":{"address":"0x1111111111111111111111111111111111111111","version":"6","issued_at":"2023-11-14T22:13:20.123456789Z","expires_at":"2023-11-14T22:18:20.123457776Z","api_https_addr":"https://s-h.day","wireguard_public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","wireguard_port":51820,"supports_overlay":true,"supports_udp":true,"supports_tcp":true,"active_connections":3,"tcp_bps":12.5,"signature":"descriptor-signature-is-not-canonicalized"},"forward_token":"hpt_forward_synthetic","first_seen_at":"0000-12-31T23:59:30Z","expires_at":"0001-01-01T00:00:00Z","signature":"304402204b60cd53c71335cb1bb3b8ef74632314bd13760caf35006abd7a105dca3098d8022008d8de2e6a7aa5f74ce40d6435574e2da11350ee68ce7e847ef241235ae2629e"}"#).unwrap();
+
+        verify_hop_route("DELETE", route).unwrap();
+    }
 }

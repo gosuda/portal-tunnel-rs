@@ -18,7 +18,8 @@ use crate::api::paths::PATH_SDK_CONNECT;
 use crate::config::RelayConfig;
 use crate::policy::PolicyRuntime;
 use crate::relay::bridge::{
-    copy_bidirectional_with_metrics, copy_bidirectional_with_policy_and_metrics, RelayMetrics,
+    copy_bidirectional_with_metrics_and_trace, copy_bidirectional_with_policy_and_metrics,
+    RelayMetrics,
 };
 use crate::relay::discovery::{DiscoveryState, DISCOVERY_POLL_INTERVAL};
 use crate::relay::hop_mux::{HopMux, HopMuxConnector, HopStream};
@@ -36,6 +37,8 @@ use crate::state::tls_material::{load_or_create_tls_material, KeylessSigner};
 const REGISTRY_JANITOR_INTERVAL: Duration = Duration::from_secs(5);
 const HOP_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 const HOP_OPEN_RETRY_WAIT: Duration = Duration::from_millis(250);
+const HOP_PREFETCH_TIMEOUT: Duration = Duration::from_secs(2);
+const HOP_PREFETCH_BUF_SIZE: usize = 16 * 1024;
 
 pub struct AppState {
     pub root_host: String,
@@ -111,6 +114,7 @@ impl Server {
                 .context("configure wireguard overlay")?;
             Some(Arc::new(
                 OverlayRuntime::new(overlay_config)
+                    .await
                     .context("initialize wireguard overlay runtime")?,
             ))
         } else {
@@ -489,14 +493,27 @@ async fn handle_hop_mux_stream(
                 .claim(MARKER_TLS_START)
                 .await
                 .context("claim reverse session")?;
-            let _ = copy_bidirectional_with_policy_and_metrics(
+            match copy_bidirectional_with_policy_and_metrics(
                 &mut stream.stream,
                 &mut reverse,
                 &target.policy,
                 &target.identity_key,
                 Some(metrics.as_ref()),
             )
-            .await;
+            .await
+            {
+                Ok((inbound_to_direct, direct_to_inbound)) => debug!(
+                    remote_addr = %stream.remote_addr,
+                    inbound_to_direct,
+                    direct_to_inbound,
+                    "hop mux direct bridge closed"
+                ),
+                Err(err) => warn!(
+                    remote_addr = %stream.remote_addr,
+                    error = %err,
+                    "hop mux direct bridge failed"
+                ),
+            }
         }
         HopRelayTarget::NextHop(target) => {
             debug!(
@@ -504,6 +521,42 @@ async fn handle_hop_mux_stream(
                 next_overlay_ipv4 = %target.overlay_ipv4,
                 "hop mux stream matched next-hop relay target"
             );
+            let mut first_payload_buf = vec![0u8; HOP_PREFETCH_BUF_SIZE];
+            let first_payload = match tokio::time::timeout(
+                HOP_PREFETCH_TIMEOUT,
+                stream.stream.read(&mut first_payload_buf),
+            )
+            .await
+            {
+                Ok(Ok(n)) => {
+                    debug!(
+                        remote_addr = %stream.remote_addr,
+                        next_overlay_ipv4 = %target.overlay_ipv4,
+                        bytes = n,
+                        "hop mux next-hop prefetched inbound payload"
+                    );
+                    first_payload_buf.truncate(n);
+                    first_payload_buf
+                }
+                Ok(Err(err)) => {
+                    warn!(
+                        remote_addr = %stream.remote_addr,
+                        next_overlay_ipv4 = %target.overlay_ipv4,
+                        error = %err,
+                        "hop mux next-hop prefetch read failed"
+                    );
+                    return Err(err).context("prefetch next-hop inbound payload");
+                }
+                Err(_) => {
+                    debug!(
+                        remote_addr = %stream.remote_addr,
+                        next_overlay_ipv4 = %target.overlay_ipv4,
+                        timeout_ms = HOP_PREFETCH_TIMEOUT.as_millis(),
+                        "hop mux next-hop inbound prefetch timed out"
+                    );
+                    Vec::new()
+                }
+            };
             let mut next = hop_mux
                 .open_stream_with_retry(
                     &target.overlay_ipv4,
@@ -512,9 +565,43 @@ async fn handle_hop_mux_stream(
                     HOP_OPEN_RETRY_WAIT,
                 )
                 .await?;
-            let _ =
-                copy_bidirectional_with_metrics(&mut stream.stream, &mut next, metrics.as_ref())
-                    .await;
+            if !first_payload.is_empty() {
+                next.write_all(&first_payload)
+                    .await
+                    .context("write prefetched hop payload to next hop")?;
+                next.flush()
+                    .await
+                    .context("flush prefetched hop payload to next hop")?;
+                debug!(
+                    remote_addr = %stream.remote_addr,
+                    next_overlay_ipv4 = %target.overlay_ipv4,
+                    bytes = first_payload.len(),
+                    "hop mux next-hop forwarded prefetched payload"
+                );
+            }
+            match copy_bidirectional_with_metrics_and_trace(
+                &mut stream.stream,
+                &mut next,
+                metrics.as_ref(),
+                "hop_middle_inbound_to_next",
+                "hop_middle_next_to_inbound",
+            )
+            .await
+            {
+                Ok((inbound_to_next, next_to_inbound)) => debug!(
+                    remote_addr = %stream.remote_addr,
+                    next_overlay_ipv4 = %target.overlay_ipv4,
+                    inbound_to_next,
+                    next_to_inbound,
+                    "hop mux next-hop bridge closed"
+                ),
+                Err(err) => warn!(
+                    remote_addr = %stream.remote_addr,
+                    next_overlay_ipv4 = %target.overlay_ipv4,
+                    error = %err,
+                    "hop mux next-hop bridge failed"
+                ),
+            }
         }
     }
     Ok(())

@@ -1,20 +1,23 @@
 #![allow(dead_code)]
 
 use anyhow::{bail, Context};
-use futures_util::future::BoxFuture;
-use futures_util::StreamExt;
+use futures_util::future::{poll_fn, BoxFuture};
 use std::collections::HashMap;
 use std::future::Future;
+use std::io;
 use std::net::{IpAddr, SocketAddr};
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context as TaskContext, Poll};
 use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
 use tokio::time;
-use tokio_yamux::{Config, Control, Session, StreamHandle};
+use tokio_util::compat::{Compat, FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
 use tracing::{debug, warn};
+use yamux::{Config, Connection as YamuxConnection, Mode, Stream as YamuxStream};
 
 pub const HOP_MUX_PORT: u16 = 7778;
 pub const MAX_HOP_TOKEN_BYTES: usize = 256;
@@ -26,6 +29,226 @@ pub(crate) trait HopMuxIo: AsyncRead + AsyncWrite + Unpin + Send + 'static {}
 impl<T> HopMuxIo for T where T: AsyncRead + AsyncWrite + Unpin + Send + 'static {}
 
 pub(crate) type BoxedHopMuxIo = Box<dyn HopMuxIo>;
+pub(crate) type StreamHandle = Compat<YamuxStream>;
+type YamuxIo = Compat<BoxedHopMuxIo>;
+
+struct TracedHopMuxIo<I> {
+    inner: I,
+    peer: String,
+    role: &'static str,
+    read_total: u64,
+    write_total: u64,
+    read_frames: Vec<u8>,
+    write_frames: Vec<u8>,
+}
+
+impl<I> TracedHopMuxIo<I> {
+    fn new(inner: I, peer: String, role: &'static str) -> Self {
+        Self {
+            inner,
+            peer,
+            role,
+            read_total: 0,
+            write_total: 0,
+            read_frames: Vec::new(),
+            write_frames: Vec::new(),
+        }
+    }
+}
+
+impl<I> AsyncRead for TracedHopMuxIo<I>
+where
+    I: AsyncRead + Unpin,
+{
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let before = buf.filled().len();
+        match Pin::new(&mut self.inner).poll_read(cx, buf) {
+            Poll::Ready(Ok(())) => {
+                let n = buf.filled().len().saturating_sub(before);
+                if n > 0 {
+                    self.read_total += n as u64;
+                    let bytes = &buf.filled()[before..];
+                    self.read_frames.extend_from_slice(bytes);
+                    let peer = self.peer.clone();
+                    let role = self.role;
+                    parse_hop_mux_frames(&mut self.read_frames, &peer, role, "read");
+                    debug!(
+                        peer = %self.peer,
+                        role = self.role,
+                        bytes = n,
+                        total = self.read_total,
+                        "hop mux raw read"
+                    );
+                } else {
+                    debug!(
+                        peer = %self.peer,
+                        role = self.role,
+                        total = self.read_total,
+                        "hop mux raw read eof"
+                    );
+                }
+                Poll::Ready(Ok(()))
+            }
+            Poll::Ready(Err(err)) => {
+                debug!(
+                    peer = %self.peer,
+                    role = self.role,
+                    total = self.read_total,
+                    error = %err,
+                    "hop mux raw read failed"
+                );
+                Poll::Ready(Err(err))
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl<I> AsyncWrite for TracedHopMuxIo<I>
+where
+    I: AsyncWrite + Unpin,
+{
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        match Pin::new(&mut self.inner).poll_write(cx, buf) {
+            Poll::Ready(Ok(n)) => {
+                if n > 0 {
+                    self.write_total += n as u64;
+                    self.write_frames.extend_from_slice(&buf[..n]);
+                    let peer = self.peer.clone();
+                    let role = self.role;
+                    parse_hop_mux_frames(&mut self.write_frames, &peer, role, "write");
+                    debug!(
+                        peer = %self.peer,
+                        role = self.role,
+                        bytes = n,
+                        total = self.write_total,
+                        "hop mux raw write"
+                    );
+                }
+                Poll::Ready(Ok(n))
+            }
+            Poll::Ready(Err(err)) => {
+                debug!(
+                    peer = %self.peer,
+                    role = self.role,
+                    total = self.write_total,
+                    error = %err,
+                    "hop mux raw write failed"
+                );
+                Poll::Ready(Err(err))
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<io::Result<()>> {
+        match Pin::new(&mut self.inner).poll_flush(cx) {
+            Poll::Ready(Ok(())) => {
+                debug!(
+                    peer = %self.peer,
+                    role = self.role,
+                    total = self.write_total,
+                    "hop mux raw flush"
+                );
+                Poll::Ready(Ok(()))
+            }
+            Poll::Ready(Err(err)) => {
+                debug!(
+                    peer = %self.peer,
+                    role = self.role,
+                    total = self.write_total,
+                    error = %err,
+                    "hop mux raw flush failed"
+                );
+                Poll::Ready(Err(err))
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<io::Result<()>> {
+        match Pin::new(&mut self.inner).poll_shutdown(cx) {
+            Poll::Ready(Ok(())) => {
+                debug!(
+                    peer = %self.peer,
+                    role = self.role,
+                    total = self.write_total,
+                    "hop mux raw shutdown"
+                );
+                Poll::Ready(Ok(()))
+            }
+            Poll::Ready(Err(err)) => {
+                debug!(
+                    peer = %self.peer,
+                    role = self.role,
+                    total = self.write_total,
+                    error = %err,
+                    "hop mux raw shutdown failed"
+                );
+                Poll::Ready(Err(err))
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+fn parse_hop_mux_frames(
+    buf: &mut Vec<u8>,
+    peer: &str,
+    role: &'static str,
+    direction: &'static str,
+) {
+    const HEADER: usize = 12;
+    let mut offset = 0usize;
+    while buf.len().saturating_sub(offset) >= HEADER {
+        let header = &buf[offset..offset + HEADER];
+        let version = header[0];
+        let frame_type = header[1];
+        let flags = u16::from_be_bytes([header[2], header[3]]);
+        let stream_id = u32::from_be_bytes([header[4], header[5], header[6], header[7]]);
+        let length = u32::from_be_bytes([header[8], header[9], header[10], header[11]]);
+        let body_len = if frame_type == 0 { length as usize } else { 0 };
+        let frame_len = HEADER.saturating_add(body_len);
+        if buf.len().saturating_sub(offset) < frame_len {
+            break;
+        }
+        debug!(
+            peer,
+            role,
+            direction,
+            version,
+            frame_type,
+            flags,
+            stream_id,
+            length,
+            frame_len,
+            "hop mux raw frame"
+        );
+        offset += frame_len;
+    }
+
+    if offset > 0 {
+        buf.drain(..offset);
+    }
+    if buf.len() > 1024 * 1024 {
+        debug!(
+            peer,
+            role,
+            direction,
+            buffered = buf.len(),
+            "hop mux raw frame parser buffer cleared"
+        );
+        buf.clear();
+    }
+}
 
 pub(crate) trait HopMuxConnector: Send + Sync + 'static {
     fn connect(&self, overlay_ipv4: &str) -> BoxFuture<'static, anyhow::Result<BoxedHopMuxIo>>;
@@ -66,8 +289,13 @@ pub struct HopStream {
 }
 
 struct OutboundSession {
-    control: Control,
+    commands: mpsc::Sender<OpenStreamCommand>,
     driver: JoinHandle<()>,
+}
+
+struct OpenStreamCommand {
+    token: String,
+    response: oneshot::Sender<anyhow::Result<StreamHandle>>,
 }
 
 impl Drop for OutboundSession {
@@ -107,7 +335,9 @@ impl HopMux {
     where
         I: HopMuxIo,
     {
-        serve_inbound_session(conn, remote_addr, self.incoming_tx.clone()).await;
+        debug!(%remote_addr, "hop mux inbound session accepted");
+        let traced = TracedHopMuxIo::new(conn, remote_addr.clone(), "inbound");
+        serve_inbound_session(traced, remote_addr, self.incoming_tx.clone()).await;
     }
 
     pub async fn accept(&self) -> Option<HopStream> {
@@ -195,26 +425,36 @@ impl HopMux {
         F: FnOnce() -> Fut,
         Fut: Future<Output = anyhow::Result<BoxedHopMuxIo>>,
     {
-        let mut control = self.session_with_connector(session_key, connector).await?;
-        let mut stream = match control.open_stream().await {
-            Ok(stream) => stream,
+        let commands = self.session_with_connector(session_key, connector).await?;
+        let (response, reply) = oneshot::channel();
+        let command = OpenStreamCommand {
+            token: token.trim().to_string(),
+            response,
+        };
+        if commands.send(command).await.is_err() {
+            self.drop_session(session_key).await;
+            bail!("hop mux outbound session closed");
+        }
+        match reply
+            .await
+            .context("hop mux outbound stream reply dropped")?
+        {
+            Ok(stream) => {
+                debug!(session_key, "hop mux outbound stream opened");
+                Ok(stream)
+            }
             Err(err) => {
                 self.drop_session(session_key).await;
-                return Err(anyhow::Error::new(err)).context("open hop mux stream");
+                Err(err)
             }
-        };
-        if let Err(err) = write_hop_token_frame(&mut stream, token).await {
-            self.drop_session(session_key).await;
-            return Err(err).context("write hop mux token frame");
         }
-        Ok(stream)
     }
 
     async fn session_with_connector<F, Fut>(
         &self,
         session_key: &str,
         connector: F,
-    ) -> anyhow::Result<Control>
+    ) -> anyhow::Result<mpsc::Sender<OpenStreamCommand>>
     where
         F: FnOnce() -> Fut,
         Fut: Future<Output = anyhow::Result<BoxedHopMuxIo>>,
@@ -228,7 +468,7 @@ impl HopMux {
             if let Some(existing) = outbound.get(session_key) {
                 if !existing.driver.is_finished() {
                     debug!(session_key, "reusing hop mux outbound session");
-                    return Ok(existing.control.clone());
+                    return Ok(existing.commands.clone());
                 }
             }
             outbound.remove(session_key);
@@ -242,13 +482,19 @@ impl HopMux {
                 return Err(err);
             }
         };
-        let mut session = Session::new_client(conn, hop_yamux_config());
-        let control = session.control();
+        let conn = Box::new(TracedHopMuxIo::new(
+            conn,
+            session_key.to_string(),
+            "outbound",
+        )) as BoxedHopMuxIo;
+        let session = YamuxConnection::new(conn.compat(), hop_yamux_config(), Mode::Client);
+        let (commands, command_rx) = mpsc::channel(32);
+        let driver_session_key = session_key.to_string();
         let driver = tokio::spawn(async move {
-            drive_outbound_session(&mut session).await;
+            drive_outbound_session(driver_session_key, session, command_rx).await;
         });
         let candidate = OutboundSession {
-            control: control.clone(),
+            commands: commands.clone(),
             driver,
         };
 
@@ -256,12 +502,12 @@ impl HopMux {
         if let Some(existing) = outbound.get(session_key) {
             if !existing.driver.is_finished() {
                 debug!(session_key, "using concurrent hop mux outbound session");
-                return Ok(existing.control.clone());
+                return Ok(existing.commands.clone());
             }
         }
         outbound.insert(session_key.to_string(), candidate);
         debug!(session_key, "hop mux outbound session ready");
-        Ok(control)
+        Ok(commands)
     }
 
     async fn drop_session(&self, session_key: &str) {
@@ -281,16 +527,14 @@ where
     if payload.len() > MAX_HOP_TOKEN_BYTES {
         bail!("next hop token is too large");
     }
-    let mut header = [0u8; 4];
-    header.copy_from_slice(&(payload.len() as u32).to_be_bytes());
+    let mut frame = Vec::with_capacity(4 + payload.len());
+    frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+    frame.extend_from_slice(payload);
     writer
-        .write_all(&header)
+        .write_all(&frame)
         .await
-        .context("write hop token frame length")?;
-    writer
-        .write_all(payload)
-        .await
-        .context("write hop token frame payload")?;
+        .context("write hop token frame")?;
+    writer.flush().await.context("flush hop token frame")?;
     Ok(())
 }
 
@@ -326,14 +570,17 @@ async fn serve_inbound_session<I>(conn: I, remote_addr: String, incoming: mpsc::
 where
     I: HopMuxIo,
 {
-    let mut session = Session::new_server(conn, hop_yamux_config());
-    while let Some(result) = session.next().await {
+    let conn = Box::new(conn) as BoxedHopMuxIo;
+    let mut session = YamuxConnection::new(conn.compat(), hop_yamux_config(), Mode::Server);
+    debug!(%remote_addr, "hop mux inbound yamux session started");
+    while let Some(result) = poll_fn(|cx| session.poll_next_inbound(cx)).await {
         match result {
             Ok(stream) => {
+                debug!(%remote_addr, "hop mux inbound stream opened");
                 let incoming = incoming.clone();
                 let remote_addr = remote_addr.clone();
                 tokio::spawn(async move {
-                    handle_inbound_stream(stream, remote_addr, incoming).await;
+                    handle_inbound_stream(stream.compat(), remote_addr, incoming).await;
                 });
             }
             Err(err) => {
@@ -374,28 +621,74 @@ async fn handle_inbound_stream(
         .is_err()
     {
         warn!("hop mux stream dropped because accept queue is closed");
+    } else {
+        debug!("hop mux inbound stream queued");
     }
 }
 
-async fn drive_outbound_session(session: &mut Session<BoxedHopMuxIo>) {
-    while let Some(result) = session.next().await {
-        match result {
-            Ok(mut stream) => {
-                let _ = stream.shutdown().await;
+async fn drive_outbound_session(
+    session_key: String,
+    mut session: YamuxConnection<YamuxIo>,
+    mut commands: mpsc::Receiver<OpenStreamCommand>,
+) {
+    loop {
+        tokio::select! {
+            command = commands.recv() => {
+                let Some(command) = command else {
+                    let _ = poll_fn(|cx| session.poll_close(cx)).await;
+                    debug!(session_key, "outbound hop mux session command channel closed");
+                    return;
+                };
+                handle_outbound_open(&session_key, &mut session, command).await;
             }
-            Err(err) => {
-                debug!(error = %err, "outbound hop mux session closed");
-                return;
+            inbound = poll_fn(|cx| session.poll_next_inbound(cx)) => {
+                match inbound {
+                    Some(Ok(stream)) => {
+                        let mut stream = stream.compat();
+                        let _ = stream.shutdown().await;
+                    }
+                    Some(Err(err)) => {
+                        debug!(session_key, error = %err, "outbound hop mux session closed");
+                        return;
+                    }
+                    None => {
+                        debug!(session_key, "outbound hop mux session closed");
+                        return;
+                    }
+                }
             }
         }
     }
 }
 
-fn hop_yamux_config() -> Config {
-    Config {
-        max_stream_window_size: MAX_STREAM_WINDOW_SIZE,
-        ..Config::default()
+async fn handle_outbound_open(
+    session_key: &str,
+    session: &mut YamuxConnection<YamuxIo>,
+    command: OpenStreamCommand,
+) {
+    let result = async {
+        let mut stream = poll_fn(|cx| session.poll_new_outbound(cx))
+            .await
+            .context("open hop mux stream")?
+            .compat();
+        write_hop_token_frame(&mut stream, &command.token)
+            .await
+            .context("write hop mux token frame")?;
+        Ok(stream)
     }
+    .await;
+
+    if result.is_err() {
+        debug!(session_key, "open hop mux outbound stream failed");
+    }
+    let _ = command.response.send(result);
+}
+
+fn hop_yamux_config() -> Config {
+    let mut config = Config::default();
+    config.set_split_send_size(1200);
+    config.set_max_connection_receive_window(None);
+    config
 }
 
 #[cfg(test)]

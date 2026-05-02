@@ -713,52 +713,71 @@ fn validate_wireguard_public_key(raw: &str) -> anyhow::Result<()> {
 }
 
 pub fn canonical_descriptor_bytes(desc: &RelayDescriptor) -> anyhow::Result<Vec<u8>> {
-    #[derive(Serialize)]
-    struct Canonical<'a> {
-        address: &'a str,
-        version: &'a str,
-        issued_at_unix_nano: i64,
-        expires_at_unix_nano: i64,
-        api_https_addr: &'a str,
-        wireguard_public_key: &'a str,
-        wireguard_port: i64,
-        supports_overlay: bool,
-        supports_udp: bool,
-        supports_tcp: bool,
-        active_connections: i64,
-        tcp_bps: serde_json::Value,
-    }
-
-    serde_json::to_vec(&Canonical {
-        address: desc.address.trim(),
-        version: desc.version.trim(),
-        issued_at_unix_nano: desc
-            .issued_at
-            .timestamp_nanos_opt()
-            .context("issued_at out of range")?,
-        expires_at_unix_nano: desc
-            .expires_at
-            .timestamp_nanos_opt()
-            .context("expires_at out of range")?,
-        api_https_addr: desc.api_https_addr.trim(),
-        wireguard_public_key: desc.wireguard_public_key.trim(),
-        wireguard_port: desc.wireguard_port,
-        supports_overlay: desc.supports_overlay,
-        supports_udp: desc.supports_udp,
-        supports_tcp: desc.supports_tcp,
-        active_connections: desc.active_connections,
-        tcp_bps: go_json_float(desc.tcp_bps),
-    })
-    .context("encode canonical relay descriptor")
+    let issued_at_unix_nano = desc
+        .issued_at
+        .timestamp_nanos_opt()
+        .context("issued_at out of range")?;
+    let expires_at_unix_nano = desc
+        .expires_at
+        .timestamp_nanos_opt()
+        .context("expires_at out of range")?;
+    let json = format!(
+        concat!(
+            "{{",
+            "\"address\":{},",
+            "\"version\":{},",
+            "\"issued_at_unix_nano\":{},",
+            "\"expires_at_unix_nano\":{},",
+            "\"api_https_addr\":{},",
+            "\"wireguard_public_key\":{},",
+            "\"wireguard_port\":{},",
+            "\"supports_overlay\":{},",
+            "\"supports_udp\":{},",
+            "\"supports_tcp\":{},",
+            "\"active_connections\":{},",
+            "\"tcp_bps\":{}",
+            "}}"
+        ),
+        json_string(desc.address.trim()),
+        json_string(desc.version.trim()),
+        issued_at_unix_nano,
+        expires_at_unix_nano,
+        json_string(desc.api_https_addr.trim()),
+        json_string(desc.wireguard_public_key.trim()),
+        desc.wireguard_port,
+        desc.supports_overlay,
+        desc.supports_udp,
+        desc.supports_tcp,
+        desc.active_connections,
+        go_json_float(desc.tcp_bps),
+    );
+    Ok(json.into_bytes())
 }
 
-fn go_json_float(value: f64) -> serde_json::Value {
-    if value.is_finite() && value.fract() == 0.0 {
-        return serde_json::Value::Number(serde_json::Number::from(value as i64));
+fn json_string(value: &str) -> String {
+    serde_json::to_string(value).expect("json string serialization cannot fail")
+}
+
+fn go_json_float(value: f64) -> String {
+    if !value.is_finite() {
+        return "0".to_string();
     }
-    serde_json::Number::from_f64(value)
-        .map(serde_json::Value::Number)
-        .unwrap_or_else(|| serde_json::Value::Number(serde_json::Number::from(0)))
+
+    let abs = value.abs();
+    if abs != 0.0 && !(1e-6..1e21).contains(&abs) {
+        let raw = format!("{value:e}");
+        if let Some((mantissa, exponent)) = raw.split_once('e') {
+            let exponent = if exponent.starts_with('-') || exponent.starts_with('+') {
+                exponent.to_string()
+            } else {
+                format!("+{exponent}")
+            };
+            return format!("{mantissa}e{exponent}");
+        }
+        return raw;
+    }
+
+    format!("{value}")
 }
 
 fn is_zero_i64(value: &i64) -> bool {
@@ -860,6 +879,36 @@ mod tests {
             String::from_utf8(canonical_descriptor_bytes(&desc).unwrap()).unwrap(),
             "{\"address\":\"0xabc\",\"version\":\"7\",\"issued_at_unix_nano\":1000000002,\"expires_at_unix_nano\":3000000004,\"api_https_addr\":\"https://relay.example\",\"wireguard_public_key\":\"\",\"wireguard_port\":0,\"supports_overlay\":false,\"supports_udp\":true,\"supports_tcp\":false,\"active_connections\":0,\"tcp_bps\":0}"
         );
+    }
+
+    #[test]
+    fn canonical_descriptor_formats_tcp_bps_like_go_json() {
+        let mut desc = RelayDescriptor {
+            address: "0xabc".to_string(),
+            version: "7".to_string(),
+            issued_at: Utc.timestamp_opt(1, 2).unwrap(),
+            expires_at: Utc.timestamp_opt(3, 4).unwrap(),
+            api_https_addr: "https://relay.example".to_string(),
+            wireguard_public_key: String::new(),
+            wireguard_port: 0,
+            supports_overlay: false,
+            supports_udp: false,
+            supports_tcp: true,
+            active_connections: 0,
+            tcp_bps: 45270.148289023724,
+            signature: String::new(),
+        };
+
+        let canonical = String::from_utf8(canonical_descriptor_bytes(&desc).unwrap()).unwrap();
+        assert!(canonical.contains("\"tcp_bps\":45270.148289023724"));
+
+        desc.tcp_bps = 1e-9;
+        let canonical = String::from_utf8(canonical_descriptor_bytes(&desc).unwrap()).unwrap();
+        assert!(canonical.contains("\"tcp_bps\":1e-9"));
+
+        desc.tcp_bps = 1e21;
+        let canonical = String::from_utf8(canonical_descriptor_bytes(&desc).unwrap()).unwrap();
+        assert!(canonical.contains("\"tcp_bps\":1e+21"));
     }
 
     #[test]

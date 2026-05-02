@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -9,21 +11,16 @@ use anyhow::{bail, Context};
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use futures_util::future::BoxFuture;
-use ipnet::{IpNet, Ipv4Net};
+use futures_util::TryStreamExt;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
 use tokio::time;
-use tokio_wireguard::config::{
-    Address as WireGuardAddress, Config as WireGuardConfig, Interface as WireGuardInterfaceConfig,
-    Peer as WireGuardPeerConfig,
-};
-use tokio_wireguard::x25519::{
-    PublicKey as WireGuardPublicKey, StaticSecret as WireGuardStaticSecret,
-};
-use tokio_wireguard::{
-    Interface as WireGuardInterface, TcpListener as WireGuardTcpListener,
-    TcpStream as WireGuardTcpStream,
-};
 use tracing::{debug, info, warn};
+use wireguard_control::{
+    AllowedIp as WgAllowedIp, Backend as WgBackend, Device as WgDevice,
+    DeviceUpdate as WgDeviceUpdate, InterfaceName as WgInterfaceName, Key as WgKey,
+    PeerConfigBuilder,
+};
 
 use crate::relay::discovery::RelayDescriptor;
 use crate::relay::hop_mux::{BoxedHopMuxIo, HopMux, HopMuxConnector, HOP_MUX_PORT};
@@ -85,10 +82,17 @@ impl OverlayConfig {
     }
 }
 
+/// Kernel-WireGuard backed overlay transport. Interface name (`wg-portal`) is
+/// created via netlink at startup; all hop_mux traffic uses the kernel TCP
+/// stack against the overlay address, which avoids the smoltcp/gvisor interop
+/// failure observed when going through `tokio-wireguard`.
+pub const OVERLAY_INTERFACE_NAME: &str = "wg-portal";
+
 pub struct OverlayRuntime {
     config: OverlayConfig,
-    interface: WireGuardInterface,
+    interface_name: WgInterfaceName,
     peers: tokio::sync::Mutex<HashMap<String, OverlayRuntimePeer>>,
+    closed: AtomicBool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,40 +118,54 @@ impl OverlayPeerSyncStats {
 }
 
 impl OverlayRuntime {
-    pub fn new(config: OverlayConfig) -> anyhow::Result<Self> {
+    pub async fn new(config: OverlayConfig) -> anyhow::Result<Self> {
         let _handle = tokio::runtime::Handle::try_current()
             .context("wireguard overlay requires a Tokio runtime")?;
         let private_key = normalize_wireguard_private_key(&config.private_key)
             .context("normalize overlay wireguard private key")?;
-        let address = Ipv4Net::new(config.overlay_ipv4, 32)
-            .context("build overlay wireguard interface address")?;
-        let interface = WireGuardInterface::new(WireGuardConfig {
-            interface: WireGuardInterfaceConfig {
-                address: WireGuardAddress::from(address),
-                listen_port: Some(config.listen_port),
-                private_key: WireGuardStaticSecret::from(private_key),
-                mtu: Some(WIREGUARD_MTU),
-            },
-            peers: Vec::new(),
-        })
-        .with_context(|| {
-            format!(
-                "create wireguard overlay interface on udp port {}",
-                config.listen_port
-            )
+        let interface_name = WgInterfaceName::from_str(OVERLAY_INTERFACE_NAME).map_err(|err| {
+            anyhow::anyhow!("invalid wireguard interface name: {err}")
         })?;
+
+        // Configure kernel WireGuard. wireguard-control's apply() will create
+        // the link via netlink RTM_NEWLINK if it doesn't exist yet, then push
+        // the private key + listen port via the WG generic netlink family.
+        WgDeviceUpdate::new()
+            .set_private_key(WgKey(private_key))
+            .set_listen_port(config.listen_port)
+            .replace_peers()
+            .apply(&interface_name, WgBackend::Kernel)
+            .with_context(|| {
+                format!(
+                    "configure kernel wireguard interface {OVERLAY_INTERFACE_NAME} on udp port {}",
+                    config.listen_port
+                )
+            })?;
+
+        // Bring the interface up and assign the overlay address using rtnetlink.
+        configure_overlay_link_address(&interface_name, config.overlay_ipv4)
+            .await
+            .with_context(|| {
+                format!(
+                    "configure overlay address {} on {OVERLAY_INTERFACE_NAME}",
+                    config.overlay_ipv4
+                )
+            })?;
+
         info!(
             overlay_ipv4 = %config.overlay_ipv4,
             wireguard_port = config.listen_port,
             wireguard_public_key = %config.public_key,
+            wireguard_interface = OVERLAY_INTERFACE_NAME,
             mtu = WIREGUARD_MTU,
             "wireguard overlay runtime ready"
         );
 
         Ok(Self {
             config,
-            interface,
+            interface_name,
             peers: tokio::sync::Mutex::new(HashMap::new()),
+            closed: AtomicBool::new(false),
         })
     }
 
@@ -167,7 +185,7 @@ impl OverlayRuntime {
         hop_mux: Arc<HopMux>,
     ) -> anyhow::Result<JoinHandle<()>> {
         let addr = SocketAddr::new(IpAddr::V4(self.overlay_ipv4()), HOP_MUX_PORT);
-        let listener = WireGuardTcpListener::bind(addr, self.interface.clone())
+        let listener = TcpListener::bind(addr)
             .await
             .with_context(|| format!("listen overlay hop mux on {addr}"))?;
         info!(overlay_addr = %addr, "overlay hop mux listener ready");
@@ -177,10 +195,17 @@ impl OverlayRuntime {
         }))
     }
 
-    async fn serve_hop_mux(self: Arc<Self>, listener: WireGuardTcpListener, hop_mux: Arc<HopMux>) {
+    async fn serve_hop_mux(self: Arc<Self>, listener: TcpListener, hop_mux: Arc<HopMux>) {
         loop {
             match listener.accept().await {
                 Ok((conn, remote_addr)) => {
+                    // Hop_mux yamux pings/ACKs are tiny; disable Nagle so the kernel
+                    // doesn't hold them. Buffering bigger frames is fine, the ones
+                    // that matter for multi-hop liveness are sub-MSS.
+                    if let Err(err) = conn.set_nodelay(true) {
+                        warn!(remote_addr = %remote_addr, error = %err, "overlay hop mux tcp set_nodelay failed");
+                    }
+                    debug!(remote_addr = %remote_addr, "overlay hop mux tcp stream accepted");
                     let hop_mux = Arc::clone(&hop_mux);
                     tokio::spawn(async move {
                         hop_mux
@@ -188,7 +213,7 @@ impl OverlayRuntime {
                             .await;
                     });
                 }
-                Err(err) if self.interface.is_closed() => {
+                Err(err) if self.is_closed() => {
                     debug!(error = %err, "overlay hop mux listener closed");
                     return;
                 }
@@ -198,6 +223,10 @@ impl OverlayRuntime {
                 }
             }
         }
+    }
+
+    fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::Relaxed)
     }
 
     pub async fn sync_peers(&self, peers: &[OverlayPeer]) -> anyhow::Result<OverlayPeerSyncStats> {
@@ -212,64 +241,76 @@ impl OverlayRuntime {
             .collect::<HashMap<_, _>>();
         let mut configured = self.peers.lock().await;
 
-        let configured_keys = configured.keys().cloned().collect::<Vec<_>>();
-        for public_key in configured_keys {
-            if desired.contains_key(&public_key) {
+        let mut update = WgDeviceUpdate::new();
+        let mut removed = Vec::new();
+        let mut added = Vec::new();
+        let mut updated = Vec::new();
+
+        for (public_key, _) in configured.iter() {
+            if desired.contains_key(public_key) {
                 continue;
             }
-            let key = wireguard_public_key(&public_key)?;
-            self.interface
-                .remove_peer(&key)
-                .await
-                .with_context(|| format!("remove overlay peer {public_key}"))?;
-            configured.remove(&public_key);
-            stats.removed += 1;
-            info!(
-                wireguard_public_key = %public_key,
-                "overlay peer removed"
-            );
+            let key = wireguard_key(public_key)?;
+            update = update.remove_peer_by_key(&key);
+            removed.push(public_key.clone());
         }
 
         let mut desired_peers = desired.into_values().collect::<Vec<_>>();
         desired_peers.sort_by(|a, b| a.public_key.cmp(&b.public_key));
-        for peer in desired_peers {
+        for peer in &desired_peers {
             match configured.get(&peer.public_key) {
-                Some(existing) if existing == &peer => {
+                Some(existing) if existing == peer => {
                     stats.unchanged += 1;
                 }
                 Some(_) => {
-                    let key = wireguard_public_key(&peer.public_key)?;
-                    self.interface
-                        .remove_peer(&key)
-                        .await
-                        .with_context(|| format!("replace overlay peer {}", peer.public_key))?;
-                    self.interface
-                        .add_peer(wireguard_peer_config(&peer)?)
-                        .await
-                        .with_context(|| format!("add overlay peer {}", peer.public_key))?;
-                    info!(
-                        wireguard_public_key = %peer.public_key,
-                        endpoint = %peer.endpoint,
-                        allowed_ip = %peer.allowed_ip,
-                        "overlay peer updated"
-                    );
-                    configured.insert(peer.public_key.clone(), peer);
-                    stats.updated += 1;
+                    update = update.add_peer(wireguard_peer_builder(peer)?);
+                    updated.push(peer.public_key.clone());
                 }
                 None => {
-                    self.interface
-                        .add_peer(wireguard_peer_config(&peer)?)
-                        .await
-                        .with_context(|| format!("add overlay peer {}", peer.public_key))?;
-                    info!(
-                        wireguard_public_key = %peer.public_key,
-                        endpoint = %peer.endpoint,
-                        allowed_ip = %peer.allowed_ip,
-                        "overlay peer added"
-                    );
-                    configured.insert(peer.public_key.clone(), peer);
-                    stats.added += 1;
+                    update = update.add_peer(wireguard_peer_builder(peer)?);
+                    added.push(peer.public_key.clone());
                 }
+            }
+        }
+
+        if removed.is_empty() && added.is_empty() && updated.is_empty() {
+            return Ok(stats);
+        }
+
+        // wireguard-control merges these into a single WG_CMD_SET_DEVICE call.
+        update
+            .apply(&self.interface_name, WgBackend::Kernel)
+            .with_context(|| {
+                format!(
+                    "apply wireguard peer update on {}",
+                    self.interface_name.as_str_lossy()
+                )
+            })?;
+
+        for key in removed {
+            configured.remove(&key);
+            stats.removed += 1;
+            info!(wireguard_public_key = %key, "overlay peer removed");
+        }
+        for peer in desired_peers {
+            if added.contains(&peer.public_key) {
+                info!(
+                    wireguard_public_key = %peer.public_key,
+                    endpoint = %peer.endpoint,
+                    allowed_ip = %peer.allowed_ip,
+                    "overlay peer added"
+                );
+                stats.added += 1;
+                configured.insert(peer.public_key.clone(), peer);
+            } else if updated.contains(&peer.public_key) {
+                info!(
+                    wireguard_public_key = %peer.public_key,
+                    endpoint = %peer.endpoint,
+                    allowed_ip = %peer.allowed_ip,
+                    "overlay peer updated"
+                );
+                stats.updated += 1;
+                configured.insert(peer.public_key.clone(), peer);
             }
         }
 
@@ -327,13 +368,19 @@ impl OverlayRuntime {
 
 impl Drop for OverlayRuntime {
     fn drop(&mut self) {
-        self.interface.close();
+        self.closed.store(true, Ordering::Relaxed);
+        // Best effort: tear down the kernel WG interface so a subsequent process
+        // start gets a clean slate. Ignore errors (the interface may already be
+        // gone or the kernel may not have CAP_NET_ADMIN delegated, which is also
+        // fine because the next startup re-applies state).
+        if let Ok(device) = WgDevice::get(&self.interface_name, WgBackend::Kernel) {
+            let _ = device.delete();
+        }
     }
 }
 
 impl HopMuxConnector for OverlayRuntime {
     fn connect(&self, overlay_ipv4: &str) -> BoxFuture<'static, anyhow::Result<BoxedHopMuxIo>> {
-        let interface = self.interface.clone();
         let overlay_ipv4 = overlay_ipv4.trim().to_string();
         Box::pin(async move {
             if overlay_ipv4.is_empty() {
@@ -344,9 +391,12 @@ impl HopMuxConnector for OverlayRuntime {
                 .context("next hop overlay ipv4 must be an IP address")?;
             let addr = SocketAddr::new(ip, HOP_MUX_PORT);
             debug!(overlay_addr = %addr, "opening overlay hop mux tcp stream");
-            let stream = WireGuardTcpStream::connect(addr, interface)
+            let stream = TcpStream::connect(addr)
                 .await
                 .with_context(|| format!("connect overlay hop mux peer at {addr}"))?;
+            if let Err(err) = stream.set_nodelay(true) {
+                warn!(overlay_addr = %addr, error = %err, "overlay hop mux tcp set_nodelay failed");
+            }
             debug!(overlay_addr = %addr, "overlay hop mux tcp stream connected");
             Ok(Box::new(stream) as BoxedHopMuxIo)
         })
@@ -546,24 +596,93 @@ fn wireguard_key_hex(raw: &str) -> anyhow::Result<String> {
     Ok(hex::encode(decoded))
 }
 
-fn wireguard_public_key(raw: &str) -> anyhow::Result<WireGuardPublicKey> {
+fn wireguard_key(raw: &str) -> anyhow::Result<WgKey> {
     let decoded = STANDARD
         .decode(raw.trim())
-        .context("wireguard public key must be base64 encoded")?;
+        .context("wireguard key must be base64 encoded")?;
     let bytes: [u8; 32] = decoded
         .try_into()
-        .map_err(|_| anyhow::anyhow!("wireguard public key must be 32 bytes"))?;
-    Ok(WireGuardPublicKey::from(bytes))
+        .map_err(|_| anyhow::anyhow!("wireguard key must be 32 bytes"))?;
+    Ok(WgKey(bytes))
 }
 
-fn wireguard_peer_config(peer: &OverlayRuntimePeer) -> anyhow::Result<WireGuardPeerConfig> {
-    let allowed_ip = Ipv4Net::new(peer.allowed_ip, 32).context("build overlay peer allowed ip")?;
-    Ok(WireGuardPeerConfig {
-        endpoint: Some(peer.endpoint),
-        allowed_ips: vec![IpNet::V4(allowed_ip)],
-        public_key: wireguard_public_key(&peer.public_key)?,
-        persistent_keepalive: Some(DEFAULT_PERSISTENT_KEEPALIVE_SECS),
-    })
+fn wireguard_peer_builder(peer: &OverlayRuntimePeer) -> anyhow::Result<PeerConfigBuilder> {
+    let public = wireguard_key(&peer.public_key)?;
+    let allowed = WgAllowedIp {
+        address: IpAddr::V4(peer.allowed_ip),
+        cidr: 32,
+    };
+    Ok(PeerConfigBuilder::new(&public)
+        .set_endpoint(peer.endpoint)
+        .add_allowed_ip(allowed.address, allowed.cidr)
+        .set_persistent_keepalive_interval(DEFAULT_PERSISTENT_KEEPALIVE_SECS))
+}
+
+/// Bring the overlay WireGuard link up and assign the overlay address. Idempotent
+/// across restarts: removes any pre-existing addresses on the interface and
+/// re-adds the desired one so a stale state from a previous run cannot trap us.
+async fn configure_overlay_link_address(
+    interface_name: &WgInterfaceName,
+    overlay_ipv4: Ipv4Addr,
+) -> anyhow::Result<()> {
+    let (connection, handle, _) =
+        rtnetlink::new_connection().context("open netlink connection")?;
+    tokio::spawn(connection);
+
+    let name = interface_name.as_str_lossy().to_string();
+    let mut links = handle.link().get().match_name(name.clone()).execute();
+    let link = links
+        .try_next()
+        .await
+        .with_context(|| format!("look up wg link {name}"))?
+        .with_context(|| format!("wg link {name} not present after wireguard-control apply"))?;
+    let link_index = link.header.index;
+
+    // Strip any existing addresses (covers crash-restart scenarios where the
+    // wg link survives but the IP is stale).
+    let mut existing = handle
+        .address()
+        .get()
+        .set_link_index_filter(link_index)
+        .execute();
+    while let Some(addr) = existing
+        .try_next()
+        .await
+        .with_context(|| format!("enumerate existing addresses on {name}"))?
+    {
+        handle
+            .address()
+            .del(addr)
+            .execute()
+            .await
+            .with_context(|| format!("remove stale address on {name}"))?;
+    }
+
+    // Assign with the full CGNAT prefix so the kernel auto-installs a route
+    // for the entire overlay (100.64.0.0/10) via wg-portal. Without this route,
+    // packets destined to peers' overlay IPs follow the default route on eth0
+    // and never enter the WireGuard interface (we observed that as silent
+    // unreachability for ping/TCP to other relays' overlay addresses).
+    handle
+        .address()
+        .add(link_index, IpAddr::V4(overlay_ipv4), 10)
+        .execute()
+        .await
+        .with_context(|| format!("add overlay address {overlay_ipv4}/10 on {name}"))?;
+
+    handle
+        .link()
+        .set(
+            rtnetlink::LinkUnspec::new_with_index(link_index)
+                .mtu(WIREGUARD_MTU as u32)
+                .up()
+                .build(),
+        )
+        .execute()
+        .await
+        .with_context(|| format!("set link up + mtu on {name}"))?;
+
+    Ok(())
 }
 
 fn join_host_port(host: &str, port: u16) -> String {
@@ -758,13 +877,14 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires CAP_NET_ADMIN to bring up the kernel wg interface"]
     async fn overlay_runtime_builds_wireguard_interface_metadata() {
         let identity = overlay_identity(
             "relay-a.example",
             "0100000000000000000000000000000000000000000000000000000000000000",
         );
         let cfg = OverlayConfig::from_identity(&identity, free_udp_port()).unwrap();
-        let runtime = OverlayRuntime::new(cfg.clone()).unwrap();
+        let runtime = OverlayRuntime::new(cfg.clone()).await.unwrap();
 
         assert_eq!(runtime.overlay_ipv4(), cfg.overlay_ipv4);
         assert_eq!(
@@ -777,7 +897,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[ignore = "requires tokio-wireguard data-path validation"]
+    #[ignore = "requires CAP_NET_ADMIN and a running kernel WG module"]
     async fn overlay_runtime_carries_hop_mux_streams() {
         let identity_a = overlay_identity(
             "relay-a.example",
@@ -789,8 +909,8 @@ mod tests {
         );
         let cfg_a = OverlayConfig::from_identity(&identity_a, free_udp_port()).unwrap();
         let cfg_b = OverlayConfig::from_identity(&identity_b, free_udp_port()).unwrap();
-        let runtime_a = Arc::new(OverlayRuntime::new(cfg_a.clone()).unwrap());
-        let runtime_b = Arc::new(OverlayRuntime::new(cfg_b.clone()).unwrap());
+        let runtime_a = Arc::new(OverlayRuntime::new(cfg_a.clone()).await.unwrap());
+        let runtime_b = Arc::new(OverlayRuntime::new(cfg_b.clone()).await.unwrap());
         let peer_a = OverlayPeer::from_descriptor(&overlay_descriptor_with_key(
             "https://127.0.0.1",
             &cfg_a.public_key,

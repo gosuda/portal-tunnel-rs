@@ -9,7 +9,7 @@ use k256::ecdsa::SigningKey;
 use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio_wireguard::x25519::{PublicKey as X25519PublicKey, StaticSecret};
+use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret};
 
 use crate::auth::identity::{address_from_signing_key, compressed_public_key_hex};
 

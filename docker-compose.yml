@@ -6,6 +6,12 @@ services:
     image: portal-relay-rs:local
     restart: unless-stopped
     stop_grace_period: 30s
+    # CAP_NET_ADMIN: required so the relay can create and configure the kernel
+    # WireGuard overlay interface (the multi-hop hop_mux runs on it).
+    # CAP_NET_BIND_SERVICE: bind 443 as non-root.
+    cap_add:
+      - NET_ADMIN
+      - NET_BIND_SERVICE
     ports:
       - "${API_PORT:-4017}:${API_PORT:-4017}"
       - "${SNI_PORT:-443}:${SNI_PORT:-443}"
@@ -29,7 +35,7 @@ services:
       LANDING_PAGE_ENABLED: ${LANDING_PAGE_ENABLED:-true}
       WIREGUARD_PORT: ${WIREGUARD_PORT:-51820}
       BOOTSTRAPS: ${BOOTSTRAPS:-}
-      RUST_LOG: ${RUST_LOG:-portal_relay=debug,tokio_wireguard=info,info}
+      RUST_LOG: ${RUST_LOG:-portal_relay=debug,info}
     volumes:
       - portal-certs:/portal-certs
 

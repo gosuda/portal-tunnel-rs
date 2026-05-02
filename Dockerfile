@@ -44,7 +44,9 @@ RUN --mount=type=cache,id=portal-cargo-registry,target=/usr/local/cargo/registry
     rustup target add "$rust_target"; \
     cargo build --release --locked --target "$rust_target" --bin portal-relay; \
     cp "/src/target/$rust_target/release/portal-relay" /usr/local/bin/portal-relay; \
-    setcap cap_net_bind_service=+ep /usr/local/bin/portal-relay; \
+    # cap_net_admin: manage the kernel WireGuard overlay interface from a non-root
+    # process; cap_net_bind_service: bind 443 as non-root.
+    setcap cap_net_admin,cap_net_bind_service=+ep /usr/local/bin/portal-relay; \
     mkdir -p /portal-certs
 
 # The glibc Rust binary needs libgcc_s, which distroless/base does not include.

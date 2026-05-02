@@ -11,7 +11,8 @@ use tracing::debug;
 
 use crate::auth::identity::normalize_hostname;
 use crate::relay::bridge::{
-    copy_bidirectional_with_metrics, copy_bidirectional_with_policy_and_metrics, RelayMetrics,
+    copy_bidirectional_with_metrics, copy_bidirectional_with_metrics_and_trace,
+    copy_bidirectional_with_policy_and_metrics, RelayMetrics,
 };
 use crate::relay::hop_mux::HopMux;
 use crate::relay::leases::LeaseRegistry;
@@ -50,7 +51,17 @@ pub async fn handle_public_ingress(
             next.write_all(&client_hello)
                 .await
                 .context("replay client hello to next hop")?;
-            let _ = copy_bidirectional_with_metrics(&mut public, &mut next, metrics.as_ref()).await;
+            next.flush()
+                .await
+                .context("flush replayed client hello to next hop")?;
+            let _ = copy_bidirectional_with_metrics_and_trace(
+                &mut public,
+                &mut next,
+                metrics.as_ref(),
+                "public_to_next",
+                "next_to_public",
+            )
+            .await;
             return Ok(());
         }
         debug!(%server_name, "no lease route for sni");
@@ -65,6 +76,10 @@ pub async fn handle_public_ingress(
         .write_all(&client_hello)
         .await
         .context("replay client hello to reverse session")?;
+    reverse
+        .flush()
+        .await
+        .context("flush replayed client hello to reverse session")?;
     let _ = copy_bidirectional_with_policy_and_metrics(
         &mut public,
         &mut reverse,
@@ -88,6 +103,9 @@ async fn forward_root_host_to_api(
     api.write_all(&client_hello)
         .await
         .context("replay client hello to api listener")?;
+    api.flush()
+        .await
+        .context("flush replayed client hello to api listener")?;
     let _ = copy_bidirectional_with_metrics(&mut public, &mut api, metrics).await;
     Ok(())
 }
