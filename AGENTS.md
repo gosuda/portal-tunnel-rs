@@ -4,7 +4,6 @@ Port pin: `gosuda/portal-tunnel` Go, tag `v2.1.8` is the upstream source of trut
 
 Wire-compat rule: Rust matches Go v2.1.8 wire/API surface. Any deliberate break lands in the same commit with a new entry in `docs/wire-compat-deltas.md`. Two distinct documents exist for two distinct failure modes — do not merge them:
 - `docs/wire-compat-deltas.md` — "ported but intentionally diverged"
-- `docs/unsupported-features.md` — "never ported"
 
 ## Wire-invariant table
 
@@ -20,8 +19,6 @@ All constants below are normative. Their single owner is `crates/portal-relay/sr
 | API envelope shape | `{ ok, data?, error? }` | `wire/envelope.rs` |
 | HTTP path constants | `/healthz`, `/sdk/*`, `/admin/*`, `/discovery` | `wire/paths.rs` |
 
-> Note: `relay/sni.rs:135` checks `record[0] != 0x01` — this is the TLS `handshake_type.client_hello` per RFC 5246 §7.4, an unrelated protocol constant. Do not unify it with `wire::markers::RAW_TCP`.
-
 ## Trust-boundary table
 
 Three TLS surfaces exist with distinct trust roots. They MUST remain as separate `rustls::ServerConfig` instances — merging any two collapses trust boundaries.
@@ -31,14 +28,6 @@ Three TLS surfaces exist with distinct trust roots. They MUST remain as separate
 | Relay API HTTPS | ACME / public CAs | `state/tls_material.rs` |
 | Tenant TLS | Per-lease keyless RSA / public CAs | `api/keyless.rs` |
 | QUIC datagram | Self-signed ES256K / pinned identity | `state/identity.rs` |
-
-## Pin
-
-All observable wire behavior is pinned by `scripts/v218-*-smoke.sh`. Any change to observable output is either:
-- A bugfix toward the Go reference (no documentation needed), or
-- A deliberate delta — same-commit entry in `docs/wire-compat-deltas.md` required.
-
-CI runs `scripts/v218-api-shape-compare.sh` and `scripts/v218-jwt-verify-compat.sh` before every merge to `refact/cleanup-sync`.
 
 ## Atomic commits / tidy-first
 
@@ -61,8 +50,3 @@ Rules:
 | Clippy lints | `pedantic` + `cargo` at `warn`, `priority = -1` |
 | Per-lint silence | `#[expect(lint_name, reason = "...")]` — NOT `#[allow]` |
 | Dep declarations | `[workspace.dependencies]` only |
-| Release panic | `unwind` (tokio task panic isolation) |
-
-## Non-goals
-
-See `docs/unsupported-features.md` for behaviors out of scope for this port (DNS provider implementations, ENS, headless Chrome, portal CLI, admin web UI, Rust SDK). These are tracked separately from wire-compat deltas.
