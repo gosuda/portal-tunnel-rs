@@ -10,6 +10,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use defguard_wireguard_rs::{InterfaceConfiguration, WGApi, WireguardInterfaceApi};
 use futures_util::TryStreamExt;
+use netlink_packet_route::link::{LinkAttribute, LinkFlags, LinkMessage};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
@@ -389,14 +390,14 @@ async fn configure_overlay_link_address(
         .await
         .with_context(|| format!("add overlay address {overlay_ipv4}/10 on {name}"))?;
 
+    let mut link_msg = LinkMessage::default();
+    link_msg.header.index = link_index;
+    link_msg.header.flags = LinkFlags::Up;
+    link_msg.header.change_mask = LinkFlags::Up;
+    link_msg.attributes.push(LinkAttribute::Mtu(WIREGUARD_MTU as u32));
     handle
         .link()
-        .set(
-            rtnetlink::LinkUnspec::new_with_index(link_index)
-                .mtu(WIREGUARD_MTU as u32)
-                .up()
-                .build(),
-        )
+        .set(link_msg)
         .execute()
         .await
         .with_context(|| format!("set link up + mtu on {name}"))?;
