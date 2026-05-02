@@ -57,6 +57,8 @@ unsafe_code     = "forbid"
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
 cargo    = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+
 # Per-lint allow entries from triage pass:
 multiple_crate_versions   = "allow"  # REASON: transitive deps pulled by quinn/rustls/rand ecosystem; cannot force single version
 match_same_arms           = "allow"  # REASON: protocol dispatch match arms are intentionally enumerated for readability and future divergence
