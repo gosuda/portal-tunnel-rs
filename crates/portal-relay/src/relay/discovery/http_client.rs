@@ -29,15 +29,16 @@ async fn decode_envelope<T>(resp: reqwest::Response) -> anyhow::Result<T>
 where
     T: DeserializeOwned,
 {
+    let status = resp.status();
     let envelope = resp
         .json::<ApiEnvelopeResponse<T>>()
         .await
-        .context("decode api envelope")?;
+        .with_context(|| format!("decode api envelope (HTTP {status})"))?;
     if envelope.ok {
         return envelope.data.context("api envelope missing data");
     }
     let message = envelope.error.map_or_else(
-        || "api request failed".to_string(),
+        || format!("api request failed (HTTP {status})"),
         |err| format!("{}: {}", err.code, err.message),
     );
     bail!(message)
@@ -84,9 +85,7 @@ impl DiscoveryState {
             .get(url)
             .send()
             .await
-            .with_context(|| format!("GET {url}"))?
-            .error_for_status()
-            .with_context(|| format!("GET {url} status"))?;
+            .with_context(|| format!("GET {url}"))?;
         decode_envelope(resp).await
     }
 
@@ -101,9 +100,7 @@ impl DiscoveryState {
             .json(body)
             .send()
             .await
-            .with_context(|| format!("POST {url}"))?
-            .error_for_status()
-            .with_context(|| format!("POST {url} status"))?;
+            .with_context(|| format!("POST {url}"))?;
         decode_envelope(resp).await
     }
 }

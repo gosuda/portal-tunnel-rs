@@ -20,7 +20,24 @@ impl LeaseRegistry {
         let now = Utc::now();
         let expires_at = now + lease_ttl(req.ttl);
 
+        // Read identity without mutating — validates lease exists before issuing a token
         let identity = {
+            let inner = self.inner.lock().expect("lease registry lock poisoned");
+            inner
+                .leases
+                .get(&identity_key)
+                .ok_or(LeaseError::LeaseNotFound)?
+                .identity
+                .clone()
+        };
+
+        // Issue token BEFORE any mutation — if this fails, lease state is untouched
+        let (access_token, _) =
+            issue_lease_access_token(&self.relay, &self.issuer, &identity, expires_at, now)
+                .map_err(|err| LeaseError::InvalidRequest(err.to_string()))?;
+
+        // Token issued successfully — commit state mutation
+        {
             let mut inner = self.inner.lock().expect("lease registry lock poisoned");
             let lease = inner
                 .leases
@@ -30,12 +47,8 @@ impl LeaseRegistry {
             lease.last_seen_at = now;
             lease.client_ip.clone_from(&client_ip);
             lease.reported_ip = req.reported_ip;
-            lease.identity.clone()
-        };
+        }
 
-        let (access_token, _) =
-            issue_lease_access_token(&self.relay, &self.issuer, &identity, expires_at, now)
-                .map_err(|err| LeaseError::InvalidRequest(err.to_string()))?;
         self.policy.register_identity_ip(&identity_key, &client_ip);
         Ok(RenewResponse {
             expires_at,
