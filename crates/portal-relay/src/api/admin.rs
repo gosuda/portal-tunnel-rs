@@ -18,7 +18,8 @@ use crate::relay::AppState;
 use crate::wire::paths::{
     PATH_ADMIN, PATH_ADMIN_APPROVAL, PATH_ADMIN_AUTH_STATUS, PATH_ADMIN_IPS_PREFIX,
     PATH_ADMIN_LANDING_PAGE, PATH_ADMIN_LEASES_PREFIX, PATH_ADMIN_LOGIN, PATH_ADMIN_LOGOUT,
-    PATH_ADMIN_RESERVE, PATH_ADMIN_SNAPSHOT, PATH_ADMIN_TCP_PORT, PATH_ADMIN_UDP,
+    PATH_ADMIN_METRICS, PATH_ADMIN_RESERVE, PATH_ADMIN_SNAPSHOT, PATH_ADMIN_TCP_PORT,
+    PATH_ADMIN_UDP,
 };
 
 const ADMIN_COOKIE_NAME: &str = "portal_admin";
@@ -162,6 +163,8 @@ pub async fn handle_admin_request(
         (_, PATH_ADMIN_TCP_PORT) => method_not_allowed(),
         ("POST", PATH_ADMIN_RESERVE) => handle_reserve(&state, body),
         (_, PATH_ADMIN_RESERVE) => method_not_allowed(),
+        ("GET", PATH_ADMIN_METRICS) => handle_metrics(&state),
+        (_, PATH_ADMIN_METRICS) => method_not_allowed(),
         _ if path.starts_with(PATH_ADMIN_LEASES_PREFIX) => {
             handle_identity_action(&state, method, path, body)
         }
@@ -330,6 +333,23 @@ fn handle_reserve(state: &AppState, body: &[u8]) -> ApiReply {
                 &err.to_string(),
             )
         }
+    }
+}
+
+/// Serves Prometheus metrics in text exposition format. Mirrors Go's `GET /admin/metrics`
+/// (which delegates to `promhttp.Handler()`).
+///
+/// Delegates encoding to [`RelayMetrics::encode_prometheus`], which owns the registry and
+/// gauges; this avoids any interaction with Prometheus' process-global default registry.
+fn handle_metrics(state: &AppState) -> ApiReply {
+    let now = chrono::Utc::now();
+    match state.metrics.encode_prometheus(now) {
+        Ok((content_type, body)) => ApiReply {
+            status: StatusCode::OK,
+            headers: vec![("Content-Type".to_string(), content_type)],
+            body,
+        },
+        Err(err) => api_error_reply(StatusCode::INTERNAL_SERVER_ERROR, "internal", &err),
     }
 }
 
