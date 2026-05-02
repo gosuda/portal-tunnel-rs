@@ -439,6 +439,7 @@ struct HopRouteLogFields {
     forward_relay_supports_udp: bool,
     forward_relay_supports_tcp: bool,
     forward_token_present: bool,
+    first_seen_at: chrono::DateTime<Utc>,
     expires_at: chrono::DateTime<Utc>,
 }
 
@@ -464,6 +465,7 @@ impl HopRouteLogFields {
             forward_relay_supports_udp: route.forward_relay.supports_udp,
             forward_relay_supports_tcp: route.forward_relay.supports_tcp,
             forward_token_present: !route.forward_token.trim().is_empty(),
+            first_seen_at: route.first_seen_at,
             expires_at: route.expires_at,
         }
     }
@@ -501,6 +503,7 @@ fn warn_hop_route_rejected(
         forward_relay_supports_udp = route.forward_relay_supports_udp,
         forward_relay_supports_tcp = route.forward_relay_supports_tcp,
         forward_token_present = route.forward_token_present,
+        first_seen_at = %route.first_seen_at,
         expires_at = %route.expires_at,
         "hop route request rejected"
     );
@@ -526,6 +529,7 @@ fn debug_hop_route_accepted(
         forward_relay_supports_overlay = route.forward_relay_supports_overlay,
         forward_relay_supports_udp = route.forward_relay_supports_udp,
         forward_relay_supports_tcp = route.forward_relay_supports_tcp,
+        first_seen_at = %route.first_seen_at,
         expires_at = %route.expires_at,
         "hop route request accepted"
     );

@@ -25,9 +25,15 @@ pub struct HopRoute {
     pub metadata: LeaseMetadata,
     pub forward_relay: RelayDescriptor,
     pub forward_token: String,
+    #[serde(default = "default_hop_route_first_seen_at")]
+    pub first_seen_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub signature: String,
+}
+
+fn default_hop_route_first_seen_at() -> DateTime<Utc> {
+    DateTime::<Utc>::from_timestamp(0, 0).expect("unix epoch timestamp is valid")
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -75,10 +81,8 @@ pub fn canonical_hop_route_bytes(method: &str, route: &HopRoute) -> Result<Vec<u
         .map_err(|err| HopRouteError::Invalid(err.to_string()))?;
     let forward_relay = std::str::from_utf8(&forward_relay)
         .map_err(|err| HopRouteError::Invalid(err.to_string()))?;
-    let expires_at_unix_nano = route
-        .expires_at
-        .timestamp_nanos_opt()
-        .ok_or_else(|| HopRouteError::Invalid("expires_at out of range".to_string()))?;
+    let first_seen_at_unix_nano = go_unix_nano(route.first_seen_at);
+    let expires_at_unix_nano = go_unix_nano(route.expires_at);
     let json = format!(
         concat!(
             "{{",
@@ -90,6 +94,7 @@ pub fn canonical_hop_route_bytes(method: &str, route: &HopRoute) -> Result<Vec<u
             "\"match_token\":{},",
             "\"forward_relay\":{},",
             "\"forward_token\":{},",
+            "\"first_seen_at_unix_nano\":{},",
             "\"expires_at_unix_nano\":{}",
             "}}"
         ),
@@ -101,6 +106,7 @@ pub fn canonical_hop_route_bytes(method: &str, route: &HopRoute) -> Result<Vec<u
         json_string(route.match_token.trim()),
         forward_relay,
         json_string(route.forward_token.trim()),
+        first_seen_at_unix_nano,
         expires_at_unix_nano,
     );
     Ok(json.into_bytes())
@@ -132,6 +138,8 @@ pub fn normalize_hop_route(
     route.match_hostname = normalize_hostname(&route.match_hostname);
     route.match_token = route.match_token.trim().to_string();
     route.forward_token = route.forward_token.trim().to_string();
+    route.first_seen_at = route.first_seen_at.with_timezone(&Utc);
+    route.expires_at = route.expires_at.with_timezone(&Utc);
     route.signature = route.signature.trim().to_string();
     Ok(route)
 }
@@ -170,6 +178,12 @@ fn parse_secp256k1_public_key_hex(raw: &str) -> anyhow::Result<VerifyingKey> {
 
 fn json_string(value: &str) -> String {
     serde_json::to_string(value).expect("json string serialization cannot fail")
+}
+
+fn go_unix_nano(time: DateTime<Utc>) -> i64 {
+    time.timestamp()
+        .wrapping_mul(1_000_000_000)
+        .wrapping_add(i64::from(time.timestamp_subsec_nanos()))
 }
 
 #[cfg(test)]
@@ -231,6 +245,7 @@ mod tests {
             metadata: LeaseMetadata::default(),
             forward_relay,
             forward_token: "hpt_token".to_string(),
+            first_seen_at: now,
             expires_at: now + Duration::seconds(30),
             signature: String::new(),
         };
@@ -260,6 +275,7 @@ mod tests {
                 "\"tcp_bps\":0",
                 "},",
                 "\"forward_token\":\"hpt_token\",",
+                "\"first_seen_at_unix_nano\":10000000020,",
                 "\"expires_at_unix_nano\":40000000020",
                 "}"
             )
@@ -279,6 +295,7 @@ mod tests {
             metadata: LeaseMetadata::default(),
             forward_relay,
             forward_token: " hpt_token ".to_string(),
+            first_seen_at: now,
             expires_at: now + Duration::seconds(30),
             signature: String::new(),
         };
@@ -290,6 +307,21 @@ mod tests {
         assert_eq!(
             owner_address_from_hop_route(&verified).unwrap(),
             address_from_signing_key(&owner)
+        );
+    }
+
+    #[test]
+    fn canonical_hop_route_uses_go_zero_time_unix_nano_wrapping() {
+        let zero = chrono::NaiveDate::from_ymd_opt(1, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc();
+
+        assert_eq!(go_unix_nano(zero), -6795364578871345152);
+        assert_eq!(
+            go_unix_nano(zero - Duration::seconds(30)),
+            -6795364608871345152
         );
     }
 }
