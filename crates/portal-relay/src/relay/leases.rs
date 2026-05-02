@@ -769,7 +769,7 @@ impl LeaseRegistry {
             },
             hostname: match_hostname,
             metadata: route.metadata,
-            first_seen_at: route.first_seen_at,
+            first_seen_at: now,
             expires_at: route.expires_at,
             hop_token: match_token,
             next_overlay_ipv4,
@@ -1531,7 +1531,6 @@ mod tests {
             metadata: LeaseMetadata::default(),
             forward_relay: test_overlay_descriptor(now),
             forward_token: "hpt_next".to_string(),
-            first_seen_at: now,
             expires_at: now + chrono::Duration::seconds(30),
             signature: String::new(),
         };
