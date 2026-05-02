@@ -12,10 +12,16 @@ use relay::Server;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
+/// Run the portal-relay binary entry point. Returns the process exit code.
 #[must_use]
 pub fn run() -> std::process::ExitCode {
-    use std::process::Termination;
-    run_inner().report()
+    match run_inner() {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(err) => {
+            tracing::error!(error = ?err, "portal relay terminated with error");
+            std::process::ExitCode::FAILURE
+        }
+    }
 }
 
 #[tokio::main]
