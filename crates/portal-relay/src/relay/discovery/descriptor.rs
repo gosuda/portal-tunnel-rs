@@ -78,8 +78,9 @@ pub fn sign_relay_descriptor(
     )
     .context("parse relay descriptor private key")?;
     let canonical = canonical_descriptor_bytes(&desc)?;
+    let hash = Sha256::digest(&canonical);
     let (signature, recovery_id) = signing_key
-        .sign_digest_recoverable(Sha256::new_with_prefix(&canonical))
+        .sign_prehash_recoverable(&hash)
         .context("sign relay descriptor")?;
     let mut compact = [0u8; 65];
     compact[0] = 27 + 4 + recovery_id.to_byte();
@@ -110,8 +111,9 @@ pub fn verify_relay_descriptor(mut desc: RelayDescriptor) -> anyhow::Result<Rela
     desc.signature.clear();
     let mut desc = normalize_relay_descriptor(desc)?;
     let canonical = canonical_descriptor_bytes(&desc)?;
+    let hash = Sha256::digest(&canonical);
     let key =
-        VerifyingKey::recover_from_digest(Sha256::new_with_prefix(&canonical), &sig, recovery_id)
+        VerifyingKey::recover_from_prehash(&hash, &sig, recovery_id)
             .context("recover relay descriptor public key")?;
     let recovered = address_from_verifying_key(&key);
     if !recovered.eq_ignore_ascii_case(desc.address.trim()) {

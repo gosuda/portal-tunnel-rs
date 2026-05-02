@@ -1,5 +1,5 @@
 use chrono::Duration as ChronoDuration;
-use rand_core::{OsRng, RngCore};
+use rand_core_06::{OsRng, RngCore};
 
 use super::DEFAULT_LEASE_TTL;
 

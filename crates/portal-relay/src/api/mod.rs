@@ -584,7 +584,7 @@ mod tests {
 
     use chrono::TimeDelta;
     use k256::ecdsa::SigningKey;
-    use rand_core::OsRng;
+    use rand_core_06::OsRng;
     use serde_json::json;
 
     use super::*;

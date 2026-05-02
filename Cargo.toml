@@ -49,6 +49,7 @@ rustls = { version = "0.23", default-features = false, features = [
 ] }
 rustls-pemfile = "2.2"
 sec1 = "0.8"
+sec1_07 = { package = "sec1", version = "0.7" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 sha2 = "0.11"

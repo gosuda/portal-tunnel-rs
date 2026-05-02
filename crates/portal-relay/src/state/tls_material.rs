@@ -15,8 +15,8 @@ use rsa::pkcs1::DecodeRsaPrivateKey;
 use rsa::{Pkcs1v15Sign, Pss, RsaPrivateKey};
 use rustls::ServerConfig;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-use sec1::DecodeEcPrivateKey;
-use sha2::{Sha256, Sha384, Sha512};
+use sec1_07::DecodeEcPrivateKey;
+use sha2_010::{Sha256 as Sha256_010, Sha384 as Sha384_010, Sha512 as Sha512_010};
 
 use crate::wire::alpn::PORTAL_TUNNEL;
 
@@ -52,27 +52,27 @@ impl KeylessSigner {
     }
 
     pub fn sign_rsa_pkcs1v15_sha256(&self, digest: &[u8]) -> anyhow::Result<Vec<u8>> {
-        self.sign_rsa_pkcs1v15("RSA_PKCS1V15_SHA256", digest, Pkcs1v15Sign::new::<Sha256>())
+        self.sign_rsa_pkcs1v15("RSA_PKCS1V15_SHA256", digest, Pkcs1v15Sign::new::<Sha256_010>())
     }
 
     pub fn sign_rsa_pkcs1v15_sha384(&self, digest: &[u8]) -> anyhow::Result<Vec<u8>> {
-        self.sign_rsa_pkcs1v15("RSA_PKCS1V15_SHA384", digest, Pkcs1v15Sign::new::<Sha384>())
+        self.sign_rsa_pkcs1v15("RSA_PKCS1V15_SHA384", digest, Pkcs1v15Sign::new::<Sha384_010>())
     }
 
     pub fn sign_rsa_pkcs1v15_sha512(&self, digest: &[u8]) -> anyhow::Result<Vec<u8>> {
-        self.sign_rsa_pkcs1v15("RSA_PKCS1V15_SHA512", digest, Pkcs1v15Sign::new::<Sha512>())
+        self.sign_rsa_pkcs1v15("RSA_PKCS1V15_SHA512", digest, Pkcs1v15Sign::new::<Sha512_010>())
     }
 
     pub fn sign_rsa_pss_sha256(&self, digest: &[u8]) -> anyhow::Result<Vec<u8>> {
-        self.sign_rsa_pss("RSA_PSS_SHA256", digest, Pss::new::<Sha256>())
+        self.sign_rsa_pss("RSA_PSS_SHA256", digest, Pss::new::<Sha256_010>())
     }
 
     pub fn sign_rsa_pss_sha384(&self, digest: &[u8]) -> anyhow::Result<Vec<u8>> {
-        self.sign_rsa_pss("RSA_PSS_SHA384", digest, Pss::new::<Sha384>())
+        self.sign_rsa_pss("RSA_PSS_SHA384", digest, Pss::new::<Sha384_010>())
     }
 
     pub fn sign_rsa_pss_sha512(&self, digest: &[u8]) -> anyhow::Result<Vec<u8>> {
-        self.sign_rsa_pss("RSA_PSS_SHA512", digest, Pss::new::<Sha512>())
+        self.sign_rsa_pss("RSA_PSS_SHA512", digest, Pss::new::<Sha512_010>())
     }
 
     fn sign_ecdsa(
@@ -111,7 +111,7 @@ impl KeylessSigner {
     ) -> anyhow::Result<Vec<u8>> {
         match &self.kind {
             KeylessSignerKind::Rsa(key) => key
-                .sign_with_rng(&mut rand_core::OsRng, padding, digest)
+                .sign_with_rng(&mut rand_core_06::OsRng, padding, digest)
                 .with_context(|| format!("sign {algorithm} digest")),
             KeylessSignerKind::EcdsaP256(_) | KeylessSignerKind::EcdsaP384(_) => {
                 bail!("invalid argument: {algorithm} requires an RSA private key")
@@ -127,7 +127,7 @@ impl KeylessSigner {
     ) -> anyhow::Result<Vec<u8>> {
         match &self.kind {
             KeylessSignerKind::Rsa(key) => key
-                .sign_with_rng(&mut rand_core::OsRng, padding, digest)
+                .sign_with_rng(&mut rand_core_06::OsRng, padding, digest)
                 .with_context(|| format!("sign {algorithm} digest")),
             KeylessSignerKind::EcdsaP256(_) | KeylessSignerKind::EcdsaP384(_) => {
                 bail!("invalid argument: {algorithm} requires an RSA private key")
@@ -334,24 +334,24 @@ mod tests {
     use rsa::RsaPublicKey;
     use rsa::pkcs1::EncodeRsaPrivateKey;
     use rsa::pkcs8::LineEnding;
-    use sha2::Digest;
+    use sha2_010::Digest;
 
     #[test]
     fn keyless_signer_accepts_rsa_pkcs1_private_key() {
-        let key = RsaPrivateKey::new(&mut rand_core::OsRng, 2048).unwrap();
+        let key = RsaPrivateKey::new(&mut rand_core_06::OsRng, 2048).unwrap();
         let key_pem = key.to_pkcs1_pem(LineEnding::LF).unwrap();
         let signer = parse_keyless_signer(key_pem.as_bytes()).unwrap();
-        let digest = Sha256::digest(b"portal-tunnel-rsa-keyless");
+        let digest = Sha256_010::digest(b"portal-tunnel-rsa-keyless");
         let public_key = RsaPublicKey::from(&key);
 
         let pkcs1_sig = signer.sign_rsa_pkcs1v15_sha256(&digest).unwrap();
         public_key
-            .verify(Pkcs1v15Sign::new::<Sha256>(), &digest, &pkcs1_sig)
+            .verify(Pkcs1v15Sign::new::<Sha256_010>(), &digest, &pkcs1_sig)
             .unwrap();
 
         let pss_sig = signer.sign_rsa_pss_sha256(&digest).unwrap();
         public_key
-            .verify(Pss::new::<Sha256>(), &digest, &pss_sig)
+            .verify(Pss::new::<Sha256_010>(), &digest, &pss_sig)
             .unwrap();
 
         assert!(signer.sign_ecdsa_sha256(&digest).is_err());

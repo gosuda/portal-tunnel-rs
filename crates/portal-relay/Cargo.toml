@@ -42,6 +42,7 @@ rsa.workspace          = true
 rustls.workspace       = true
 rustls-pemfile.workspace = true
 sec1.workspace         = true
+sec1_07.workspace      = true
 serde.workspace        = true
 serde_json.workspace   = true
 sha2.workspace         = true

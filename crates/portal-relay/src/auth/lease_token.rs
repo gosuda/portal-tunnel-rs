@@ -153,6 +153,6 @@ fn decode_json<T: for<'de> Deserialize<'de>>(segment: &str) -> anyhow::Result<T>
 
 fn random_id(prefix: &str) -> String {
     let mut buf = [0u8; 8];
-    rand_core::RngCore::fill_bytes(&mut rand_core::OsRng, &mut buf);
+    rand_core_06::RngCore::fill_bytes(&mut rand_core_06::OsRng, &mut buf);
     format!("{prefix}{}", hex::encode(buf))
 }

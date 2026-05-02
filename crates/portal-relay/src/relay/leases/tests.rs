@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use k256::ecdsa::SigningKey;
-use rand_core::OsRng;
+use rand_core_06::OsRng;
 
 use super::hop_routes::hop_route_record_key;
 use super::port_allocator::PortAllocator;

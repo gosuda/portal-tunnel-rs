@@ -190,7 +190,7 @@ fn go_unix_nano(time: DateTime<Utc>) -> i64 {
 mod tests {
     use chrono::{Duration, TimeZone};
     use k256::ecdsa::SigningKey;
-    use rand_core::OsRng;
+    use rand_core_06::OsRng;
 
     use super::*;
     use crate::auth::identity::address_from_signing_key;

@@ -1,6 +1,6 @@
 use chrono::{DateTime, TimeZone, Utc};
 use k256::ecdsa::SigningKey;
-use rand_core::OsRng;
+use rand_core_06::OsRng;
 
 use super::descriptor::DESCRIPTOR_TTL;
 use super::*;

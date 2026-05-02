@@ -6,7 +6,7 @@ use anyhow::{Context, bail};
 use base64::Engine;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use k256::ecdsa::SigningKey;
-use rand_core::{OsRng, RngCore};
+use rand_core_06::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret};

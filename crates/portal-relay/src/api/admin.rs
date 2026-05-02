@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use hyper::StatusCode;
-use rand_core::{OsRng, RngCore};
+use rand_core_06::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 
 use crate::api::{ApiReply, api_error_reply, decode_json, json_ok, method_not_allowed};
