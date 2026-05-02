@@ -12,7 +12,7 @@ use chrono::Utc;
 use hyper::StatusCode;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use tracing::warn;
+use tracing::{debug, warn};
 
 use crate::api::envelope::{api_error, api_ok};
 use crate::api::keyless::{ErrorResponse, SignRequest};
@@ -230,10 +230,13 @@ pub async fn handle_request(
         ("POST", PATH_SDK_HOP) | ("DELETE", PATH_SDK_HOP) => {
             if state.hop_mux.is_none() {
                 warn!(
-                    method,
-                    portal_url = %state.portal_url,
+                    method = %method,
+                    status = StatusCode::SERVICE_UNAVAILABLE.as_u16(),
+                    error_code = "feature_unavailable",
+                    reason = "hop_mux_unavailable",
+                    receiving_relay = %state.portal_url,
                     client_ip = %client_ip,
-                    "hop route rejected because hop mux runtime is unavailable"
+                    "hop route request rejected"
                 );
                 return api_error_reply(
                     StatusCode::SERVICE_UNAVAILABLE,
@@ -243,18 +246,19 @@ pub async fn handle_request(
             }
             match decode_json::<HopRoute>(&body) {
                 Ok(payload) => {
-                    let log_fields = hop_route_log_fields(&payload);
+                    let mut route_log = HopRouteLogFields::from_route(&payload);
                     match verify_hop_route(method, payload) {
                         Ok(mut route) => {
+                            route_log = HopRouteLogFields::from_route(&route);
                             if route.relay_url != state.portal_url {
-                                warn!(
+                                warn_hop_route_rejected(
+                                    state.as_ref(),
                                     method,
-                                    portal_url = %state.portal_url,
-                                    route_relay_url = %route.relay_url,
-                                    matcher = log_fields.matcher,
-                                    forward_relay_url = %log_fields.forward_relay_url,
-                                    forward_relay_address = %log_fields.forward_relay_address,
-                                    "hop route relay url mismatch"
+                                    StatusCode::FORBIDDEN,
+                                    "unauthorized",
+                                    "relay_url_mismatch",
+                                    "hop route relay url does not match receiving relay",
+                                    &route_log,
                                 );
                                 return api_error_reply(
                                     StatusCode::FORBIDDEN,
@@ -264,73 +268,93 @@ pub async fn handle_request(
                             }
                             if method == "DELETE" {
                                 match state.leases.delete_hop_route(&route) {
-                                    Ok(()) => json_ok(StatusCode::OK, &serde_json::json!({})),
-                                    Err(err) => {
-                                        warn!(
+                                    Ok(()) => {
+                                        debug_hop_route_accepted(
+                                            state.as_ref(),
                                             method,
-                                            portal_url = %state.portal_url,
-                                            route_relay_url = %log_fields.route_relay_url,
-                                            matcher = log_fields.matcher,
-                                            forward_relay_url = %log_fields.forward_relay_url,
-                                            forward_relay_address = %log_fields.forward_relay_address,
-                                            error = %err,
-                                            "hop route delete rejected"
+                                            "deleted",
+                                            &route_log,
+                                        );
+                                        json_ok(StatusCode::OK, &serde_json::json!({}))
+                                    }
+                                    Err(err) => {
+                                        let status = err.status_code();
+                                        let code = err.api_code();
+                                        let message = err.to_string();
+                                        warn_hop_route_rejected(
+                                            state.as_ref(),
+                                            method,
+                                            status,
+                                            code,
+                                            "lease_delete_failed",
+                                            &message,
+                                            &route_log,
                                         );
                                         lease_error(err)
                                     }
                                 }
                             } else {
+                                let descriptor_log = route_log.clone();
                                 match verify_relay_descriptor(route.forward_relay) {
                                     Ok(forward_relay) => {
                                         route.forward_relay = forward_relay;
+                                        route_log = HopRouteLogFields::from_route(&route);
                                         match state.leases.register_hop_route(route, Utc::now()) {
                                             Ok(()) => {
+                                                debug_hop_route_accepted(
+                                                    state.as_ref(),
+                                                    method,
+                                                    "registered",
+                                                    &route_log,
+                                                );
                                                 json_ok(StatusCode::OK, &serde_json::json!({}))
                                             }
                                             Err(err) => {
-                                                warn!(
+                                                let status = err.status_code();
+                                                let code = err.api_code();
+                                                let message = err.to_string();
+                                                warn_hop_route_rejected(
+                                                    state.as_ref(),
                                                     method,
-                                                    portal_url = %state.portal_url,
-                                                    route_relay_url = %log_fields.route_relay_url,
-                                                    matcher = log_fields.matcher,
-                                                    forward_relay_url = %log_fields.forward_relay_url,
-                                                    forward_relay_address = %log_fields.forward_relay_address,
-                                                    error = %err,
-                                                    "hop route register rejected"
+                                                    status,
+                                                    code,
+                                                    "lease_register_failed",
+                                                    &message,
+                                                    &route_log,
                                                 );
                                                 lease_error(err)
                                             }
                                         }
                                     }
                                     Err(err) => {
-                                        warn!(
+                                        let message = format!("forward relay: {err}");
+                                        warn_hop_route_rejected(
+                                            state.as_ref(),
                                             method,
-                                            portal_url = %state.portal_url,
-                                            route_relay_url = %log_fields.route_relay_url,
-                                            matcher = log_fields.matcher,
-                                            forward_relay_url = %log_fields.forward_relay_url,
-                                            forward_relay_address = %log_fields.forward_relay_address,
-                                            error = %err,
-                                            "hop route forward relay descriptor rejected"
+                                            StatusCode::BAD_REQUEST,
+                                            "invalid_request",
+                                            "forward_relay_invalid",
+                                            &message,
+                                            &descriptor_log,
                                         );
                                         api_error_reply(
                                             StatusCode::BAD_REQUEST,
                                             "invalid_request",
-                                            &format!("forward relay: {err}"),
+                                            &message,
                                         )
                                     }
                                 }
                             }
                         }
                         Err(HopRouteError::SignatureInvalid) => {
-                            warn!(
+                            warn_hop_route_rejected(
+                                state.as_ref(),
                                 method,
-                                portal_url = %state.portal_url,
-                                route_relay_url = %log_fields.route_relay_url,
-                                matcher = log_fields.matcher,
-                                forward_relay_url = %log_fields.forward_relay_url,
-                                forward_relay_address = %log_fields.forward_relay_address,
-                                "hop route signature rejected"
+                                StatusCode::FORBIDDEN,
+                                "unauthorized",
+                                "signature_invalid",
+                                "hop route signature is invalid",
+                                &route_log,
                             );
                             api_error_reply(
                                 StatusCode::FORBIDDEN,
@@ -339,21 +363,31 @@ pub async fn handle_request(
                             )
                         }
                         Err(HopRouteError::Invalid(message)) => {
-                            warn!(
+                            warn_hop_route_rejected(
+                                state.as_ref(),
                                 method,
-                                portal_url = %state.portal_url,
-                                route_relay_url = %log_fields.route_relay_url,
-                                matcher = log_fields.matcher,
-                                forward_relay_url = %log_fields.forward_relay_url,
-                                forward_relay_address = %log_fields.forward_relay_address,
-                                error = %message,
-                                "hop route payload rejected"
+                                StatusCode::BAD_REQUEST,
+                                "invalid_request",
+                                "route_invalid",
+                                &message,
+                                &route_log,
                             );
                             api_error_reply(StatusCode::BAD_REQUEST, "invalid_request", &message)
                         }
                     }
                 }
-                Err(err) => invalid_json(err),
+                Err(err) => {
+                    warn!(
+                        method = %method,
+                        status = StatusCode::BAD_REQUEST.as_u16(),
+                        error_code = "invalid_json",
+                        reason = "invalid_json",
+                        receiving_relay = %state.portal_url,
+                        error = %err,
+                        "hop route request rejected"
+                    );
+                    invalid_json(err)
+                }
             }
         }
         (_, PATH_SDK_HOP) => method_not_allowed(),
@@ -392,6 +426,111 @@ fn lease_error(err: LeaseError) -> ApiReply {
     api_error_reply(err.status_code(), err.api_code(), &err.to_string())
 }
 
+#[derive(Clone)]
+struct HopRouteLogFields {
+    route_relay_url: String,
+    matcher: &'static str,
+    match_hostname: String,
+    match_token_present: bool,
+    owner_public_key_present: bool,
+    forward_relay_url: String,
+    forward_relay_address: String,
+    forward_relay_supports_overlay: bool,
+    forward_relay_supports_udp: bool,
+    forward_relay_supports_tcp: bool,
+    forward_token_present: bool,
+    expires_at: chrono::DateTime<Utc>,
+}
+
+impl HopRouteLogFields {
+    fn from_route(route: &HopRoute) -> Self {
+        let match_hostname = route.match_hostname.trim().to_string();
+        let match_token_present = !route.match_token.trim().is_empty();
+        let matcher = match (!match_hostname.is_empty(), match_token_present) {
+            (true, false) => "hostname",
+            (false, true) => "token",
+            (true, true) => "hostname_and_token",
+            (false, false) => "none",
+        };
+        Self {
+            route_relay_url: route.relay_url.trim().to_string(),
+            matcher,
+            match_hostname,
+            match_token_present,
+            owner_public_key_present: !route.owner_public_key.trim().is_empty(),
+            forward_relay_url: route.forward_relay.api_https_addr.trim().to_string(),
+            forward_relay_address: route.forward_relay.address.trim().to_string(),
+            forward_relay_supports_overlay: route.forward_relay.supports_overlay,
+            forward_relay_supports_udp: route.forward_relay.supports_udp,
+            forward_relay_supports_tcp: route.forward_relay.supports_tcp,
+            forward_token_present: !route.forward_token.trim().is_empty(),
+            expires_at: route.expires_at,
+        }
+    }
+
+    fn route_relay_matches(&self, portal_url: &str) -> bool {
+        self.route_relay_url == portal_url
+    }
+}
+
+fn warn_hop_route_rejected(
+    state: &AppState,
+    method: &str,
+    status: StatusCode,
+    error_code: &str,
+    reason: &str,
+    detail: &str,
+    route: &HopRouteLogFields,
+) {
+    warn!(
+        method = %method,
+        status = status.as_u16(),
+        error_code = %error_code,
+        reason = %reason,
+        detail = %detail,
+        receiving_relay = %state.portal_url,
+        route_relay_url = %route.route_relay_url,
+        route_relay_matches_receiving = route.route_relay_matches(&state.portal_url),
+        matcher = %route.matcher,
+        match_hostname = %route.match_hostname,
+        match_token_present = route.match_token_present,
+        owner_public_key_present = route.owner_public_key_present,
+        forward_relay_url = %route.forward_relay_url,
+        forward_relay_address = %route.forward_relay_address,
+        forward_relay_supports_overlay = route.forward_relay_supports_overlay,
+        forward_relay_supports_udp = route.forward_relay_supports_udp,
+        forward_relay_supports_tcp = route.forward_relay_supports_tcp,
+        forward_token_present = route.forward_token_present,
+        expires_at = %route.expires_at,
+        "hop route request rejected"
+    );
+}
+
+fn debug_hop_route_accepted(
+    state: &AppState,
+    method: &str,
+    action: &str,
+    route: &HopRouteLogFields,
+) {
+    debug!(
+        method = %method,
+        action = %action,
+        receiving_relay = %state.portal_url,
+        route_relay_url = %route.route_relay_url,
+        matcher = %route.matcher,
+        match_hostname = %route.match_hostname,
+        match_token_present = route.match_token_present,
+        owner_public_key_present = route.owner_public_key_present,
+        forward_relay_url = %route.forward_relay_url,
+        forward_relay_address = %route.forward_relay_address,
+        forward_relay_supports_overlay = route.forward_relay_supports_overlay,
+        forward_relay_supports_udp = route.forward_relay_supports_udp,
+        forward_relay_supports_tcp = route.forward_relay_supports_tcp,
+        expires_at = %route.expires_at,
+        "hop route request accepted"
+    );
+}
+
 pub(crate) fn json_ok<T: Serialize>(status: StatusCode, data: &T) -> ApiReply {
     json_reply(status, &api_ok(data))
 }
@@ -423,34 +562,6 @@ fn header_value(headers: &[(String, String)], name: &str) -> Option<String> {
         .iter()
         .find(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
         .map(|(_, value)| value.clone())
-}
-
-struct HopRouteLogFields {
-    route_relay_url: String,
-    matcher: &'static str,
-    forward_relay_url: String,
-    forward_relay_address: String,
-}
-
-fn hop_route_log_fields(route: &HopRoute) -> HopRouteLogFields {
-    HopRouteLogFields {
-        route_relay_url: route.relay_url.trim().to_string(),
-        matcher: hop_route_matcher_kind(route),
-        forward_relay_url: route.forward_relay.api_https_addr.trim().to_string(),
-        forward_relay_address: route.forward_relay.address.trim().to_string(),
-    }
-}
-
-fn hop_route_matcher_kind(route: &HopRoute) -> &'static str {
-    match (
-        route.match_hostname.trim().is_empty(),
-        route.match_token.trim().is_empty(),
-    ) {
-        (false, true) => "hostname",
-        (true, false) => "token",
-        (false, false) => "both",
-        (true, true) => "empty",
-    }
 }
 
 #[derive(Debug, Serialize)]

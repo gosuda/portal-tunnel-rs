@@ -533,24 +533,27 @@ async fn handle_api_connection(
     remote_addr: SocketAddr,
 ) -> anyhow::Result<()> {
     let req = read_http_request(&mut io).await?;
-    if req.method == "GET" && req.path == PATH_SDK_CONNECT {
-        handle_sdk_connect(io, state, req).await?;
-        return Ok(());
-    }
-
     let client_ip = state
         .admin
         .policy
         .extract_client_ip(remote_addr, &req.headers);
+    if req.method == "GET" && req.path == PATH_SDK_CONNECT {
+        handle_sdk_connect(io, state, req, remote_addr, client_ip).await?;
+        return Ok(());
+    }
+
+    let method = req.method.clone();
+    let path = req.path.clone();
     let reply = api::handle_request(
         Arc::clone(&state),
-        &req.method,
-        &req.path,
+        &method,
+        &path,
         &req.headers,
-        client_ip,
+        client_ip.clone(),
         req.body,
     )
     .await;
+    log_api_rejection(&method, &path, reply.status, remote_addr, &client_ip);
     write_http_response(&mut io, reply.status, &reply.headers, &reply.body, true).await?;
     Ok(())
 }
@@ -559,6 +562,8 @@ async fn handle_sdk_connect(
     mut io: TlsStream<tokio::net::TcpStream>,
     state: Arc<AppState>,
     req: ParsedRequest,
+    remote_addr: SocketAddr,
+    client_ip: String,
 ) -> anyhow::Result<()> {
     let token = header_value(&req.headers, "x-portal-access-token").unwrap_or_default();
     match state.leases.admit_connect(&token) {
@@ -570,10 +575,54 @@ async fn handle_sdk_connect(
         }
         Err(err) => {
             let reply = api::api_error_reply(err.status_code(), err.api_code(), &err.to_string());
+            warn!(
+                method = %req.method,
+                path = %PATH_SDK_CONNECT,
+                status = reply.status.as_u16(),
+                error_code = %err.api_code(),
+                remote_addr = %remote_addr,
+                client_ip = %client_ip,
+                error = %err,
+                "api request rejected"
+            );
             write_http_response(&mut io, reply.status, &reply.headers, &reply.body, true).await?;
         }
     }
     Ok(())
+}
+
+fn log_api_rejection(
+    method: &str,
+    path: &str,
+    status: hyper::StatusCode,
+    remote_addr: SocketAddr,
+    client_ip: &str,
+) {
+    if status.as_u16() < 400 {
+        return;
+    }
+    let path = path.split_once('?').map(|(path, _)| path).unwrap_or(path);
+    let sdk_or_relay_api =
+        path.starts_with("/sdk/") || path.starts_with("/discovery") || path == "/v1/sign";
+    if status.as_u16() >= 500 || sdk_or_relay_api {
+        warn!(
+            method = %method,
+            path = %path,
+            status = status.as_u16(),
+            remote_addr = %remote_addr,
+            client_ip = %client_ip,
+            "api request rejected"
+        );
+    } else {
+        debug!(
+            method = %method,
+            path = %path,
+            status = status.as_u16(),
+            remote_addr = %remote_addr,
+            client_ip = %client_ip,
+            "api request rejected"
+        );
+    }
 }
 
 async fn read_http_request(
