@@ -9,9 +9,9 @@ use sha2::{Digest, Sha256};
 
 use crate::auth::identity::{Identity, normalize_identity};
 use crate::state::identity::RelayIdentity;
+use crate::wire::jwt::LEASE_TOKEN_ALG;
 
 const LEASE_ACCESS_TOKEN_AUDIENCE: &str = "portal-sdk";
-const LEASE_TOKEN_ALGORITHM: &str = "ES256K";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct JwtHeader<'a> {
@@ -73,7 +73,7 @@ pub fn issue_lease_access_token(
     };
 
     let header = JwtHeader {
-        alg: LEASE_TOKEN_ALGORITHM,
+        alg: LEASE_TOKEN_ALG,
         kid: relay.address.trim(),
         typ: "JWT",
     };
@@ -100,7 +100,7 @@ pub fn verify_lease_access_token(
         bail!("token must have three segments");
     }
     let header: serde_json::Value = decode_json(parts[0])?;
-    if header.get("alg").and_then(|v| v.as_str()) != Some(LEASE_TOKEN_ALGORITHM) {
+    if header.get("alg").and_then(|v| v.as_str()) != Some(LEASE_TOKEN_ALG) {
         bail!("token algorithm is invalid");
     }
 

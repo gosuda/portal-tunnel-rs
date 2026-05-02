@@ -6,12 +6,12 @@ use hyper::StatusCode;
 use serde::Serialize;
 use url::form_urlencoded;
 
-use crate::api::paths::{PATH_APP, PATH_APP_PREFIX, PATH_ASSETS_PREFIX, PATH_TUNNEL_STATUS};
 use crate::api::{ApiReply, api_error_reply, json_ok, method_not_allowed};
 use crate::auth::identity::normalize_hostname;
 use crate::relay::AppState;
 use crate::relay::discovery::RelayDescriptor;
 use crate::relay::leases::LeaseView;
+use crate::wire::paths::{PATH_APP, PATH_APP_PREFIX, PATH_ASSETS_PREFIX, PATH_TUNNEL_STATUS};
 
 const FAVICON_PATHS: &[&str] = &[
     "/favicon.ico",

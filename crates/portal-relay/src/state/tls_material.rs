@@ -18,6 +18,8 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use sec1::DecodeEcPrivateKey;
 use sha2::{Sha256, Sha384, Sha512};
 
+use crate::wire::alpn::PORTAL_TUNNEL;
+
 pub struct TlsMaterial {
     pub config: ServerConfig,
     pub keyless_signer: KeylessSigner,
@@ -308,7 +310,7 @@ fn parse_quic_server_config(
         .with_no_client_auth()
         .with_single_cert(certs, key)
         .context("configure quic tls certificate")?;
-    rustls_config.alpn_protocols = vec![b"portal-tunnel".to_vec()];
+    rustls_config.alpn_protocols = vec![PORTAL_TUNNEL.to_vec()];
     rustls_config.max_early_data_size = u32::MAX;
 
     let crypto =

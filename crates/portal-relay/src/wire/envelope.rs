@@ -29,6 +29,7 @@ where
     }
 }
 
+#[must_use]
 pub fn api_error(code: &str, message: &str) -> ApiEnvelope<()> {
     ApiEnvelope {
         data: None,

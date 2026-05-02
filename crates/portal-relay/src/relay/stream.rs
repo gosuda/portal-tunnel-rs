@@ -7,12 +7,10 @@ use tokio::sync::{Mutex, Notify};
 use tokio::time;
 use tokio_rustls::server::TlsStream;
 
+use crate::wire::markers::KEEPALIVE;
+
 const DEFAULT_IDLE_KEEPALIVE: Duration = Duration::from_secs(15);
 const DEFAULT_READY_QUEUE_LIMIT: usize = 8;
-
-pub const MARKER_KEEPALIVE: u8 = 0x00;
-pub const MARKER_RAW_START: u8 = 0x01;
-pub const MARKER_TLS_START: u8 = 0x02;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StreamError {
@@ -95,7 +93,7 @@ impl ReverseSession {
             let Some(io) = guard.as_mut() else {
                 return;
             };
-            if tokio::io::AsyncWriteExt::write_all(io, &[MARKER_KEEPALIVE])
+            if tokio::io::AsyncWriteExt::write_all(io, &[KEEPALIVE])
                 .await
                 .is_err()
             {

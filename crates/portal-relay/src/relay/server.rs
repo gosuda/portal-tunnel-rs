@@ -14,7 +14,6 @@ use tracing::{debug, error, info, warn};
 use crate::api;
 use crate::api::admin::AdminState;
 use crate::api::frontend::FrontendState;
-use crate::api::paths::PATH_SDK_CONNECT;
 use crate::config::RelayConfig;
 use crate::policy::PolicyRuntime;
 use crate::relay::bridge::{
@@ -25,13 +24,14 @@ use crate::relay::hop_mux::{HopMux, HopMuxConnector, HopStream};
 use crate::relay::leases::{HopRelayTarget, LeaseRegistry, LeaseRegistryConfig};
 use crate::relay::overlay::{OverlayConfig, OverlayPeer, OverlayRuntime};
 use crate::relay::sni::handle_public_ingress;
-use crate::relay::stream::MARKER_TLS_START;
 use crate::relay::udp_datagram::{
     QuicBackhaulControlResponse, read_control_message, write_control_response,
 };
 use crate::state::acme::AcmeManager;
 use crate::state::identity::{RelayIdentity, load_or_create_relay_identity};
 use crate::state::tls_material::{KeylessSigner, load_or_create_tls_material};
+use crate::wire::markers::TLS_ACTIVATE;
+use crate::wire::paths::PATH_SDK_CONNECT;
 
 const REGISTRY_JANITOR_INTERVAL: Duration = Duration::from_secs(5);
 const HOP_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
@@ -483,7 +483,7 @@ async fn handle_hop_mux_stream(
         HopRelayTarget::Direct(target) => {
             let mut reverse = target
                 .stream
-                .claim(MARKER_TLS_START)
+                .claim(TLS_ACTIVATE)
                 .await
                 .context("claim reverse session")?;
             let _ = copy_bidirectional_with_policy_and_metrics(

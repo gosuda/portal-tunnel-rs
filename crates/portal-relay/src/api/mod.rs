@@ -1,9 +1,7 @@
 pub mod admin;
-pub mod envelope;
 pub mod frontend;
 pub mod installer;
 pub mod keyless;
-pub mod paths;
 pub mod sdk;
 
 use std::sync::Arc;
@@ -14,14 +12,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tracing::{debug, warn};
 
-use crate::api::envelope::{api_error, api_ok};
 use crate::api::keyless::{ErrorResponse, SignRequest};
-use crate::api::paths::{
-    PATH_ADMIN_PREFIX, PATH_APP, PATH_DISCOVERY, PATH_DISCOVERY_ANNOUNCE, PATH_HEALTHZ,
-    PATH_INSTALL_BIN_PREFIX, PATH_INSTALL_POWERSHELL, PATH_INSTALL_SHELL, PATH_SDK_DOMAIN,
-    PATH_SDK_HOP, PATH_SDK_REGISTER, PATH_SDK_REGISTER_CHALLENGE, PATH_SDK_RENEW,
-    PATH_SDK_UNREGISTER, PATH_TUNNEL_STATUS, PATH_V1_SIGN,
-};
 use crate::api::sdk::DomainResponse;
 use crate::relay::AppState;
 use crate::relay::discovery::{
@@ -30,6 +21,13 @@ use crate::relay::discovery::{
 use crate::relay::hop::{HopRoute, HopRouteError, verify_hop_route};
 use crate::relay::leases::{
     LeaseError, RegisterChallengeRequest, RegisterRequest, RenewRequest, UnregisterRequest,
+};
+use crate::wire::envelope::{api_error, api_ok};
+use crate::wire::paths::{
+    PATH_ADMIN_PREFIX, PATH_APP, PATH_DISCOVERY, PATH_DISCOVERY_ANNOUNCE, PATH_HEALTHZ,
+    PATH_INSTALL_BIN_PREFIX, PATH_INSTALL_POWERSHELL, PATH_INSTALL_SHELL, PATH_SDK_DOMAIN,
+    PATH_SDK_HOP, PATH_SDK_REGISTER, PATH_SDK_REGISTER_CHALLENGE, PATH_SDK_RENEW,
+    PATH_SDK_UNREGISTER, PATH_TUNNEL_STATUS, PATH_V1_SIGN,
 };
 
 pub struct ApiReply {
@@ -590,7 +588,6 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::api::paths::{PATH_APP, PATH_SDK_HOP, PATH_SDK_REGISTER_CHALLENGE};
     use crate::auth::identity::{address_from_signing_key, compressed_public_key_hex};
     use crate::policy::PolicyRuntime;
     use crate::relay::AppState;
@@ -601,6 +598,7 @@ mod tests {
     use crate::relay::leases::{LeaseRegistry, LeaseRegistryConfig};
     use crate::state::identity::RelayIdentity;
     use crate::state::tls_material::load_or_create_tls_material;
+    use crate::wire::paths::{PATH_APP, PATH_SDK_HOP, PATH_SDK_REGISTER_CHALLENGE};
 
     #[test]
     fn healthz_response_is_enveloped() {

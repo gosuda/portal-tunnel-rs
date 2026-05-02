@@ -7,7 +7,8 @@ use tracing::{debug, warn};
 
 use crate::policy::PolicyRuntime;
 use crate::relay::bridge::{RelayMetrics, copy_bidirectional_with_policy_and_metrics};
-use crate::relay::stream::{MARKER_RAW_START, RelayStream};
+use crate::relay::stream::RelayStream;
+use crate::wire::markers::RAW_TCP;
 
 pub struct TcpPortRuntime {
     port: u16,
@@ -80,7 +81,7 @@ async fn bridge_tcp_conn(
     policy: &PolicyRuntime,
     metrics: &RelayMetrics,
 ) -> anyhow::Result<()> {
-    let mut reverse = stream.claim(MARKER_RAW_START).await?;
+    let mut reverse = stream.claim(RAW_TCP).await?;
     let _ = copy_bidirectional_with_policy_and_metrics(
         &mut public,
         &mut reverse,

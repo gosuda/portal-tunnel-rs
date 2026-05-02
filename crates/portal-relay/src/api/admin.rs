@@ -9,15 +9,15 @@ use hyper::StatusCode;
 use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 
-use crate::api::paths::{
-    PATH_ADMIN, PATH_ADMIN_APPROVAL, PATH_ADMIN_AUTH_STATUS, PATH_ADMIN_IPS_PREFIX,
-    PATH_ADMIN_LANDING_PAGE, PATH_ADMIN_LEASES_PREFIX, PATH_ADMIN_LOGIN, PATH_ADMIN_LOGOUT,
-    PATH_ADMIN_SNAPSHOT, PATH_ADMIN_TCP_PORT, PATH_ADMIN_UDP,
-};
 use crate::api::{ApiReply, api_error_reply, decode_json, json_ok, method_not_allowed};
 use crate::auth::identity::{Identity, normalize_identity};
 use crate::policy::{ApprovalMode, PolicyRuntime};
 use crate::relay::AppState;
+use crate::wire::paths::{
+    PATH_ADMIN, PATH_ADMIN_APPROVAL, PATH_ADMIN_AUTH_STATUS, PATH_ADMIN_IPS_PREFIX,
+    PATH_ADMIN_LANDING_PAGE, PATH_ADMIN_LEASES_PREFIX, PATH_ADMIN_LOGIN, PATH_ADMIN_LOGOUT,
+    PATH_ADMIN_SNAPSHOT, PATH_ADMIN_TCP_PORT, PATH_ADMIN_UDP,
+};
 
 const ADMIN_COOKIE_NAME: &str = "portal_admin";
 const SESSION_TTL: Duration = Duration::from_secs(24 * 60 * 60);

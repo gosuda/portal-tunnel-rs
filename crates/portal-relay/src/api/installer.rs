@@ -1,7 +1,7 @@
 use hyper::StatusCode;
 
 use crate::api::ApiReply;
-use crate::api::paths::PATH_INSTALL_BIN_PREFIX;
+use crate::wire::paths::PATH_INSTALL_BIN_PREFIX;
 
 const INSTALL_SH: &str = include_str!("install.sh");
 const INSTALL_PS1: &str = include_str!("install.ps1");

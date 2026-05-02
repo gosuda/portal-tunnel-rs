@@ -13,12 +13,12 @@ use sha2::{Digest, Sha256};
 use tracing::{debug, warn};
 use url::Url;
 
-use crate::api::paths::{PATH_DISCOVERY, PATH_DISCOVERY_ANNOUNCE};
 use crate::auth::identity::{address_from_verifying_key, normalize_evm_address};
 use crate::config::normalize_relay_url;
 use crate::relay::bridge::RelayMetrics;
 use crate::relay::overlay::OverlayDiscoveryInfo;
 use crate::state::identity::RelayIdentity;
+use crate::wire::paths::{PATH_DISCOVERY, PATH_DISCOVERY_ANNOUNCE};
 
 pub const DISCOVERY_VERSION: &str = "7";
 pub const DISCOVERY_POLL_INTERVAL: Duration = Duration::from_secs(30);

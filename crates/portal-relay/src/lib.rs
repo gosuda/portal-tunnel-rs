@@ -4,6 +4,7 @@ mod config;
 mod policy;
 mod relay;
 mod state;
+pub mod wire;
 
 use anyhow::Context;
 use clap::Parser;

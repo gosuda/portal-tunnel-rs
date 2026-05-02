@@ -15,7 +15,7 @@ use crate::relay::bridge::{
 };
 use crate::relay::hop_mux::HopMux;
 use crate::relay::leases::LeaseRegistry;
-use crate::relay::stream::MARKER_TLS_START;
+use crate::wire::markers::TLS_ACTIVATE;
 
 const CLIENT_HELLO_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_CLIENT_HELLO_BYTES: usize = 16 * 1024;
@@ -58,7 +58,7 @@ pub async fn handle_public_ingress(
     };
     let mut reverse = target
         .stream
-        .claim(MARKER_TLS_START)
+        .claim(TLS_ACTIVATE)
         .await
         .context("claim reverse session")?;
     reverse
