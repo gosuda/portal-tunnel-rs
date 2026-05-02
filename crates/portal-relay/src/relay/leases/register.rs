@@ -161,9 +161,7 @@ impl LeaseRegistry {
             } else {
                 for existing in inner.hop_routes.values() {
                     if existing.expires_at > now && existing.hop_token == hop_token {
-                        return Err(LeaseError::InvalidRequest(
-                            "hop token conflict".to_string(),
-                        ));
+                        return Err(LeaseError::InvalidRequest("hop token conflict".to_string()));
                     }
                 }
             }
@@ -288,9 +286,7 @@ impl LeaseRegistry {
                     && existing_key != &identity_key
                     && existing.hop_token == hop_token
                 {
-                    conflict = Some(LeaseError::InvalidRequest(
-                        "hop token conflict".to_string(),
-                    ));
+                    conflict = Some(LeaseError::InvalidRequest("hop token conflict".to_string()));
                     break;
                 }
             }
@@ -310,9 +306,8 @@ impl LeaseRegistry {
                 } else {
                     for existing in inner.hop_routes.values() {
                         if existing.expires_at > now && existing.hop_token == hop_token {
-                            conflict = Some(LeaseError::InvalidRequest(
-                                "hop token conflict".to_string(),
-                            ));
+                            conflict =
+                                Some(LeaseError::InvalidRequest("hop token conflict".to_string()));
                             break;
                         }
                     }
