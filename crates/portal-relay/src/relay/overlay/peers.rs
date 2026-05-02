@@ -3,7 +3,8 @@
 use std::net::IpAddr;
 
 use anyhow::Context;
-use wireguard_control::{AllowedIp as WgAllowedIp, PeerConfigBuilder};
+use defguard_wireguard_rs::net::IpAddrMask;
+use defguard_wireguard_rs::peer::Peer;
 
 use crate::relay::discovery::RelayDescriptor;
 use crate::state::identity::{derive_wireguard_overlay_ipv4, validate_wireguard_public_key};
@@ -67,16 +68,14 @@ impl OverlayPeerConfigState {
     }
 }
 
-pub(super) fn wireguard_peer_builder(
-    peer: &OverlayRuntimePeer,
-) -> anyhow::Result<PeerConfigBuilder> {
+pub(super) fn wireguard_peer(peer: &OverlayRuntimePeer) -> anyhow::Result<Peer> {
     let public = wireguard_key(&peer.public_key)?;
-    let allowed = WgAllowedIp {
+    let mut wg_peer = Peer::new(public);
+    wg_peer.endpoint = Some(peer.endpoint);
+    wg_peer.allowed_ips = vec![IpAddrMask {
         address: IpAddr::V4(peer.allowed_ip),
         cidr: 32,
-    };
-    Ok(PeerConfigBuilder::new(&public)
-        .set_endpoint(peer.endpoint)
-        .add_allowed_ip(allowed.address, allowed.cidr)
-        .set_persistent_keepalive_interval(DEFAULT_PERSISTENT_KEEPALIVE_SECS))
+    }];
+    wg_peer.persistent_keepalive_interval = Some(DEFAULT_PERSISTENT_KEEPALIVE_SECS);
+    Ok(wg_peer)
 }

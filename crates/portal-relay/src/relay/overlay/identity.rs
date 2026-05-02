@@ -3,7 +3,7 @@
 use anyhow::{Context, bail};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use wireguard_control::Key as WgKey;
+use defguard_wireguard_rs::key::Key as WgKey;
 
 use crate::state::identity::{
     RelayIdentity, derive_wireguard_overlay_ipv4, normalize_wireguard_private_key,
@@ -60,5 +60,5 @@ pub(super) fn wireguard_key(raw: &str) -> anyhow::Result<WgKey> {
     let bytes: [u8; 32] = decoded
         .try_into()
         .map_err(|_| anyhow::anyhow!("wireguard key must be 32 bytes"))?;
-    Ok(WgKey(bytes))
+    Ok(WgKey::new(bytes))
 }

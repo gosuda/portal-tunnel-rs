@@ -68,7 +68,7 @@ tokio-util = { version = "0.7", features = ["compat"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2.5"
-wireguard-control = "1.7.1"
+defguard_wireguard_rs = { version = "0.9", default-features = false }
 x509-parser = "0.18"
 x25519-dalek = "2"
 yamux = "0.13"

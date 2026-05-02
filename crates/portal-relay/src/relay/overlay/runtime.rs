@@ -2,19 +2,17 @@
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
-use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use anyhow::Context;
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
+use defguard_wireguard_rs::{InterfaceConfiguration, WGApi, WireguardInterfaceApi};
 use futures_util::TryStreamExt;
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
-use wireguard_control::{
-    Backend as WgBackend, DeviceUpdate as WgDeviceUpdate, InterfaceName as WgInterfaceName,
-    Key as WgKey,
-};
 
 use crate::relay::hop_mux::{HOP_MUX_PORT, HopMux};
 use crate::state::identity::normalize_wireguard_private_key;
@@ -22,32 +20,49 @@ use crate::state::identity::normalize_wireguard_private_key;
 use super::{
     OVERLAY_INTERFACE_NAME, OverlayConfig, OverlayDiscoveryInfo, OverlayPeer, OverlayPeerSyncStats,
     OverlayRuntime, OverlayRuntimePeer, WIREGUARD_MTU, identity::wireguard_key,
-    ipc::resolve_peer_endpoint, peers::wireguard_peer_builder,
+    ipc::resolve_peer_endpoint, peers::wireguard_peer,
 };
 
 impl OverlayRuntime {
     pub async fn new(config: OverlayConfig) -> anyhow::Result<Self> {
         let _handle = tokio::runtime::Handle::try_current()
             .context("wireguard overlay requires a Tokio runtime")?;
-        let private_key = normalize_wireguard_private_key(&config.private_key)
+        // Normalize and re-encode so the key passed to the kernel is always
+        // clamped (even if config.private_key was stored pre-clamp).
+        let private_key_bytes = normalize_wireguard_private_key(&config.private_key)
             .context("normalize overlay wireguard private key")?;
-        let interface_name = WgInterfaceName::from_str(OVERLAY_INTERFACE_NAME)
-            .map_err(|err| anyhow::anyhow!("invalid wireguard interface name: {err}"))?;
+        let private_key_b64 = STANDARD.encode(private_key_bytes);
+        let interface_name = OVERLAY_INTERFACE_NAME.to_string();
 
-        // Configure kernel WireGuard. wireguard-control's apply() will create
-        // the link via netlink RTM_NEWLINK if it doesn't exist yet, then push
-        // the private key + listen port via the WG generic netlink family.
-        WgDeviceUpdate::new()
-            .set_private_key(WgKey(private_key))
-            .set_listen_port(config.listen_port)
-            .replace_peers()
-            .apply(&interface_name, WgBackend::Kernel)
-            .with_context(|| {
-                format!(
-                    "configure kernel wireguard interface {OVERLAY_INTERFACE_NAME} on udp port {}",
-                    config.listen_port
-                )
-            })?;
+        // Configure kernel WireGuard. defguard_wireguard_rs creates the link via
+        // netlink RTM_NEWLINK if it doesn't exist yet, then pushes the private key
+        // + listen port via the WG generic netlink family.
+        let mut api: WGApi = WGApi::new(interface_name.clone()).with_context(|| {
+            format!("open wireguard netlink handle for {OVERLAY_INTERFACE_NAME}")
+        })?;
+        api.create_interface().with_context(|| {
+            format!("create kernel wireguard interface {OVERLAY_INTERFACE_NAME}")
+        })?;
+
+        // Guard: if any step between create_interface and Ok(Self) fails, remove
+        // the interface so subsequent restarts get a clean slate.
+        let mut guard = CleanupGuard::new(interface_name.clone());
+
+        api.configure_interface(&InterfaceConfiguration {
+            name: interface_name.clone(),
+            prvkey: private_key_b64,
+            port: config.listen_port,
+            addresses: vec![],
+            peers: vec![],
+            mtu: Some(WIREGUARD_MTU as u32),
+            fwmark: None,
+        })
+        .with_context(|| {
+            format!(
+                "configure kernel wireguard interface {OVERLAY_INTERFACE_NAME} on udp port {}",
+                config.listen_port
+            )
+        })?;
 
         // Bring the interface up and assign the overlay address using rtnetlink.
         configure_overlay_link_address(&interface_name, config.overlay_ipv4)
@@ -58,6 +73,9 @@ impl OverlayRuntime {
                     config.overlay_ipv4
                 )
             })?;
+
+        // Disarm the cleanup guard — all setup steps succeeded.
+        guard.disarm();
 
         info!(
             overlay_ipv4 = %config.overlay_ipv4,
@@ -148,7 +166,6 @@ impl OverlayRuntime {
             .collect::<HashMap<_, _>>();
         let mut configured = self.peers.lock().await;
 
-        let mut update = WgDeviceUpdate::new();
         let mut removed = Vec::new();
         let mut added = Vec::new();
         let mut updated = Vec::new();
@@ -157,8 +174,6 @@ impl OverlayRuntime {
             if desired.contains_key(public_key) {
                 continue;
             }
-            let key = wireguard_key(public_key)?;
-            update = update.remove_peer_by_key(&key);
             removed.push(public_key.clone());
         }
 
@@ -170,11 +185,9 @@ impl OverlayRuntime {
                     stats.unchanged += 1;
                 }
                 Some(_) => {
-                    update = update.add_peer(wireguard_peer_builder(peer)?);
                     updated.push(peer.public_key.clone());
                 }
                 None => {
-                    update = update.add_peer(wireguard_peer_builder(peer)?);
                     added.push(peer.public_key.clone());
                 }
             }
@@ -184,15 +197,35 @@ impl OverlayRuntime {
             return Ok(stats);
         }
 
-        // wireguard-control merges these into a single WG_CMD_SET_DEVICE call.
-        update
-            .apply(&self.interface_name, WgBackend::Kernel)
-            .with_context(|| {
+        // Apply peer removals — one netlink call per removed peer.
+        for key_str in &removed {
+            let key = wireguard_key(key_str)?;
+            let api: WGApi = WGApi::new(self.interface_name.clone()).with_context(|| {
+                format!("open wireguard netlink handle for {}", self.interface_name)
+            })?;
+            api.remove_peer(&key).with_context(|| {
                 format!(
-                    "apply wireguard peer update on {}",
-                    self.interface_name.as_str_lossy()
+                    "remove wireguard peer {} on {}",
+                    key_str, self.interface_name
                 )
             })?;
+        }
+
+        // Apply peer additions and updates — one netlink call per peer.
+        for peer in &desired_peers {
+            if added.contains(&peer.public_key) || updated.contains(&peer.public_key) {
+                let wg_peer = wireguard_peer(peer)?;
+                let api: WGApi = WGApi::new(self.interface_name.clone()).with_context(|| {
+                    format!("open wireguard netlink handle for {}", self.interface_name)
+                })?;
+                api.configure_peer(&wg_peer).with_context(|| {
+                    format!(
+                        "configure wireguard peer {} on {}",
+                        peer.public_key, self.interface_name
+                    )
+                })?;
+            }
+        }
 
         for key in removed {
             configured.remove(&key);
@@ -273,23 +306,55 @@ impl OverlayRuntime {
     }
 }
 
+/// RAII guard that removes the `WireGuard` kernel interface on drop unless
+/// `disarm()` has been called (i.e. construction succeeded).
+struct CleanupGuard {
+    interface_name: String,
+    armed: bool,
+}
+
+impl CleanupGuard {
+    fn new(interface_name: String) -> Self {
+        Self {
+            interface_name,
+            armed: true,
+        }
+    }
+
+    /// Disarm the guard so that drop becomes a no-op.
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for CleanupGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            if let Ok(api) = WGApi::new(self.interface_name.clone()) {
+                let api: WGApi = api;
+                let _ = api.remove_interface();
+            }
+        }
+    }
+}
+
 /// Bring the overlay `WireGuard` link up and assign the overlay address. Idempotent
 /// across restarts: removes any pre-existing addresses on the interface and
 /// re-adds the desired one so a stale state from a previous run cannot trap us.
 async fn configure_overlay_link_address(
-    interface_name: &WgInterfaceName,
+    interface_name: &str,
     overlay_ipv4: std::net::Ipv4Addr,
 ) -> anyhow::Result<()> {
     let (connection, handle, _) = rtnetlink::new_connection().context("open netlink connection")?;
     tokio::spawn(connection);
 
-    let name = interface_name.as_str_lossy().to_string();
+    let name = interface_name.to_string();
     let mut links = handle.link().get().match_name(name.clone()).execute();
     let link = links
         .try_next()
         .await
         .with_context(|| format!("look up wg link {name}"))?
-        .with_context(|| format!("wg link {name} not present after wireguard-control apply"))?;
+        .with_context(|| format!("wg link {name} not present after wireguard interface create"))?;
     let link_index = link.header.index;
 
     // Strip any existing addresses (covers crash-restart scenarios where the

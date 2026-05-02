@@ -5,9 +5,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
-use wireguard_control::{
-    Backend as WgBackend, Device as WgDevice, InterfaceName as WgInterfaceName,
-};
+use defguard_wireguard_rs::{WGApi, WireguardInterfaceApi};
 
 pub mod identity;
 pub mod ipc;
@@ -47,7 +45,7 @@ pub struct OverlayConfig {
 
 pub struct OverlayRuntime {
     pub(super) config: OverlayConfig,
-    pub(super) interface_name: WgInterfaceName,
+    pub(super) interface_name: String,
     pub(super) peers: tokio::sync::Mutex<HashMap<String, OverlayRuntimePeer>>,
     pub(super) closed: AtomicBool,
 }
@@ -105,8 +103,9 @@ impl Drop for OverlayRuntime {
         // start gets a clean slate. Ignore errors (the interface may already be
         // gone or the kernel may not have CAP_NET_ADMIN delegated, which is also
         // fine because the next startup re-applies state).
-        if let Ok(device) = WgDevice::get(&self.interface_name, WgBackend::Kernel) {
-            let _ = device.delete();
+        if let Ok(api) = WGApi::new(self.interface_name.clone()) {
+            let api: WGApi = api;
+            let _ = api.remove_interface();
         }
     }
 }
