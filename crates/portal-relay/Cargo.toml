@@ -9,6 +9,14 @@ description = "Relay server for the portal-tunnel secure tunneling system"
 keywords    = ["tunnel", "relay", "proxy", "wireguard", "tls"]
 categories  = ["network-programming", "cryptography"]
 
+[lib]
+name = "portal_relay"
+path = "src/lib.rs"
+
+[[bin]]
+name = "portal-relay"
+path = "src/main.rs"
+
 [dependencies]
 anyhow.workspace       = true
 base64.workspace       = true
