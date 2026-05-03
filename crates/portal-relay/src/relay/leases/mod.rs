@@ -186,7 +186,6 @@ struct RegisterChallenge {
 }
 
 #[derive(Clone)]
-#[allow(dead_code)]
 struct LeaseRecord {
     identity: Identity,
     hostname: String,
@@ -205,7 +204,6 @@ struct LeaseRecord {
 }
 
 #[derive(Clone)]
-#[allow(dead_code)]
 struct HopRouteRecord {
     identity: Identity,
     hostname: String,

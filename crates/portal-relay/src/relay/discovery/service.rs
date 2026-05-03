@@ -99,7 +99,6 @@ impl DiscoveryState {
         })
     }
 
-    #[allow(dead_code)]
     pub fn overlay_peers(&self, now: DateTime<Utc>) -> Vec<RelayDescriptor> {
         let mut stored = self.relays.lock().expect("discovery relays lock poisoned");
         stored.retain(|_, desc| desc.expires_at > now);

@@ -14,7 +14,6 @@ use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret};
 use crate::auth::identity::{address_from_signing_key, compressed_public_key_hex};
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct RelayIdentity {
     pub name: String,
     pub address: String,
@@ -247,7 +246,6 @@ pub(crate) fn validate_wireguard_public_key(raw: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[allow(dead_code)]
 pub fn derive_wireguard_overlay_ipv4(public_key: &str) -> anyhow::Result<Ipv4Addr> {
     let decoded = STANDARD
         .decode(public_key.trim())

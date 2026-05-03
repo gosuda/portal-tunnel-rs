@@ -55,7 +55,6 @@ impl RelayStream {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub async fn claim(&self, marker: u8) -> Result<ReverseIo, StreamError> {
         loop {
             if let Some(session) = self.ready.lock().await.pop_front() {
@@ -68,7 +67,6 @@ impl RelayStream {
         }
     }
 
-    #[allow(dead_code)]
     pub async fn ready_count(&self) -> usize {
         self.ready.lock().await.len()
     }
@@ -103,7 +101,6 @@ impl ReverseSession {
         }
     }
 
-    #[allow(dead_code)]
     async fn activate(&self, marker: u8) -> Option<ReverseIo> {
         let mut io = self.io.lock().await.take()?;
         if tokio::io::AsyncWriteExt::write_all(&mut io, &[marker])
