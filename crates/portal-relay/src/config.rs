@@ -5,9 +5,9 @@ use anyhow::{Context, bail};
 use clap::Parser;
 use url::Url;
 
-use crate::state::acme::AcmeCloudflareConfig;
+use crate::state::acme::{AcmeConfig, AcmeDnsProviderConfig};
 
-#[derive(Debug, Clone, Parser)]
+#[derive(Clone, Parser)]
 #[command(name = "portal-relay")]
 #[command(about = "Portal relay server implemented in Rust")]
 pub struct RelayConfig {
@@ -93,6 +93,52 @@ pub struct RelayConfig {
     pub aws_dnssec_kms_key_arn: String,
 }
 
+impl std::fmt::Debug for RelayConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RelayConfig")
+            .field("portal_url", &self.portal_url)
+            .field("identity_path", &self.identity_path)
+            .field("api_port", &self.api_port)
+            .field("sni_port", &self.sni_port)
+            .field("trust_proxy_headers", &self.trust_proxy_headers)
+            .field("trusted_proxy_cidrs", &self.trusted_proxy_cidrs)
+            .field("wireguard_port", &self.wireguard_port)
+            .field("udp_enabled", &self.udp_enabled)
+            .field("discovery_enabled", &self.discovery_enabled)
+            .field("bootstraps", &self.bootstraps)
+            .field("tcp_enabled", &self.tcp_enabled)
+            .field("min_port", &self.min_port)
+            .field("max_port", &self.max_port)
+            .field("landing_page_enabled", &self.landing_page_enabled)
+            .field("frontend_dist", &self.frontend_dist)
+            .field("headless_shell_url", &self.headless_shell_url)
+            .field("acme_dns_provider", &self.acme_dns_provider)
+            .field("ens_gasless_enabled", &self.ens_gasless_enabled)
+            .field(
+                "cloudflare_token",
+                &redacted_if_present(&self.cloudflare_token),
+            )
+            .field("gcp_project_id", &self.gcp_project_id)
+            .field("gcp_managed_zone", &self.gcp_managed_zone)
+            .field(
+                "aws_access_key_id",
+                &redacted_if_present(&self.aws_access_key_id),
+            )
+            .field(
+                "aws_secret_access_key",
+                &redacted_if_present(&self.aws_secret_access_key),
+            )
+            .field(
+                "aws_session_token",
+                &redacted_if_present(&self.aws_session_token),
+            )
+            .field("aws_region", &self.aws_region)
+            .field("aws_hosted_zone_id", &self.aws_hosted_zone_id)
+            .field("aws_dnssec_kms_key_arn", &self.aws_dnssec_kms_key_arn)
+            .finish()
+    }
+}
+
 impl RelayConfig {
     pub fn normalize(mut self) -> anyhow::Result<Self> {
         self.portal_url = normalize_relay_url(&self.portal_url)?;
@@ -137,33 +183,88 @@ impl RelayConfig {
         if self.ens_gasless_enabled {
             bail!("ENS gasless automation is not implemented");
         }
-        if !self.gcp_project_id.is_empty() || !self.gcp_managed_zone.is_empty() {
-            bail!("ACME_DNS_PROVIDER=gcloud is not implemented");
-        }
-        if !self.aws_access_key_id.is_empty()
-            || !self.aws_secret_access_key.is_empty()
-            || !self.aws_session_token.is_empty()
-            || !self.aws_region.is_empty()
-            || !self.aws_hosted_zone_id.is_empty()
-            || !self.aws_dnssec_kms_key_arn.is_empty()
-        {
-            bail!("ACME_DNS_PROVIDER=route53 is not implemented");
-        }
+        self.aws_hosted_zone_id = normalize_route53_zone_id(&self.aws_hosted_zone_id);
 
         match self.acme_dns_provider.as_str() {
             "" => {
-                if !self.cloudflare_token.is_empty() {
-                    bail!("CLOUDFLARE_TOKEN requires ACME_DNS_PROVIDER=cloudflare");
-                }
+                self.reject_provider_config_unless_selected("cloudflare", "CLOUDFLARE_TOKEN")?;
+                self.reject_provider_config_unless_selected("gcloud", "GCP_PROJECT_ID")?;
+                self.reject_provider_config_unless_selected("gcloud", "GCP_MANAGED_ZONE")?;
+                self.reject_provider_config_unless_selected("route53", "AWS_ACCESS_KEY_ID")?;
+                self.reject_provider_config_unless_selected("route53", "AWS_SECRET_ACCESS_KEY")?;
+                self.reject_provider_config_unless_selected("route53", "AWS_SESSION_TOKEN")?;
+                self.reject_provider_config_unless_selected("route53", "AWS_REGION")?;
+                self.reject_provider_config_unless_selected("route53", "AWS_HOSTED_ZONE_ID")?;
+                self.reject_provider_config_unless_selected("route53", "AWS_DNSSEC_KMS_KEY_ARN")?;
             }
             "cloudflare" => {
+                self.reject_provider_config_unless_selected("gcloud", "GCP_PROJECT_ID")?;
+                self.reject_provider_config_unless_selected("gcloud", "GCP_MANAGED_ZONE")?;
+                self.reject_provider_config_unless_selected("route53", "AWS_ACCESS_KEY_ID")?;
+                self.reject_provider_config_unless_selected("route53", "AWS_SECRET_ACCESS_KEY")?;
+                self.reject_provider_config_unless_selected("route53", "AWS_SESSION_TOKEN")?;
+                self.reject_provider_config_unless_selected("route53", "AWS_REGION")?;
+                self.reject_provider_config_unless_selected("route53", "AWS_HOSTED_ZONE_ID")?;
+                self.reject_provider_config_unless_selected("route53", "AWS_DNSSEC_KMS_KEY_ARN")?;
                 if self.cloudflare_token.is_empty() {
                     bail!("CLOUDFLARE_TOKEN is required when ACME_DNS_PROVIDER=cloudflare");
                 }
             }
-            "gcloud" => bail!("ACME_DNS_PROVIDER=gcloud is not implemented"),
-            "route53" => bail!("ACME_DNS_PROVIDER=route53 is not implemented"),
+            "gcloud" => {
+                self.reject_provider_config_unless_selected("cloudflare", "CLOUDFLARE_TOKEN")?;
+                self.reject_provider_config_unless_selected("route53", "AWS_ACCESS_KEY_ID")?;
+                self.reject_provider_config_unless_selected("route53", "AWS_SECRET_ACCESS_KEY")?;
+                self.reject_provider_config_unless_selected("route53", "AWS_SESSION_TOKEN")?;
+                self.reject_provider_config_unless_selected("route53", "AWS_REGION")?;
+                self.reject_provider_config_unless_selected("route53", "AWS_HOSTED_ZONE_ID")?;
+                self.reject_provider_config_unless_selected("route53", "AWS_DNSSEC_KMS_KEY_ARN")?;
+                if self.gcp_project_id.is_empty() {
+                    bail!("GCP_PROJECT_ID is required when ACME_DNS_PROVIDER=gcloud");
+                }
+                if self.gcp_managed_zone.is_empty() {
+                    bail!("GCP_MANAGED_ZONE is required when ACME_DNS_PROVIDER=gcloud");
+                }
+            }
+            "route53" => {
+                self.reject_provider_config_unless_selected("cloudflare", "CLOUDFLARE_TOKEN")?;
+                self.reject_provider_config_unless_selected("gcloud", "GCP_PROJECT_ID")?;
+                self.reject_provider_config_unless_selected("gcloud", "GCP_MANAGED_ZONE")?;
+                if !self.aws_session_token.is_empty()
+                    && (self.aws_access_key_id.is_empty() || self.aws_secret_access_key.is_empty())
+                {
+                    bail!("AWS_SESSION_TOKEN requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY");
+                }
+                if self.aws_access_key_id.is_empty() != self.aws_secret_access_key.is_empty() {
+                    bail!("AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY must be supplied together");
+                }
+                if !self.aws_dnssec_kms_key_arn.is_empty() {
+                    bail!("AWS_DNSSEC_KMS_KEY_ARN is not supported by ACME_DNS_PROVIDER=route53");
+                }
+            }
             other => bail!("unsupported ACME_DNS_PROVIDER: {other}"),
+        }
+        Ok(())
+    }
+
+    fn reject_provider_config_unless_selected(
+        &self,
+        expected_provider: &str,
+        field_name: &str,
+    ) -> anyhow::Result<()> {
+        let is_set = match field_name {
+            "CLOUDFLARE_TOKEN" => !self.cloudflare_token.is_empty(),
+            "GCP_PROJECT_ID" => !self.gcp_project_id.is_empty(),
+            "GCP_MANAGED_ZONE" => !self.gcp_managed_zone.is_empty(),
+            "AWS_ACCESS_KEY_ID" => !self.aws_access_key_id.is_empty(),
+            "AWS_SECRET_ACCESS_KEY" => !self.aws_secret_access_key.is_empty(),
+            "AWS_SESSION_TOKEN" => !self.aws_session_token.is_empty(),
+            "AWS_REGION" => !self.aws_region.is_empty(),
+            "AWS_HOSTED_ZONE_ID" => !self.aws_hosted_zone_id.is_empty(),
+            "AWS_DNSSEC_KMS_KEY_ARN" => !self.aws_dnssec_kms_key_arn.is_empty(),
+            _ => bail!("unknown provider config field: {field_name}"),
+        };
+        if is_set {
+            bail!("{field_name} requires ACME_DNS_PROVIDER={expected_provider}");
         }
         Ok(())
     }
@@ -180,11 +281,29 @@ impl RelayConfig {
         root_host(&self.portal_url)
     }
 
-    pub fn acme_cloudflare_config(&self, base_domain: &str) -> Option<AcmeCloudflareConfig> {
-        (self.acme_dns_provider == "cloudflare").then(|| AcmeCloudflareConfig {
+    pub fn acme_config(&self, base_domain: &str) -> Option<AcmeConfig> {
+        let provider = match self.acme_dns_provider.as_str() {
+            "" => None,
+            "cloudflare" => Some(AcmeDnsProviderConfig::Cloudflare {
+                token: self.cloudflare_token.clone(),
+            }),
+            "gcloud" => Some(AcmeDnsProviderConfig::GCloud {
+                project_id: self.gcp_project_id.clone(),
+                managed_zone: self.gcp_managed_zone.clone(),
+            }),
+            "route53" => Some(AcmeDnsProviderConfig::Route53 {
+                access_key_id: self.aws_access_key_id.clone(),
+                secret_access_key: self.aws_secret_access_key.clone(),
+                session_token: self.aws_session_token.clone(),
+                region: self.aws_region.clone(),
+                hosted_zone_id: self.aws_hosted_zone_id.clone(),
+            }),
+            _ => None,
+        }?;
+        Some(AcmeConfig {
             identity_path: self.identity_path.clone(),
             base_domain: base_domain.to_string(),
-            token: self.cloudflare_token.clone(),
+            provider,
         })
     }
 }
@@ -234,6 +353,17 @@ pub fn root_host(portal_url: &str) -> anyhow::Result<String> {
 
 pub fn normalize_hostname(raw: &str) -> String {
     raw.trim().trim_end_matches('.').to_ascii_lowercase()
+}
+
+fn normalize_route53_zone_id(raw: &str) -> String {
+    raw.trim()
+        .trim_start_matches("/hostedzone/")
+        .trim()
+        .to_string()
+}
+
+fn redacted_if_present(raw: &str) -> &str {
+    if raw.is_empty() { "" } else { "<redacted>" }
 }
 
 #[cfg(test)]
@@ -306,11 +436,112 @@ mod tests {
     }
 
     #[test]
-    fn config_rejects_unimplemented_acme_provider() {
+    fn config_rejects_unknown_acme_provider() {
+        let mut cfg = base_config();
+        cfg.acme_dns_provider = "typo".to_string();
+
+        assert!(
+            cfg.normalize()
+                .unwrap_err()
+                .to_string()
+                .contains("unsupported ACME_DNS_PROVIDER")
+        );
+    }
+
+    #[test]
+    fn config_rejects_provider_specific_fields_when_acme_provider_is_empty() {
+        let mut cfg = base_config();
+        cfg.gcp_project_id = "project-id".to_string();
+
+        assert!(
+            cfg.normalize()
+                .unwrap_err()
+                .to_string()
+                .contains("GCP_PROJECT_ID requires ACME_DNS_PROVIDER=gcloud")
+        );
+    }
+
+    #[test]
+    fn config_rejects_provider_specific_fields_when_acme_provider_mismatches() {
+        let mut cfg = base_config();
+        cfg.acme_dns_provider = "cloudflare".to_string();
+        cfg.cloudflare_token = "cf-token".to_string();
+        cfg.aws_hosted_zone_id = "Z123".to_string();
+
+        assert!(
+            cfg.normalize()
+                .unwrap_err()
+                .to_string()
+                .contains("AWS_HOSTED_ZONE_ID requires ACME_DNS_PROVIDER=route53")
+        );
+    }
+
+    #[test]
+    fn config_rejects_route53_dnssec_kms_without_dnssec_support() {
         let mut cfg = base_config();
         cfg.acme_dns_provider = "route53".to_string();
+        cfg.aws_dnssec_kms_key_arn = "arn:aws:kms:us-east-1:123456789012:key/example".to_string();
 
-        assert!(cfg.normalize().unwrap_err().to_string().contains("route53"));
+        assert!(
+            cfg.normalize()
+                .unwrap_err()
+                .to_string()
+                .contains("AWS_DNSSEC_KMS_KEY_ARN")
+        );
+    }
+
+    #[test]
+    fn config_accepts_gcloud_acme_config() {
+        let mut cfg = base_config();
+        cfg.acme_dns_provider = "gcloud".to_string();
+        cfg.gcp_project_id = "project-id".to_string();
+        cfg.gcp_managed_zone = "portal-zone".to_string();
+
+        let cfg = cfg.normalize().unwrap();
+        assert_eq!(cfg.acme_dns_provider, "gcloud");
+        assert_eq!(cfg.gcp_project_id, "project-id");
+        assert_eq!(cfg.gcp_managed_zone, "portal-zone");
+    }
+
+    #[test]
+    fn config_rejects_gcloud_acme_without_managed_zone() {
+        let mut cfg = base_config();
+        cfg.acme_dns_provider = "gcloud".to_string();
+        cfg.gcp_project_id = "project-id".to_string();
+
+        assert!(
+            cfg.normalize()
+                .unwrap_err()
+                .to_string()
+                .contains("GCP_MANAGED_ZONE")
+        );
+    }
+
+    #[test]
+    fn config_accepts_route53_acme_config() {
+        let mut cfg = base_config();
+        cfg.acme_dns_provider = "route53".to_string();
+        cfg.aws_hosted_zone_id = "/hostedzone/Z123".to_string();
+
+        let cfg = cfg.normalize().unwrap();
+        assert_eq!(cfg.acme_dns_provider, "route53");
+        assert_eq!(cfg.aws_hosted_zone_id, "Z123");
+    }
+
+    #[test]
+    fn config_debug_redacts_acme_provider_secrets() {
+        let mut cfg = base_config();
+        cfg.cloudflare_token = "cf-token".to_string();
+        cfg.aws_access_key_id = "access-key".to_string();
+        cfg.aws_secret_access_key = "secret-key".to_string();
+        cfg.aws_session_token = "session-token".to_string();
+
+        let debug = format!("{cfg:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("cf-token"));
+        assert!(!debug.contains("access-key"));
+        assert!(!debug.contains("secret-key"));
+        assert!(!debug.contains("session-token"));
     }
 
     fn base_config() -> RelayConfig {

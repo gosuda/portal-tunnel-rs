@@ -165,7 +165,7 @@ impl Server {
             load_or_create_relay_identity(&cfg.identity_path, &root_host, cfg.discovery_enabled)
                 .context("load or create relay identity")?;
         let acme_manager = cfg
-            .acme_cloudflare_config(&root_host)
+            .acme_config(&root_host)
             .map(AcmeManager::new)
             .transpose()
             .context("configure acme manager")?;
@@ -932,10 +932,7 @@ mod voucher_budget_tests {
     fn consume_exhausts_budget_after_max_issuances() {
         let budget = Arc::new(VoucherBudget::new(MAX_VOUCHER_BUDGET));
         for _ in 0..MAX_VOUCHER_BUDGET {
-            budget
-                .acquire()
-                .expect("within capacity")
-                .consume();
+            budget.acquire().expect("within capacity").consume();
         }
         assert_eq!(budget.in_flight(), MAX_VOUCHER_BUDGET);
         assert!(

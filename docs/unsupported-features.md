@@ -17,7 +17,7 @@ The current Rust relay implements the main relay-server compatibility surface:
 - Discovery endpoints and signed relay descriptors.
 - Experimental `tokio-wireguard` overlay and HopMux wiring.
 - ECDSA P-256/P-384 and RSA keyless signing for the upstream signrpc algorithm set.
-- Cloudflare-managed ACME DNS-01 certificate provisioning, DNS A/TXT sync, and on-disk renewal.
+- Cloudflare, Google Cloud DNS, and Route53 managed ACME DNS-01 certificate provisioning, DNS A/TXT sync, and on-disk renewal.
 - Installer script endpoints, with binary downloads redirected to upstream release assets.
 - Static frontend serving when `FRONTEND_DIST` points at a built upstream frontend dist.
 - Built-in minimal landing page that lists public tunnels and discovered public relays when `FRONTEND_DIST` is absent and `LANDING_PAGE_ENABLED=true`.
@@ -39,9 +39,9 @@ The current Rust relay implements the main relay-server compatibility surface:
 | Full public landing/listing UI | Partially implemented | The built-in Rust page is a minimal server-rendered tunnel and public relay list. It is not the upstream React landing/list/detail/search/filter command-generator UI. |
 | `/thumbnail/<hostname>` endpoint | Not implemented | Thumbnail URLs can be accepted as metadata, but relay-generated thumbnails are unavailable. |
 | `HEADLESS_SHELL_URL` thumbnail capture | Explicitly rejected | Setting `HEADLESS_SHELL_URL` fails startup because headless Chrome/CDP screenshot capture and cache are not ported. |
-| Managed ACME DNS-01 automation | Partially implemented | `ACME_DNS_PROVIDER=cloudflare` is supported. `ACME_DNS_PROVIDER=gcloud` and `ACME_DNS_PROVIDER=route53` still fail startup. |
-| DNS A/TXT sync for managed zones | Partially implemented | Cloudflare root/wildcard A records and ACME TXT records are managed. Google Cloud DNS and Route53 record management are unavailable. |
-| ENS gasless DNSSEC/TXT automation | Explicitly rejected | `ENS_GASLESS_ENABLED=true` and related DNSSEC/KMS settings fail startup. |
+| Managed ACME DNS-01 automation | Implemented for supported providers | `ACME_DNS_PROVIDER=cloudflare`, `ACME_DNS_PROVIDER=gcloud`, and `ACME_DNS_PROVIDER=route53` are supported. Unknown non-empty providers still fail startup; an empty value keeps the manual certificate opt-out behavior. |
+| DNS A/TXT sync for managed zones | Implemented for supported providers | Cloudflare, Google Cloud DNS, and Route53 root/wildcard A records and ACME TXT records are managed. Route53 DNSSEC KMS automation remains unsupported. |
+| ENS gasless DNSSEC/TXT automation | Explicitly rejected | `ENS_GASLESS_ENABLED=true` and related ENS gasless DNSSEC settings fail startup. Route53 DNSSEC/KMS (`AWS_DNSSEC_KMS_KEY_ARN`) also remains unsupported and is rejected. |
 | Production-grade relay mesh/multi-hop parity | Experimental only | Overlay identity, discovery metadata, peer config, `tokio-wireguard`, and HopMux are wired, but multi-hop mesh mode still lacks relay-pair smoke coverage, NAT/keepalive validation, MTU validation, peer churn testing, and Go v2.1.8 mesh interop validation. Treat it as not production-supported. |
 | Upstream docs site | Not ported | The SvelteKit docs site, static examples, package manifests, and docs build workflow are not included. |
 | VS Code extension | Not ported | Upstream `extensions/vscode` is absent. |
@@ -51,7 +51,7 @@ The current Rust relay implements the main relay-server compatibility surface:
 
 ## Known Compatibility Notes
 
-- Managed Cloudflare certificates are written to `fullchain.pem` and `privatekey.pem`; manually provisioned PEM files are still supported and are treated as an override when they cover the root and wildcard relay domains.
+- Managed ACME certificates are written to `fullchain.pem` and `privatekey.pem`; manually provisioned PEM files are still supported and are treated as an override when they cover the root and wildcard relay domains.
 - ACME renewal updates certificate files on disk. The current running TLS acceptor and QUIC config load renewed material after relay restart.
 - The keyless signer supports ECDSA P-256/P-384 and RSA private keys.
 - `LANDING_PAGE_ENABLED=true` only provides the built-in minimal HTML page when no persisted admin setting overrides it.
