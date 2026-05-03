@@ -1,17 +1,114 @@
 [workspace]
 resolver = "3"
+members = [
+    "crates/portal-wire",
+    "crates/portal-crypto",
+    "crates/portal-net",
+    "crates/portal-acme",
+    "crates/portal-relay",
+    "crates/portal-sdk",
+    "crates/portal-relay-bin",
+    "crates/portal-cli",
+    "crates/portal-demo",
+    "xtask",
+]
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.87"
-repository = "https://github.com/gosuda/portal-tunnel"
+rust-version = "1.91"
 license = "MIT"
+repository = "https://github.com/gosuda/portal-tunnel-rs"
+
+[workspace.dependencies]
+# Async runtime + HTTP stack
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec", "rt"] }
+axum = "0.8"
+hyper = { version = "1", features = ["full"] }
+tower = "0.5"
+
+# TLS — rustls MANDATORY (R13). aws_lc_rs provider; prefer-post-quantum opts the
+# X25519+ML-KEM-768 hybrid KEX in once rustls negotiates it. Server-side ECH is
+# tracked in rustls#1980 and will be added when it lands.
+rustls = { version = "0.23.22", default-features = false, features = ["aws_lc_rs", "prefer-post-quantum", "std", "tls12"] }
+
+# Transport + codec
+quinn = "0.11"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+postcard = { version = "1", features = ["alloc"] }
+winnow = "1"
+bon = "3"
+
+# Time / secrets / strings / concurrency primitives
+jiff = "0.2"
+secrecy = "0.10"
+compact_str = { version = "0.9", features = ["serde"] }
+papaya = "0.2"
+arc-swap = "1"
+governor = "0.10"
+figment = { version = "0.10", features = ["env", "json", "toml"] }
+
+# Observability + errors
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.17", default-features = false }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+thiserror = "2"
+eyre = "0.6"
+color-eyre = "0.6"
+
+# CLI + assets + OpenAPI
+clap = { version = "4", features = ["derive"] }
+rust-embed = { version = "8", features = ["compression"] }
+utoipa = "5"
+utoipa-axum = "0.2"
+
+# ACME + Ethereum
+instant-acme = "0.8"
+siwe = "=0.6.1"
+alloy = { version = "0.10", default-features = false, features = ["provider-http", "contract"] }
+
+# Crypto + traits
+k256 = { version = "0.13", features = ["ecdsa"] }
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+trait_variant = "0.1"
+
+# TUI (R15)
+ratatui = { version = "0.30", default-features = false }
+ratatui-crossterm = "0.1"
+
+# DNS providers (R14 / Phase 4) — aws-sdk-route53 explicitly opts out of the
+# legacy hyper-0.14+rustls-0.21 stack per FEAS-R2-4. MSRV floor 1.91.
+aws-sdk-route53 = { version = "1", default-features = false, features = ["behavior-version-latest", "rt-tokio", "default-https-client"] }
+gcp_auth = "0.13"
+
+# Overlay (Phase 6b)
+smoltcp = { version = "0.13", default-features = false }
+brotli = "9"
+
+# Dev-deps register (consumed by member crates' [dev-dependencies])
+divan = "3"
+insta = "1"
+proptest = "1"
+wiremock = "0.6"
+assert_cmd = "2"
+predicates = "3"
 
 [workspace.lints.clippy]
-cargo = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
-perf = { level = "deny", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+# Workspace dep tree commonly produces multiple major versions of leaf crates
+# (rand, hashbrown, getrandom, etc.). We accept the noise here; cargo-deny
+# `multiple-versions = "warn"` is the operational gate.
+multiple_crate_versions = "allow"
+# Stub-crate metadata (readme/keywords/categories) lands in Phase 7 release prep.
+cargo_common_metadata = "allow"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
 unused_must_use = "deny"
+missing_docs = "warn"

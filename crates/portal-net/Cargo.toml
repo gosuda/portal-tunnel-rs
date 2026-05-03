@@ -1,0 +1,11 @@
+[package]
+name = "portal-net"
+version = "0.1.0"
+description = "Transport layer — quinn-based QUIC backhaul, raw TCP/UDP relay, datagram session."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true

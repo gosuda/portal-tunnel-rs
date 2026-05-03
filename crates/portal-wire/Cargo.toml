@@ -1,0 +1,11 @@
+[package]
+name = "portal-wire"
+version = "0.1.0"
+description = "Greenfield wire types, codecs, and constants for portal-tunnel."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true

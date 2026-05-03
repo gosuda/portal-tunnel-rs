@@ -1,0 +1,15 @@
+[package]
+name = "portal-cli"
+version = "0.1.0"
+description = "User-facing client CLI; ships as the `portal` binary (R5)."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "portal"
+path = "src/main.rs"
+
+[lints]
+workspace = true
