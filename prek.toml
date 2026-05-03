@@ -1,0 +1,67 @@
+# prek (https://prek.j178.dev) git-hooks for portal-tunnel-rs.
+# Install once per checkout: `cargo install prek` (or `pip install prek` —
+# the pip distribution ships the prebuilt Rust binary; no Python runtime
+# needed at hook invocation), then `prek install`.
+#:schema https://www.schemastore.org/prek.json
+
+[[repos]]
+repo = "builtin"
+hooks = [
+    { id = "trailing-whitespace" },
+    { id = "end-of-file-fixer" },
+    { id = "check-added-large-files" },
+    { id = "check-merge-conflict" },
+    { id = "check-toml" },
+    { id = "check-yaml" },
+]
+
+[[repos]]
+repo = "local"
+
+# Pre-commit gates (fast feedback; mirrors CI workflow's fmt/clippy/taplo
+# /machete jobs so a clean local commit lands clean in CI).
+[[repos.hooks]]
+id = "cargo-fmt"
+name = "cargo fmt --check --all"
+entry = "cargo fmt --check --all"
+language = "system"
+types = ["rust"]
+pass_filenames = false
+stages = ["pre-commit"]
+
+[[repos.hooks]]
+id = "cargo-clippy"
+name = "cargo clippy --workspace --all-targets -- -D warnings"
+entry = "cargo clippy --workspace --all-targets -- -D warnings"
+language = "system"
+types = ["rust"]
+pass_filenames = false
+stages = ["pre-commit"]
+
+[[repos.hooks]]
+id = "taplo-fmt"
+name = "taplo fmt --check"
+entry = "taplo fmt --check"
+language = "system"
+files = "\\.toml$"
+pass_filenames = false
+stages = ["pre-commit"]
+
+[[repos.hooks]]
+id = "cargo-machete"
+name = "cargo machete (unused-dep detection)"
+entry = "cargo machete"
+language = "system"
+files = "Cargo\\.toml$"
+pass_filenames = false
+stages = ["pre-commit"]
+
+# Pre-push gate (slower; full test run before any history is published).
+[[repos.hooks]]
+id = "cargo-nextest"
+name = "cargo nextest run --workspace"
+entry = "cargo nextest run --workspace"
+language = "system"
+types = ["rust"]
+pass_filenames = false
+stages = ["pre-push"]
