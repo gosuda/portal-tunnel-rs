@@ -49,6 +49,18 @@ The current Rust relay implements the main relay-server compatibility surface:
 | Release asset build matrix | Partially implemented | Tag pushes publish a relay container image to the Forgejo registry. There is still no upstream-equivalent GitHub release workflow or Rust `portal` client assets. |
 | Relay-hosted binary assets | Redirect-only | `/install/bin/*` redirects to the official upstream GitHub release assets, so a relay-hosted install script installs the upstream Go client, not a Rust client. |
 
+## ACME Provider And ENS Gasless Delta Details
+
+Route53 and Google Cloud DNS ACME DNS-01 providers (A/TXT record management) are now implemented and supported. This section covers only the remaining DNSSEC/KMS and ENS gasless gaps, which are unsupported-feature gaps, not wire-compatibility deltas: Rust rejects these configurations at startup instead of claiming support with divergent behavior.
+
+### Route53 DNSSEC/KMS Automation (Unsupported)
+
+Route53 DNSSEC/KMS requires an AWS DNS client abstraction with tests that do not contact AWS, hosted-zone DNSSEC discovery through `GetDNSSEC`, DNSSEC enablement through `EnableHostedZoneDNSSEC`, and KSK creation/activation through `CreateKeySigningKey` using `AWS_DNSSEC_KMS_KEY_ARN` when no ACTIVE KSK exists. Config fails startup with a clear error until this is implemented.
+
+### ENS Gasless DNSSEC/TXT Automation (Unsupported)
+
+ENS gasless requires end-to-end testable DNSSEC proof handling, relayer/API semantics, configured gasless address handling, and safeguards proving DNS/Ethereum state mutations match upstream behavior before enabling `ENS_GASLESS_ENABLED`. Config fails startup with a clear error until this is implemented.
+
 ## Known Compatibility Notes
 
 - Managed ACME certificates are written to `fullchain.pem` and `privatekey.pem`; manually provisioned PEM files are still supported and are treated as an override when they cover the root and wildcard relay domains.
