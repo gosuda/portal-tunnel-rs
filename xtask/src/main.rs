@@ -62,10 +62,11 @@ fn run_ci(repo_root: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     ) {
         failures.push("cargo clippy");
     }
-    if !cmd_ok(
+    if !cmd_ok_with_env(
         repo_root,
         "cargo",
         &["nextest", "run", "--workspace", "--no-fail-fast"],
+        &[("PROPTEST_CASES", "4096")],
     ) {
         failures.push("cargo nextest");
     }
@@ -92,10 +93,21 @@ fn run_ci(repo_root: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn cmd_ok(repo_root: &PathBuf, program: &str, args: &[&str]) -> bool {
-    let st = Command::new(program)
-        .args(args)
-        .current_dir(repo_root)
-        .status();
+    cmd_ok_with_env(repo_root, program, args, &[])
+}
+
+fn cmd_ok_with_env(
+    repo_root: &PathBuf,
+    program: &str,
+    args: &[&str],
+    env: &[(&str, &str)],
+) -> bool {
+    let mut cmd = Command::new(program);
+    cmd.args(args).current_dir(repo_root);
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    let st = cmd.status();
     match st {
         Ok(s) if s.success() => true,
         Ok(_) => false,

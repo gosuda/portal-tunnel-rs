@@ -7,8 +7,6 @@ use portal_wire::descriptor::RelayDescriptor;
 use proptest::prelude::*;
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(16))]
-
     #[test]
     fn descriptor_inner_under_cap(addr_octet in 1u8..255u8) {
         let d = RelayDescriptor {

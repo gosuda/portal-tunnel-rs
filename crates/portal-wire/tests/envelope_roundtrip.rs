@@ -7,8 +7,6 @@ use portal_wire::envelope::{Audience, Claims, Envelope, Purpose};
 use proptest::prelude::*;
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(32))]
-
     #[test]
     fn envelope_postcard_roundtrip(
         payload in prop::collection::vec(any::<u8>(), 0..512),
