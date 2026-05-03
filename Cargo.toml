@@ -30,7 +30,12 @@ tower = "0.5"
 # TLS — rustls MANDATORY (R13). aws_lc_rs provider; prefer-post-quantum opts the
 # X25519+ML-KEM-768 hybrid KEX in once rustls negotiates it. Server-side ECH is
 # tracked in rustls#1980 and will be added when it lands.
-rustls = { version = "0.23.22", default-features = false, features = ["aws_lc_rs", "prefer-post-quantum", "std", "tls12"] }
+rustls = { version = "0.23.22", default-features = false, features = [
+    "aws_lc_rs",
+    "prefer-post-quantum",
+    "std",
+    "tls12",
+] }
 
 # Transport + codec
 quinn = "0.11"
@@ -80,7 +85,11 @@ ratatui-crossterm = "0.1"
 
 # DNS providers (R14 / Phase 4) — aws-sdk-route53 explicitly opts out of the
 # legacy hyper-0.14+rustls-0.21 stack per FEAS-R2-4. MSRV floor 1.91.
-aws-sdk-route53 = { version = "1", default-features = false, features = ["behavior-version-latest", "rt-tokio", "default-https-client"] }
+aws-sdk-route53 = { version = "1", default-features = false, features = [
+    "behavior-version-latest",
+    "rt-tokio",
+    "default-https-client",
+] }
 gcp_auth = "0.13"
 
 # Overlay (Phase 6b)

@@ -1,0 +1,21 @@
+include = [
+    "Cargo.toml",
+    "crates/*/Cargo.toml",
+    "xtask/Cargo.toml",
+    "deny.toml",
+    "prek.toml",
+    "rust-toolchain.toml",
+    ".cargo/config.toml",
+]
+exclude = [
+    "**/target/**",
+    "**/.claude/**",
+    "**/portal-tunnel/**",
+    "**/.git/**",
+]
+
+[formatting]
+align_entries = false
+column_width = 100
+indent_string = "    "
+reorder_keys = false

@@ -1,0 +1,25 @@
+# Workspace cargo config — task aliases + sparse registry.
+#
+# cargo-vet supply-chain audit setup (supply-chain/audits.toml +
+# supply-chain/config.toml) is deferred to Phase 5 per scope-guardian #2:
+# the supply chain at Phase 0 bootstrap has zero crates of our own to gate.
+
+[registries.crates-io]
+protocol = "sparse"
+
+[net]
+git-fetch-with-cli = true
+
+[alias]
+# `cargo xtask <task>` — workspace task runner stub.
+xtask = "run --package xtask --release --"
+
+# `cargo cov` — alias for cargo-llvm-cov.
+cov = "llvm-cov --workspace"
+
+# `cargo bench-divan` — divan harness; criterion runs under `cargo bench`.
+bench-divan = "bench --bench divan"
+
+# `cargo ci` — local mirror of the CI workflow gate set; runs the same
+# checks as .github/workflows/ci.yml on a single machine.
+ci = "xtask ci"
