@@ -31,9 +31,14 @@ impl LeaseRegistry {
                 .leases
                 .get_mut(&identity_key)
                 .ok_or(LeaseError::LeaseNotFound)?;
-            let (access_token, _) =
-                issue_lease_access_token(&self.relay, &self.issuer, &lease.identity, expires_at, now)
-                    .map_err(|err| LeaseError::InvalidRequest(err.to_string()))?;
+            let (access_token, _) = issue_lease_access_token(
+                &self.relay,
+                &self.issuer,
+                &lease.identity,
+                expires_at,
+                now,
+            )
+            .map_err(|err| LeaseError::InvalidRequest(err.to_string()))?;
             lease.expires_at = expires_at;
             lease.last_seen_at = now;
             lease.client_ip.clone_from(&client_ip);

@@ -118,9 +118,8 @@ pub fn verify_relay_descriptor(mut desc: RelayDescriptor) -> anyhow::Result<Rela
     let mut desc = normalize_relay_descriptor(desc)?;
     let canonical = canonical_descriptor_bytes(&desc)?;
     let hash = Sha256::digest(&canonical);
-    let key =
-        VerifyingKey::recover_from_prehash(&hash, &sig, recovery_id)
-            .context("recover relay descriptor public key")?;
+    let key = VerifyingKey::recover_from_prehash(&hash, &sig, recovery_id)
+        .context("recover relay descriptor public key")?;
     let recovered = address_from_verifying_key(&key);
     if !recovered.eq_ignore_ascii_case(desc.address.trim()) {
         bail!("relay descriptor address does not match recovered signing key");

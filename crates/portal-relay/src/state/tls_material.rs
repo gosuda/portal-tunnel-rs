@@ -52,15 +52,27 @@ impl KeylessSigner {
     }
 
     pub fn sign_rsa_pkcs1v15_sha256(&self, digest: &[u8]) -> anyhow::Result<Vec<u8>> {
-        self.sign_rsa_pkcs1v15("RSA_PKCS1V15_SHA256", digest, Pkcs1v15Sign::new::<Sha256_010>())
+        self.sign_rsa_pkcs1v15(
+            "RSA_PKCS1V15_SHA256",
+            digest,
+            Pkcs1v15Sign::new::<Sha256_010>(),
+        )
     }
 
     pub fn sign_rsa_pkcs1v15_sha384(&self, digest: &[u8]) -> anyhow::Result<Vec<u8>> {
-        self.sign_rsa_pkcs1v15("RSA_PKCS1V15_SHA384", digest, Pkcs1v15Sign::new::<Sha384_010>())
+        self.sign_rsa_pkcs1v15(
+            "RSA_PKCS1V15_SHA384",
+            digest,
+            Pkcs1v15Sign::new::<Sha384_010>(),
+        )
     }
 
     pub fn sign_rsa_pkcs1v15_sha512(&self, digest: &[u8]) -> anyhow::Result<Vec<u8>> {
-        self.sign_rsa_pkcs1v15("RSA_PKCS1V15_SHA512", digest, Pkcs1v15Sign::new::<Sha512_010>())
+        self.sign_rsa_pkcs1v15(
+            "RSA_PKCS1V15_SHA512",
+            digest,
+            Pkcs1v15Sign::new::<Sha512_010>(),
+        )
     }
 
     pub fn sign_rsa_pss_sha256(&self, digest: &[u8]) -> anyhow::Result<Vec<u8>> {

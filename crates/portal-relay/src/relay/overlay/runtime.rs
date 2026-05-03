@@ -394,7 +394,9 @@ async fn configure_overlay_link_address(
     link_msg.header.index = link_index;
     link_msg.header.flags = LinkFlags::Up;
     link_msg.header.change_mask = LinkFlags::Up;
-    link_msg.attributes.push(LinkAttribute::Mtu(WIREGUARD_MTU as u32));
+    link_msg
+        .attributes
+        .push(LinkAttribute::Mtu(WIREGUARD_MTU as u32));
     handle
         .link()
         .set(link_msg)

@@ -39,13 +39,19 @@ impl AnnounceLimiter {
 
     #[must_use]
     pub fn allow(&self, src_ip: &str) -> bool {
-        let key = if src_ip.is_empty() { "<unknown>" } else { src_ip };
+        let key = if src_ip.is_empty() {
+            "<unknown>"
+        } else {
+            src_ip
+        };
         let now = Instant::now();
         let mut inner = self.inner.lock().expect("announce limiter lock poisoned");
 
         // Prune idle buckets on schedule
         if now.duration_since(inner.last_prune) >= PRUNE_INTERVAL {
-            inner.buckets.retain(|_, b| now.duration_since(b.last_update) < BUCKET_IDLE_TTL);
+            inner
+                .buckets
+                .retain(|_, b| now.duration_since(b.last_update) < BUCKET_IDLE_TTL);
             inner.last_prune = now;
         }
 
@@ -56,7 +62,10 @@ impl AnnounceLimiter {
         let bucket = inner
             .buckets
             .entry(key.to_string())
-            .or_insert_with(|| AnnounceBucket { tokens: BURST, last_update: now });
+            .or_insert_with(|| AnnounceBucket {
+                tokens: BURST,
+                last_update: now,
+            });
 
         // Token replenishment (token bucket algorithm)
         let elapsed_secs = now.duration_since(bucket.last_update).as_secs_f64();
@@ -109,13 +118,19 @@ mod tests {
         }
         assert!(!limiter.allow("1.1.1.1"), "1.1.1.1 should be exhausted");
         // Other IP should still be allowed
-        assert!(limiter.allow("2.2.2.2"), "2.2.2.2 should be independent and allowed");
+        assert!(
+            limiter.allow("2.2.2.2"),
+            "2.2.2.2 should be independent and allowed"
+        );
     }
 
     #[test]
     fn test_unknown_key_for_empty_ip() {
         let limiter = AnnounceLimiter::new();
         // Should not panic, uses "<unknown>" key
-        assert!(limiter.allow(""), "empty ip should be allowed via <unknown> key");
+        assert!(
+            limiter.allow(""),
+            "empty ip should be allowed via <unknown> key"
+        );
     }
 }
