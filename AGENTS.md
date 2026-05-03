@@ -1,11 +1,11 @@
 # portal-tunnel-rs — AGENTS.md
 
-Greenfield Rust port of Portal. Go upstream (`gosuda/portal-tunnel` v2.1.8 in
-the sibling `portal-tunnel/` checkout) is **read-only behavioral spec**, not a
-wire constraint — see [ADR-0001](docs/adr/0001-greenfield-wire.md). The v2.1.8
-user-base migration posture is in
-[ADR-0003](docs/adr/0003-registry-fork-and-v2-1-8-migration.md). The
-public-internet upgrade-encouragement matrix is in
+Greenfield Rust port of Portal. Go upstream (`gosuda/portal-tunnel` in the
+sibling `portal-tunnel/` checkout) is **read-only behavioral spec**, not a
+wire constraint — see [ADR-0001](docs/adr/0001-greenfield-wire.md). Legacy-
+deployment migration posture is in
+[ADR-0003](docs/adr/0003-registry-fork-and-v2-1-8-migration.md). Public-
+internet upgrade-encouragement matrix is in
 [ADR-0004](docs/adr/0004-supported-clients-and-upgrade-encouragement.md).
 
 ## Crate ownership
