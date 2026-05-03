@@ -8,6 +8,28 @@ use super::hop_routes::one_level_wildcard_hostname;
 use super::{BridgeTarget, HopRelayTarget, LeaseRegistry, NextHopTarget};
 
 impl LeaseRegistry {
+    pub fn thumbnail_eligible(&self, hostname: &str) -> bool {
+        let hostname = crate::auth::identity::normalize_hostname(hostname);
+        if hostname.is_empty() {
+            return false;
+        }
+        let wildcard = one_level_wildcard_hostname(&hostname);
+        let now = Utc::now();
+        let inner = self.inner.lock().expect("lease registry lock poisoned");
+        inner.leases.values().any(|lease| {
+            lease.hop_token.is_empty()
+                && !lease.hostname.is_empty()
+                && (lease.hostname == hostname
+                    || wildcard.as_deref() == Some(lease.hostname.as_str()))
+                && lease.expires_at > now
+                && !lease.metadata.hide
+                && lease.metadata.thumbnail.trim().is_empty()
+                && self
+                    .policy
+                    .is_identity_routable(&lease.identity.key(), &lease.client_ip)
+        })
+    }
+
     pub fn lookup_stream(&self, hostname: &str) -> Option<BridgeTarget> {
         let hostname = crate::auth::identity::normalize_hostname(hostname);
         let wildcard = one_level_wildcard_hostname(&hostname);

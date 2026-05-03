@@ -8,6 +8,7 @@ pub mod server;
 pub mod sni;
 pub mod stream;
 pub mod tcp_port;
+pub mod thumbnail;
 pub mod udp_datagram;
 
 pub use server::{AppState, Server};

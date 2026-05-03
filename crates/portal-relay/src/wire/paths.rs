@@ -30,3 +30,5 @@ pub const PATH_SDK_HOP: &str = "/sdk/hop";
 pub const PATH_SDK_CONNECT: &str = "/sdk/connect";
 pub const PATH_ADMIN_RESERVE: &str = "/admin/reserve";
 pub const PATH_ADMIN_METRICS: &str = "/admin/metrics";
+pub const PATH_THUMBNAIL: &str = "/thumbnail";
+pub const PATH_THUMBNAIL_PREFIX: &str = "/thumbnail/";

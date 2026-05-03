@@ -111,6 +111,11 @@ impl FrontendState {
             return not_found();
         };
         let leases = state.leases.public_leases().await;
+        if let Some(thumbnails) = &state.thumbnails {
+            thumbnails
+                .prefetch_public_leases(std::sync::Arc::clone(&state.leases), &leases)
+                .await;
+        }
         let leases = serde_json::to_string(&leases).unwrap_or_else(|_| "[]".to_string());
         let ssr_script =
             format!("<script id=\"__SSR_DATA__\" type=\"application/json\">{leases}</script>");
@@ -163,6 +168,11 @@ async fn serve_builtin_landing_page(state: &AppState, method: &str) -> ApiReply 
         return method_not_allowed();
     }
     let mut leases = state.leases.public_leases().await;
+    if let Some(thumbnails) = &state.thumbnails {
+        thumbnails
+            .prefetch_public_leases(std::sync::Arc::clone(&state.leases), &leases)
+            .await;
+    }
     leases.sort_by(|a, b| a.hostname.cmp(&b.hostname));
     let relays = public_relays(state);
 

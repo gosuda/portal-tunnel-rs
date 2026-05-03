@@ -511,6 +511,42 @@ fn verifies_go_v218_issued_lease_token() {
 }
 
 #[test]
+fn thumbnail_eligible_rejects_hop_routes() {
+    let registry = test_registry();
+    let now = Utc::now();
+    let route = HopRouteRecord {
+        identity: Identity {
+            name: "demo".to_string(),
+            address: "0x0000000000000000000000000000000000000001".to_string(),
+            public_key: String::new(),
+            private_key: String::new(),
+        },
+        hostname: "demo.localhost".to_string(),
+        metadata: LeaseMetadata::default(),
+        expires_at: now + chrono::Duration::seconds(30),
+        first_seen_at: now,
+        hop_token: String::new(),
+        next_overlay_ipv4: "100.64.0.10".to_string(),
+        next_token: "hpt_next".to_string(),
+    };
+    registry
+        .inner
+        .lock()
+        .expect("lease registry lock poisoned")
+        .hop_routes
+        .insert(hop_route_record_key(&route), route);
+
+    assert!(!registry.thumbnail_eligible("demo.localhost"));
+    assert_eq!(
+        registry.lookup_next_hop("demo.localhost"),
+        Some(NextHopTarget {
+            overlay_ipv4: "100.64.0.10".to_string(),
+            token: "hpt_next".to_string(),
+        })
+    );
+}
+
+#[test]
 fn one_level_wildcard_candidate_uses_only_leftmost_label() {
     use super::hop_routes::one_level_wildcard_hostname;
     assert_eq!(

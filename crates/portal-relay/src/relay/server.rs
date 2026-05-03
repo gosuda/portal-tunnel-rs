@@ -25,6 +25,7 @@ use crate::relay::hop_mux::{HopMux, HopMuxConnector, HopStream};
 use crate::relay::leases::{HopRelayTarget, LeaseRegistry, LeaseRegistryConfig};
 use crate::relay::overlay::{OverlayConfig, OverlayPeer, OverlayRuntime};
 use crate::relay::sni::handle_public_ingress;
+use crate::relay::thumbnail::ThumbnailService;
 use crate::relay::udp_datagram::{
     QuicBackhaulControlResponse, read_control_message, write_control_response,
 };
@@ -144,6 +145,7 @@ pub struct AppState {
     pub overlay: Option<Arc<OverlayRuntime>>,
     pub hop_mux: Option<Arc<HopMux>>,
     pub metrics: Arc<RelayMetrics>,
+    pub thumbnails: Option<Arc<ThumbnailService>>,
     pub voucher_budget: Arc<VoucherBudget>,
 }
 
@@ -249,6 +251,8 @@ impl Server {
             .transpose()
             .context("initialize frontend static serving")?
             .map(Arc::new);
+        let thumbnails = (!cfg.headless_shell_url.is_empty())
+            .then(|| Arc::new(ThumbnailService::new(cfg.headless_shell_url.clone())));
         info!(
             portal_url = %cfg.portal_url,
             root_host = %identity.name,
@@ -266,6 +270,7 @@ impl Server {
             trust_proxy_headers = cfg.trust_proxy_headers,
             bootstrap_count = cfg.bootstraps.len(),
             acme_dns_provider = %cfg.acme_dns_provider,
+            thumbnails_enabled = thumbnails.is_some(),
             "relay runtime configured"
         );
         let state = Arc::new(AppState {
@@ -280,6 +285,7 @@ impl Server {
             discovery,
             overlay,
             hop_mux,
+            thumbnails,
             metrics,
             voucher_budget: Arc::new(VoucherBudget::new(MAX_VOUCHER_BUDGET)),
         });

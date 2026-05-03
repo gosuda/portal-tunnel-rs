@@ -148,9 +148,6 @@ impl RelayConfig {
             bail!("identity path is required");
         }
         self.headless_shell_url = self.headless_shell_url.trim().to_string();
-        if !self.headless_shell_url.is_empty() {
-            bail!("thumbnail generation via HEADLESS_SHELL_URL is not implemented");
-        }
         self.normalize_acme_config()?;
 
         let has_port_range = self.min_port > 0 && self.max_port > 0;
@@ -399,16 +396,13 @@ mod tests {
     }
 
     #[test]
-    fn config_rejects_unimplemented_headless_thumbnail_config() {
+    fn config_accepts_headless_thumbnail_config() {
         let mut cfg = base_config();
-        cfg.headless_shell_url = "ws://headless-shell:9222".to_string();
+        cfg.headless_shell_url = " http://headless-shell:9222 ".to_string();
 
-        assert!(
-            cfg.normalize()
-                .unwrap_err()
-                .to_string()
-                .contains("thumbnail")
-        );
+        let cfg = cfg.normalize().unwrap();
+
+        assert_eq!(cfg.headless_shell_url, "http://headless-shell:9222");
     }
 
     #[test]

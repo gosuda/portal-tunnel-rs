@@ -58,6 +58,7 @@ thiserror.workspace    = true
 tokio.workspace        = true
 tokio-util.workspace   = true
 tokio-rustls.workspace = true
+tokio-tungstenite.workspace = true
 defguard_wireguard_rs.workspace = true
 rtnetlink.workspace    = true
 netlink-packet-route.workspace = true

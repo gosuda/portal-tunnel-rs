@@ -27,7 +27,7 @@ use crate::wire::paths::{
     PATH_ADMIN_PREFIX, PATH_APP, PATH_DISCOVERY, PATH_DISCOVERY_ANNOUNCE, PATH_HEALTHZ,
     PATH_INSTALL_BIN_PREFIX, PATH_INSTALL_POWERSHELL, PATH_INSTALL_SHELL, PATH_SDK_DOMAIN,
     PATH_SDK_HOP, PATH_SDK_REGISTER, PATH_SDK_REGISTER_CHALLENGE, PATH_SDK_RENEW,
-    PATH_SDK_UNREGISTER, PATH_TUNNEL_STATUS, PATH_V1_SIGN,
+    PATH_SDK_UNREGISTER, PATH_THUMBNAIL, PATH_THUMBNAIL_PREFIX, PATH_TUNNEL_STATUS, PATH_V1_SIGN,
 };
 
 pub struct ApiReply {
@@ -53,6 +53,23 @@ pub async fn handle_request(
     match (method, path) {
         ("GET", PATH_HEALTHZ) => json_ok(StatusCode::OK, &HealthzResponse { status: "ok" }),
         (_, PATH_HEALTHZ) => method_not_allowed(),
+
+        ("GET", path) if path.starts_with(PATH_THUMBNAIL_PREFIX) => {
+            match (
+                &state.thumbnails,
+                crate::relay::thumbnail::thumbnail_hostname(path),
+            ) {
+                (Some(thumbnails), Some(hostname)) => {
+                    thumbnails
+                        .handle_get(Arc::clone(&state.leases), hostname)
+                        .await
+                }
+                _ => crate::relay::thumbnail::thumbnail_not_found(),
+            }
+        }
+        ("GET", PATH_THUMBNAIL) => crate::relay::thumbnail::thumbnail_not_found(),
+        (_, PATH_THUMBNAIL) => method_not_allowed(),
+        (_, path) if path.starts_with(PATH_THUMBNAIL_PREFIX) => method_not_allowed(),
 
         ("GET", PATH_SDK_DOMAIN) => {
             let mut response = json_ok(
@@ -607,7 +624,7 @@ mod tests {
     use crate::relay::leases::{LeaseRegistry, LeaseRegistryConfig};
     use crate::state::identity::RelayIdentity;
     use crate::state::tls_material::load_or_create_tls_material;
-    use crate::wire::paths::{PATH_APP, PATH_SDK_HOP, PATH_SDK_REGISTER_CHALLENGE};
+    use crate::wire::paths::{PATH_APP, PATH_SDK_HOP, PATH_SDK_REGISTER_CHALLENGE, PATH_THUMBNAIL};
 
     #[test]
     fn healthz_response_is_enveloped() {
@@ -705,6 +722,42 @@ mod tests {
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&response.body).unwrap()["error"]["code"],
             "feature_unavailable"
+        );
+    }
+
+    #[tokio::test]
+    async fn thumbnail_without_hostname_returns_empty_404() {
+        let response = handle_request(
+            test_state(),
+            "GET",
+            PATH_THUMBNAIL,
+            &[],
+            "127.0.0.1".to_string(),
+            Vec::new(),
+        )
+        .await;
+
+        assert_eq!(response.status, StatusCode::NOT_FOUND);
+        assert!(response.headers.is_empty());
+        assert!(response.body.is_empty());
+    }
+
+    #[tokio::test]
+    async fn thumbnail_without_hostname_method_mismatch_is_method_not_allowed() {
+        let response = handle_request(
+            test_state(),
+            "POST",
+            PATH_THUMBNAIL,
+            &[],
+            "127.0.0.1".to_string(),
+            Vec::new(),
+        )
+        .await;
+
+        assert_eq!(response.status, StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(
+            header_value(&response.headers, "Content-Type").as_deref(),
+            Some("application/json")
         );
     }
 
@@ -903,6 +956,7 @@ mod tests {
             discovery,
             overlay: None,
             hop_mux: None,
+            thumbnails: None,
             metrics: Arc::new(crate::relay::bridge::RelayMetrics::default()),
             voucher_budget: Arc::new(crate::relay::server::VoucherBudget::new(
                 crate::relay::server::MAX_VOUCHER_BUDGET,
