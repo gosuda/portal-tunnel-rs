@@ -1,7 +1,8 @@
 # Portal greenfield wire protocol
 
-**Status:** active (ADR-0001).  
-**Last verified against `crates/portal-wire` commit:** `<set by CI — run \`git log -1 --format=%H crates/portal-wire\`>`
+<!-- Last verified against crates/portal-wire commit: 4a57b8580aadf8cc883cabc1783a02a551e7c23d -->
+
+**Status:** active (ADR-0001).
 
 This document is the normative specification for the Rust reference implementation. Go `gosuda/portal-tunnel` v2.1.8 is a behavioral reference only; bytes on the wire are **not** compatible with Go marker-byte framing or ES256K JWT envelopes.
 

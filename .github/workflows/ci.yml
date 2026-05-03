@@ -24,6 +24,35 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all --check
 
+  wire-protocol-gates:
+    name: wire-protocol drift + v0.1 ReputationDelta gate (U16)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91"
+      - uses: Swatinem/rust-cache@v2
+      - name: Spec drift vs crates/portal-wire HEAD
+        run: cargo run -p xtask --quiet -- wire-drift-check
+      - name: v0.1 crates must not construct ReputationDelta on the wire
+        run: |
+          set -euo pipefail
+          targets=(
+            crates/portal-relay
+            crates/portal-net
+            crates/portal-sdk
+            crates/portal-cli
+            crates/portal-relay-bin
+            crates/portal-demo
+          )
+          if rg --line-number --fixed-strings \
+            -e 'ReputationDelta::new' -e 'ReputationDelta {' \
+            "${targets[@]}"; then
+            echo "::error::U16 gate: v0.1 crates must not emit ReputationDelta (R10 v0.2 only)."
+            exit 1
+          fi
+
   taplo:
     name: taplo fmt --check
     runs-on: ubuntu-latest
