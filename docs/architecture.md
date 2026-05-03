@@ -1,6 +1,6 @@
 # Architecture
 
-> Phase 0 skeleton. Each subsequent phase plan extends the relevant section.
+> Phase 0 + Phase 1 baseline. Wire framing and threat model live in their own documents (see below). Each subsequent phase plan extends the relevant section.
 
 ## Component map
 
@@ -120,9 +120,8 @@ expected anti-pattern; this section exists to head it off.
 
 The following sections will be populated by the corresponding phase plans:
 
-- **Wire framing + codec layout** — Phase 1 (`docs/wire-protocol.md` + this
-  file's `## Wire framing` section)
-- **Threat model** — Phase 1 (`docs/threat-model.md` per SEC-006)
+- **Wire framing + codec layout** — landed in Phase 1: see [`docs/wire-protocol.md`](wire-protocol.md). The U16 drift marker (`xtask/src/wire_drift_check.rs`) keeps the spec and `crates/portal-wire/src/*` in lockstep on every PR.
+- **Threat model** — landed in Phase 1: see [`docs/threat-model.md`](threat-model.md). Adversary capabilities, multi-hop privacy claims, R10 8-class enumeration, and SEC-001..005 evaluation context are documented there.
 - **Lease registry data layout (papaya `pin_owned()` boundaries)** — Phase 5
 - **Hot-reload semantics for `arc-swap<Config>` trust-boundary keys** — Phase 5 (SEC-010)
 - **Three trust boundaries' rustls::ServerConfig assembly** — Phase 5

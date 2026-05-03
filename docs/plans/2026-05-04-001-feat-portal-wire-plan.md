@@ -8,6 +8,10 @@ origin: /home/alpha/.cursor/plans/port_go_to_rust_greenfield_383a2dc9.plan.md (U
 
 # feat(portal-wire): greenfield wire types, codecs, wire-protocol.md, threat-model.md
 
+## Implementation status
+
+Phase 1 is active. `docs/wire-protocol.md`, `docs/threat-model.md`, the `crates/portal-wire/src/*` type module set, and `xtask/src/wire_drift_check.rs` are committed. The five named U17 `proptest_*.rs` suites and the `PROPTEST_CASES=4096` CI/local case-count gate are pending. Phase 1 remains active — and `PLAN.md` MUST NOT mark it complete — until both the U16 drift marker matches HEAD and the five U17 suites pass at `PROPTEST_CASES=4096` on CI. The U16/U17 acceptance criteria below are the contract; any subsequent edit to this plan must not soften them.
+
 ## Summary
 
 Phase 1 of the `portal-tunnel-rs` roadmap. Lands the `portal-wire` crate (pure types + framing, **no I/O, no async**) plus the two specifications it implements:

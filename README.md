@@ -5,9 +5,14 @@ Greenfield port of [`gosuda/portal-tunnel`](https://github.com/gosuda/portal-tun
 v2.1.8 — the Go upstream is the behavioral specification; the Rust port owns
 the wire (see [ADR-0001](docs/adr/0001-greenfield-wire.md)).
 
-> **Status**: Phase 0 (workspace foundation). Active development. v0.1 ships
-> when Phases 1-5 + 6a + 7-minus-overlay land. v0.2 backlog enumerated in the
-> roadmap plan.
+> **Status**: Phase 1 active, gates pending. Phase 0 workspace foundation has
+> landed (workspace manifest, four ADRs, AGENTS.md, deny.toml, prek.toml,
+> .cargo/config.toml, CI workflow, xtask skeleton, architecture skeleton, nine
+> crate stubs). Phase 1 portal-wire types, wire-protocol.md, threat-model.md,
+> and the U16 wire-drift checker are committed; the five U17 proptest suites
+> and the `PROPTEST_CASES=4096` case-count gate are pending. Phase 2 starts
+> after Phase 1 gates pass. v0.1 ships when Phases 1-5 + 6a + 7-minus-overlay
+> land. v0.2 backlog enumerated in the roadmap plan.
 
 ## Quick links
 

@@ -24,7 +24,7 @@ or `portal-types` crates (R7).
 | `portal-relay-bin` | `portal-relay` binary; embedded admin SPA + docs site | 7 |
 | `portal-cli` | `portal` binary (R5+C11: distinct binary name from crate name) | 7 |
 | `portal-demo` | `portal-demo` sample target binary | 7 |
-| `xtask` | codegen, release, openapi-export, dep-audit, refresh-frontend-bundle | 0 (skeleton) |
+| `xtask` | workspace gates: `wire-drift-check` (Phase 1 U16) + `cargo xtask ci` alias mirroring CI gates; future codegen/release/openapi-export/dep-audit/refresh-frontend-bundle | 0+ |
 
 ## Trust boundaries — key-material isolation (R2)
 
@@ -93,8 +93,10 @@ files do not count toward this limit).
 
 ## Decision Stability
 
-Once Phase 0 ships (commit 11 lands), the v0.1 R-ID set (R1-R6 + R10-R15) and
-the v0.2 Backlog enumeration both **freeze**. Reopening any frozen decision
+Once Phase 0 CI passes on `main` (all Phase 0 commits merged, `cargo-deny` +
+`nextest` + `clippy` all green) and the `v0.1-scope-freeze` git tag lands, the
+v0.1 R-ID set (R1-R6 + R10-R15) and the v0.2 Backlog enumeration both
+**freeze**. Reopening any frozen decision
 requires an ADR amendment (rationale, considered alternatives, impact on phase
 plans), not a TODO. ADR amendments use the procedure documented in
 [`docs/adr/README.md`](docs/adr/README.md). New scope additions after v0.1
