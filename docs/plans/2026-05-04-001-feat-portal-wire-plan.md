@@ -10,7 +10,12 @@ origin: /home/alpha/.cursor/plans/port_go_to_rust_greenfield_383a2dc9.plan.md (U
 
 ## Implementation status
 
-Phase 1 is active. `docs/wire-protocol.md`, `docs/threat-model.md`, the `crates/portal-wire/src/*` type module set, and `xtask/src/wire_drift_check.rs` are committed. The five named U17 `proptest_*.rs` suites and the `PROPTEST_CASES=4096` CI/local case-count gate are pending. Phase 1 remains active — and `PLAN.md` MUST NOT mark it complete — until both the U16 drift marker matches HEAD and the five U17 suites pass at `PROPTEST_CASES=4096` on CI. The U16/U17 acceptance criteria below are the contract; any subsequent edit to this plan must not soften them.
+Phase 1 implementation has landed. Phase 1 remains under per-commit gate revalidation, and `PLAN.md` MUST NOT mark it complete on the basis of any past green run alone — the gate is a contract that has to hold on every commit touching `crates/portal-wire`. The acceptance criteria are:
+
+- **U16** has TWO components, both required: (a) the wire-drift marker in `docs/wire-protocol.md` matches `git log -1 --format=%H -- crates/portal-wire`, and (b) v0.1 runtime crates do not construct or emit `ReputationDelta` (CI grep gate over `crates/portal-relay`, `portal-net`, `portal-sdk`, `portal-cli`, `portal-relay-bin`, `portal-demo`).
+- **U17** requires all five named `proptest_*.rs` suites (`proptest_envelope`, `proptest_descriptor`, `proptest_reputation_delta`, `proptest_hop_route`, `proptest_channel_framing`) to pass at `PROPTEST_CASES=4096` on CI.
+
+Subsequent edits to this plan must not soften either component. The U16/U17 specifications below are the canonical contract.
 
 ## Summary
 

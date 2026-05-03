@@ -120,7 +120,7 @@ expected anti-pattern; this section exists to head it off.
 
 The following sections will be populated by the corresponding phase plans:
 
-- **Wire framing + codec layout** — landed in Phase 1: see [`docs/wire-protocol.md`](wire-protocol.md). The U16 drift marker (`xtask/src/wire_drift_check.rs`) keeps the spec and `crates/portal-wire/src/*` in lockstep on every PR.
+- **Wire framing + codec layout** — landed in Phase 1: see [`docs/wire-protocol.md`](wire-protocol.md). Spec/code lockstep is the U16 invariant; gate ownership lives in [`xtask/src/wire_drift_check.rs`](../xtask/src/wire_drift_check.rs).
 - **Threat model** — landed in Phase 1: see [`docs/threat-model.md`](threat-model.md). Adversary capabilities, multi-hop privacy claims, R10 8-class enumeration, and SEC-001..005 evaluation context are documented there.
 - **Lease registry data layout (papaya `pin_owned()` boundaries)** — Phase 5
 - **Hot-reload semantics for `arc-swap<Config>` trust-boundary keys** — Phase 5 (SEC-010)
