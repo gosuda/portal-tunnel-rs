@@ -1,0 +1,93 @@
+# cargo-deny configuration for portal-tunnel-rs
+#
+# Operationalizes the Engineering Defaults R7-R9 / ADR-0002 register and the
+# rustls-MANDATORY R13 policy. Deviation requires an ADR amendment per
+# docs/adr/README.md (cargo-deny will refuse the offending PR until the
+# amendment lands in the same commit).
+#
+# Direct-deps-only intent: cargo-deny's `bans.deny` array applies to every
+# match in the dep tree, with optional `wrappers` for known parents. We
+# enforce the strict-everywhere policy on TLS competitors (R13: no C-FFI TLS
+# transitively either; the `cargo tree -i openssl` CI gate is the reference)
+# and the strict-direct-only policy on legacy crates that are commonly pulled
+# transitively (lazy_static / once_cell / nom). Pattern matches cargo-deny's
+# own canonical config plus our R8 escape-hatch carve-outs.
+
+[graph]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+all-features = false
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = []
+
+[licenses]
+version = 2
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "MPL-2.0",
+    "Zlib",
+    "CC0-1.0",
+    "BSL-1.0",
+    "OpenSSL",
+]
+confidence-threshold = 0.93
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+
+# Bans applied to direct AND transitive matches (no wrappers list means full
+# tree deny). Used for TLS competitors per R13 — no C-FFI TLS allowed at any
+# depth — and for legacy crates that have no widespread transitive use in our
+# register so a strict ban does not generate false positives.
+deny = [
+    # ---------------------------------------------------------------- TLS
+    # rustls-MANDATORY (R13). cargo tree -i openssl is the CI reference gate.
+    { crate = "openssl", reason = "rustls-MANDATORY (R13 / ADR-0002)" },
+    { crate = "openssl-sys", reason = "rustls-MANDATORY (R13 / ADR-0002)" },
+    { crate = "libssh2-sys", reason = "rustls-MANDATORY; pulls openssl transitively" },
+    { crate = "native-tls", reason = "rustls-MANDATORY (R13 / ADR-0002)" },
+    { crate = "tokio-native-tls", reason = "rustls-MANDATORY (R13 / ADR-0002)" },
+    { crate = "hyper-tls", reason = "rustls-MANDATORY; use hyper-rustls" },
+    { crate = "cmake", reason = "use cc; cmake build pulls a C toolchain footprint we do not need" },
+    # ---------------------------------------------------------------- Legacy direct picks
+    # These are not commonly transitive in our register; full-tree ban is safe.
+    { crate = "chrono", reason = "use jiff (R8 / ADR-0002)" },
+    { crate = "async-trait", reason = "use native async-fn-in-trait + trait_variant (R9 / ADR-0002)" },
+    { crate = "derive_builder", reason = "use bon (R8 / ADR-0002)" },
+    { crate = "typed-builder", reason = "use bon (R8 / ADR-0002)" },
+    { crate = "cargo-tarpaulin", reason = "use cargo-llvm-cov (R8 / ADR-0002)" },
+]
+
+# `lazy_static`, `once_cell`, and `nom` are also Engineering-Default-banned as
+# direct deps but are commonly transitive (axum / hyper / tokio / aws-sdk /
+# wiremock pull them at varying depths). cargo-deny's `bans.deny` array does
+# not natively express "ban direct only"; the workspace policy is enforced via
+# (a) ADR-0002 ban-list discipline at code review, (b) `cargo machete` flagging
+# unused direct deps, and (c) a future ast-grep CI gate that scans member
+# crates' `[dependencies]` blocks for these names. Phase 0 ships (a) and (b);
+# (c) lands with the Phase 7 utoipa-coverage gate.
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
