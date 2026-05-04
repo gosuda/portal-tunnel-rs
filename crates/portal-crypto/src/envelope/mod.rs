@@ -13,6 +13,12 @@
 //!   purpose) **before** the cryptographic verification, so cheap rejections
 //!   happen first.
 
+// `pub mod` (not `pub(crate)`) is intentional: clippy::redundant_pub_crate fires
+// because `envelope` itself is declared `pub(crate)` in `lib.rs`, making an
+// inner `pub(crate)` redundant. The `ed25519/`, `secp256k1/`, and `siwe/`
+// submodules use `pub(crate)` directly because they live under a `pub(crate)`
+// parent that is also `pub(crate)` in `lib.rs` — the lint did not fire there
+// due to nesting depth differences. Consistency here is blocked by the lint.
 pub mod sign;
 pub mod verify;
 

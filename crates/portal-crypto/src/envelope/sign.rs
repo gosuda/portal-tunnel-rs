@@ -243,6 +243,112 @@ mod tests {
         }
     }
 
+    /// 6. Purpose mismatch: sign with `Purpose::Register`, verify expecting
+    ///    `Purpose::Renew` → "purpose" in error message.
+    #[test]
+    fn envelope_purpose_mismatch_fails() {
+        let now = Timestamp::UNIX_EPOCH
+            .checked_add(jiff::SignedDuration::from_secs(1_000_000))
+            .unwrap();
+        let (key, verifier) = make_signer_verifier([0x15u8; 32]);
+        let signer = Ed25519Signer::new(&key);
+
+        let payload = Bytes::from_static(b"purpose mismatch payload");
+        let claims = make_claims(now, Audience::RelayApiSdk, Purpose::Register); // signed with Register
+
+        let env = sign_envelope::<RelayDescriptor>(claims, payload, &signer).unwrap();
+
+        let result = verify_envelope::<RelayDescriptor>(
+            &env,
+            &verifier,
+            Audience::RelayApiSdk,
+            Purpose::Renew, // expected Renew — mismatch
+            now.checked_add(jiff::SignedDuration::from_secs(1)).unwrap(),
+        );
+
+        match &result {
+            Err(PortalCryptoError::Envelope(msg)) => {
+                assert!(
+                    msg.contains("purpose"),
+                    "expected 'purpose' in message, got: {msg}"
+                );
+            }
+            other => panic!("expected Envelope(purpose mismatch) error, got: {other:?}"),
+        }
+    }
+
+    /// 7. Wrong key: sign with key A, verify with verifier from key B → sig fails.
+    #[test]
+    fn envelope_wrong_key_fails() {
+        let now = Timestamp::UNIX_EPOCH
+            .checked_add(jiff::SignedDuration::from_secs(1_000_000))
+            .unwrap();
+        let (key_a, _) = make_signer_verifier([0x20u8; 32]);
+        let (_, verifier_b) = make_signer_verifier([0x21u8; 32]);
+        let signer_a = Ed25519Signer::new(&key_a);
+
+        let payload = Bytes::from_static(b"wrong key payload");
+        let claims = make_claims(now, Audience::RelayApiSdk, Purpose::Register);
+
+        // Sign with key A…
+        let env = sign_envelope::<RelayDescriptor>(claims, payload, &signer_a).unwrap();
+
+        // …but verify with verifier derived from key B.
+        let result = verify_envelope::<RelayDescriptor>(
+            &env,
+            &verifier_b,
+            Audience::RelayApiSdk,
+            Purpose::Register,
+            now.checked_add(jiff::SignedDuration::from_secs(1)).unwrap(),
+        );
+
+        assert!(
+            matches!(result, Err(PortalCryptoError::Envelope(_))),
+            "expected Envelope error for wrong key, got: {result:?}"
+        );
+    }
+
+    /// 8. Not-yet-valid: sign with `not_before` = now, verify at now - 1s →
+    ///    "not yet valid" / "expired or not yet valid" in error message.
+    ///
+    /// This covers the `now < not_before` branch in `verify_envelope` which
+    /// previously had no test.
+    #[test]
+    fn envelope_not_yet_valid_fails() {
+        let now = Timestamp::UNIX_EPOCH
+            .checked_add(jiff::SignedDuration::from_secs(1_000_000))
+            .unwrap();
+        let (key, verifier) = make_signer_verifier([0x16u8; 32]);
+        let signer = Ed25519Signer::new(&key);
+
+        let payload = Bytes::from_static(b"not yet valid payload");
+        // not_before = now, not_after = now + 60s.
+        let claims = make_claims(now, Audience::RelayApiSdk, Purpose::Register);
+
+        let env = sign_envelope::<RelayDescriptor>(claims, payload, &signer).unwrap();
+
+        // Verify one second BEFORE not_before → not yet valid.
+        let verify_at = now.checked_sub(jiff::SignedDuration::from_secs(1)).unwrap();
+
+        let result = verify_envelope::<RelayDescriptor>(
+            &env,
+            &verifier,
+            Audience::RelayApiSdk,
+            Purpose::Register,
+            verify_at,
+        );
+
+        match &result {
+            Err(PortalCryptoError::Envelope(msg)) => {
+                assert!(
+                    msg.contains("not yet valid") || msg.contains("expired or not yet valid"),
+                    "expected 'not yet valid' or 'expired or not yet valid' in message, got: {msg}"
+                );
+            }
+            other => panic!("expected Envelope(not yet valid) error, got: {other:?}"),
+        }
+    }
+
     /// 5. Role mismatch: sign under `RelayDescriptor`, verify under `HopRoute`.
     ///
     /// The domain separator bytes differ → different signing input → signature
