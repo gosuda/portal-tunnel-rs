@@ -26,7 +26,15 @@ all-features = false
 [advisories]
 version = 2
 yanked = "deny"
-ignore = []
+ignore = [
+    # paste 1.0.15 — RUSTSEC-2024-0436 (unmaintained). Pulled transitively by
+    # the alloy 2.x stack (alloy-primitives → alloy-chains → alloy-provider).
+    # No safe upgrade exists upstream as of 2026-05; alloy itself has not
+    # migrated to `pastey`. Trigger to remove this ignore: alloy publishes a
+    # release that drops the paste dep, OR a rustsec-rated vulnerability lands
+    # on top of the unmaintained status.
+    { id = "RUSTSEC-2024-0436", reason = "transitive via alloy 2.x; no upstream upgrade path 2026-05" },
+]
 
 [licenses]
 version = 2
@@ -71,20 +79,22 @@ deny = [
     # ---------------------------------------------------------------- Legacy direct picks
     # These are not commonly transitive in our register; full-tree ban is safe.
     { crate = "chrono", reason = "use jiff (R8 / ADR-0002)" },
-    { crate = "async-trait", reason = "use native async-fn-in-trait + trait_variant (R9 / ADR-0002)" },
     { crate = "derive_builder", reason = "use bon (R8 / ADR-0002)" },
     { crate = "typed-builder", reason = "use bon (R8 / ADR-0002)" },
     { crate = "cargo-tarpaulin", reason = "use cargo-llvm-cov (R8 / ADR-0002)" },
 ]
 
-# `lazy_static`, `once_cell`, and `nom` are also Engineering-Default-banned as
-# direct deps but are commonly transitive (axum / hyper / tokio / aws-sdk /
-# wiremock pull them at varying depths). cargo-deny's `bans.deny` array does
-# not natively express "ban direct only"; the workspace policy is enforced via
-# (a) ADR-0002 ban-list discipline at code review, (b) `cargo machete` flagging
-# unused direct deps, and (c) a future ast-grep CI gate that scans member
-# crates' `[dependencies]` blocks for these names. Phase 0 ships (a) and (b);
-# (c) lands with the Phase 7 utoipa-coverage gate.
+# `async-trait`, `lazy_static`, `once_cell`, and `nom` are Engineering-Default-
+# banned as DIRECT deps but appear transitively in the modern Rust 2026 graph
+# (alloy / axum / hyper / tokio / aws-sdk / wiremock pull them at varying
+# depths). cargo-deny's `bans.deny` array does not natively express "ban direct
+# only", and `cargo machete` only flags UNUSED direct deps — neither catches a
+# directly-added-and-used legacy crate. Today the workspace policy is enforced
+# by ADR-0002 ban-list discipline at code review only. The ast-grep CI gate
+# that scans member crates' `[dependencies]` blocks for these names is a Phase
+# 7 deliverable (lands with the utoipa-coverage gate). R9 / ADR-0002 still
+# mandates native async-fn-in-trait + trait_variant for OUR async traits — the
+# review-discipline guard is the only current backstop until ast-grep lands.
 
 [sources]
 unknown-registry = "deny"
