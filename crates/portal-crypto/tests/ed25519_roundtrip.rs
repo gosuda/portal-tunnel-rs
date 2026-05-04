@@ -24,7 +24,12 @@ use proptest::test_runner::TestCaseError;
 // Role-pair table
 // ---------------------------------------------------------------------------
 
-/// A discriminant for the six available signing roles.
+/// A discriminant for the three ed25519 signing roles under proptest coverage.
+///
+/// `KeylessRequest`, `ReputationDelta`, and `BindingAttestation` are excluded:
+/// `BindingAttestation` is signed via secp256k1 (SIWE flow), not ed25519;
+/// `KeylessRequest` and `ReputationDelta` are exercised in their owner
+/// crates (portal-relay Phase 6b/A and Phase 5 U12 respectively).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RoleId {
     RelayDescriptor,

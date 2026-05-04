@@ -21,7 +21,7 @@ The exact-version pin (`=0.6.1` not `^0.6.1` or `0.6`) prevents accidental featu
 Fork to a `vendor/siwe-rs` workspace member with `[patch.crates-io] siwe = { path = "vendor/siwe-rs" }` IF AND ONLY IF one of the following fires:
 
 1. **Bug:** A v0.1-shipping bug attributable to `siwe = "=0.6.1"` is reported (issue filed upstream, reproducer in our repo) AND upstream has not published a crates.io release containing the fix within 30 days of the report date.
-2. **Compat break:** Alloy 3.x ships and `siwe = "=0.6.1"` cannot satisfy the alloy-types compatibility surface (siwe currently uses alloy 2.x types in its public API).
+2. **Compat break:** Alloy 3.x ships AND `siwe = "=0.6.1"` causes a compile error OR a type-mismatch error in portal-crypto's direct use of siwe's public API against alloy 3.x types. The break is observable by attempting `cargo build --workspace` against an alloy 3.x bump and finding a hard failure attributable to siwe's type surface.
 3. **Maintenance signal:** Upstream archives the repository OR explicitly marks the crate unmaintained on crates.io.
 
 Any other reason to fork (perceived staleness, subjective code smell, "we should own our deps") is **not** sufficient.

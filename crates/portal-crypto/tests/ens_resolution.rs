@@ -19,7 +19,7 @@
 //! unit tests there) but promotes it to a crate-level integration test so the
 //! public `EnsResolver` trait contract is exercised through the crate boundary.
 //!
-//! Phase 2 B8 / U11 integration gate.
+//! Phase 2 B8 / U13 integration gate.
 
 use std::future::Future;
 

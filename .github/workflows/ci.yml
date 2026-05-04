@@ -92,6 +92,9 @@ jobs:
   # line-based rg scan.  Those cases are covered by code review and the
   # disallowed-methods clippy entry in clippy.toml.  A future batch may add
   # an xtask/ast-grep gate for the multiline case.
+  # Multi-line rustfmt-wrapped signature gap is tracked in PLAN.md's
+  # post-v0.1 backlog as a v0.2 ast-grep enhancement (multi-line AST
+  # query rather than line-based regex).
   #
   # Pattern rationale: `-> .*SecretBox.*SecretBox` matches any line that
   # contains a `->` return-type arrow followed (anywhere on the same line) by
