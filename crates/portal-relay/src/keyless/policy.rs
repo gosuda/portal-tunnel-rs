@@ -920,8 +920,7 @@ mod tests {
 
     #[test]
     fn routing_rejects_bare_star() {
-        let err =
-            check_routing_context(&ctx("anything.com", "*")).expect_err("bare `*` refused");
+        let err = check_routing_context(&ctx("anything.com", "*")).expect_err("bare `*` refused");
         assert!(matches!(err, KeylessError::RoutingContextMismatch(_)));
     }
 
