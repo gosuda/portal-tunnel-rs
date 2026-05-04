@@ -35,6 +35,12 @@ zeroize = { workspace = true }
 # (jiff is already in [dependencies] for the QUIC backhaul control window).
 portal-crypto = { workspace = true, features = ["insecure-test-constructors"] }
 tempfile = { workspace = true }
+# `tracing-subscriber` is used by the U11 behavioral-gate integration tests
+# under `tests/` to surface `RUST_LOG=portal_net=debug` output during failure
+# investigation. The `fmt` feature ships in the default set; we list it
+# explicitly alongside `env-filter` so a future workspace-level
+# `default-features = false` flip does not silently break our tests.
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 
 [lints]
 workspace = true
