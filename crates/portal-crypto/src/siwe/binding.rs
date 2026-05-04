@@ -97,10 +97,23 @@ pub fn build_binding(
 /// `statement` field and that [`verify_binding`] extracts and validates.
 #[must_use]
 pub fn into_siwe_statement(att: &BindingAttestation) -> CompactString {
-    let hex = bytes32_to_hex(&att.ed25519_pubkey.to_bytes());
+    canonical_statement(&att.ed25519_pubkey, &att.nonce)
+}
+
+/// Render the canonical SIWE binding statement directly from the ed25519
+/// pubkey and nonce, without requiring a constructed [`BindingAttestation`].
+///
+/// `super::challenge::build` calls this so it shares the exact same template
+/// with [`into_siwe_statement`] / [`verify_binding`]; editing either side in
+/// isolation cannot silently drift the wire-visible string.
+#[must_use]
+pub fn canonical_statement(
+    ed25519_pubkey: &ed25519_dalek::VerifyingKey,
+    nonce: &str,
+) -> CompactString {
+    let hex = bytes32_to_hex(&ed25519_pubkey.to_bytes());
     CompactString::from(format!(
-        "{STMT_PREFIX}{hex}{STMT_INFIX}{}{}",
-        att.nonce, STMT_SUFFIX
+        "{STMT_PREFIX}{hex}{STMT_INFIX}{nonce}{STMT_SUFFIX}"
     ))
 }
 

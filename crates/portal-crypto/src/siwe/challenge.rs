@@ -66,15 +66,6 @@ fn jiff_to_siwe_ts(ts: Timestamp) -> Result<::siwe::TimeStamp, PortalCryptoError
         .map_err(|e| PortalCryptoError::Siwe(format!("timestamp conversion: {e}")))
 }
 
-/// Lowercase-hex-encode 32 bytes into a 64-char `String`.
-fn bytes32_to_hex(b: &[u8; 32]) -> String {
-    use std::fmt::Write as _;
-    b.iter().fold(String::with_capacity(64), |mut s, byte| {
-        let _ = write!(s, "{byte:02x}");
-        s
-    })
-}
-
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -118,9 +109,10 @@ pub fn build(
         .parse::<iri_string::types::UriString>()
         .map_err(|e| PortalCryptoError::Siwe(format!("invalid uri: {e}")))?;
 
-    let hex = bytes32_to_hex(&ed25519_pk.to_bytes());
-    let statement =
-        format!("Bind portal-tunnel ed25519 key {hex} for lease registration (nonce={nonce})");
+    // Single canonical template — drift between challenge.rs and binding.rs
+    // is structurally impossible because both call sites go through
+    // `binding::canonical_statement` (SEC-002 anti-drift invariant).
+    let statement = super::binding::canonical_statement(&ed25519_pk, nonce).into_string();
 
     let issued_at = jiff_to_siwe_ts(now)?;
     let expiration_time = Some(jiff_to_siwe_ts(expires_at)?);
