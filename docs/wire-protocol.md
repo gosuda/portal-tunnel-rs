@@ -1,6 +1,6 @@
 # Portal greenfield wire protocol
 
-<!-- Last verified against crates/portal-wire commit: 24b3faa1ebdc76f60dbfddb16a0f66decdec4361 -->
+<!-- Last verified against crates/portal-wire commit: e18d1e467b0e48f10485ea73776dc5984e1a202e -->
 
 **Status:** active (ADR-0001).
 
