@@ -27,10 +27,6 @@ pub mod key;
 pub mod sign;
 pub mod verify;
 
-pub use key::{RelayEd25519Key, load_relay_ed25519_key, verifying_key};
-pub use sign::Ed25519Signer;
-pub use verify::Ed25519Verifier;
-
 use crate::error::PortalCryptoError;
 use crate::separator::Role;
 
@@ -55,9 +51,7 @@ use crate::separator::Role;
 ///
 /// Returns [`PortalCryptoError::Ed25519`] if `payload.len()` exceeds
 /// `u32::MAX`.
-pub(super) fn build_hash_input<R: Role>(
-    payload: &[u8],
-) -> Result<Vec<u8>, PortalCryptoError> {
+pub fn build_hash_input<R: Role>(payload: &[u8]) -> Result<Vec<u8>, PortalCryptoError> {
     let sep = R::SEPARATOR.as_bytes();
     // DomainSeparator::new enforces len ≤ u8::MAX at compile time.
     #[expect(
@@ -71,7 +65,7 @@ pub(super) fn build_hash_input<R: Role>(
     let payload_len = u32::try_from(payload.len())
         .map_err(|_| PortalCryptoError::Ed25519("payload exceeds u32::MAX bytes".to_owned()))?;
 
-    let capacity = 1 + sep.len() + 4 + usize::try_from(payload_len).unwrap_or(payload.len());
+    let capacity = 1 + sep.len() + 4 + payload.len();
     let mut input = Vec::with_capacity(capacity);
     input.push(sep_len);
     input.extend_from_slice(sep);

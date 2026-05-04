@@ -11,6 +11,3 @@
 
 pub mod binding;
 pub mod challenge;
-
-pub use binding::{BindingAttestation, build_binding, into_siwe_statement, verify_binding};
-pub use challenge::{ChallengeBuilder, RegisterChallenge, verify_siwe};

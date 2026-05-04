@@ -28,12 +28,12 @@
 
 #![forbid(unsafe_code)]
 
-pub mod ed25519;
+pub(crate) mod ed25519;
 pub mod error;
-pub mod secp256k1;
+pub(crate) mod secp256k1;
 pub(crate) mod secret;
 pub mod separator;
-pub mod siwe;
+pub(crate) mod siwe;
 
 pub use ed25519::key::{RelayEd25519Key, load_relay_ed25519_key, verifying_key};
 pub use ed25519::sign::Ed25519Signer;
@@ -49,4 +49,6 @@ pub use separator::{
     RelayDescriptor, ReputationDelta, Role,
 };
 pub use siwe::binding::{BindingAttestation, build_binding, into_siwe_statement, verify_binding};
-pub use siwe::challenge::{ChallengeBuilder, RegisterChallenge, verify_siwe};
+pub use siwe::challenge::{
+    ChallengeBuilder, RegisterChallenge, build as build_siwe_challenge, verify_siwe,
+};

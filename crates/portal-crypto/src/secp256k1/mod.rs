@@ -17,7 +17,3 @@
 pub mod address;
 pub mod eip191;
 pub mod key;
-
-pub use address::{EthAddress, evm_address_from_pubkey};
-pub use eip191::sign_eip191_personal;
-pub use key::{TenantSecp256k1Key, load_tenant_secp256k1_key, public_key};
