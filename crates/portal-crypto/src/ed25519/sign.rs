@@ -76,6 +76,33 @@ impl<'k> Ed25519Signer<'k> {
 }
 
 // ---------------------------------------------------------------------------
+// Envelope-specific helper (pub(crate) only)
+// ---------------------------------------------------------------------------
+
+impl Ed25519Signer<'_> {
+    /// Sign pre-canonicalized signing-input bytes for an envelope.
+    ///
+    /// Used by [`crate::envelope::sign::sign_envelope`] **only**. The envelope
+    /// flow builds its own canonical signing input via
+    /// [`portal_wire::envelope::Envelope::signing_input`], so we **must not**
+    /// add the length-prefix framing that [`Ed25519Signer::sign_with_separator`]
+    /// adds — doing so would double-canonicalize the input and produce
+    /// signatures that [`crate::envelope::verify::verify_envelope`] cannot
+    /// validate.
+    ///
+    /// For free-form payloads (not going through `portal_wire::Envelope`) use
+    /// [`Ed25519Signer::sign_with_separator`] instead.
+    pub(crate) fn sign_raw_signing_input(
+        &self,
+        bytes: &[u8],
+    ) -> Result<ed25519_dalek::Signature, PortalCryptoError> {
+        let sk = self.key.expose_secret().signing_key();
+        sk.try_sign(bytes)
+            .map_err(|e| PortalCryptoError::Envelope(e.to_string()))
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Unit tests (three mandatory tests from U4 spec)
 // ---------------------------------------------------------------------------
 

@@ -13,7 +13,7 @@
 //! - **`KeylessSigningKey`** — ephemeral keyless signing oracle key (Phase 6b).
 //! - **`ApiHttpsKey`** — HTTPS mutual-TLS identity for the relay admin API (Phase 5).
 //!
-//! # Current surface (U1 + U2 + U3 + U4 + U5 + U6 + U7)
+//! # Current surface (U1 + U2 + U3 + U4 + U5 + U6 + U7 + U8)
 //!
 //! - [`PortalCryptoError`] — workspace-wide crypto error type.
 //! - [`DomainSeparator`] + [`Role`] — SEC-007 domain-separation typestate.
@@ -25,10 +25,12 @@
 //! - [`sign_eip191_personal`] — EIP-191 personal-message signing.
 //! - [`ChallengeBuilder`] + [`RegisterChallenge`] + [`verify_siwe`] — SIWE challenge (U6).
 //! - [`BindingAttestation`] + [`build_binding`] + [`into_siwe_statement`] + [`verify_binding`] — SIWE→ed25519 binding (U7, SEC-002).
+//! - [`sign_envelope`] + [`verify_envelope`] — SEC-001 envelope sign/verify (U8).
 
 #![forbid(unsafe_code)]
 
 pub(crate) mod ed25519;
+pub(crate) mod envelope;
 pub mod error;
 pub(crate) mod secp256k1;
 pub(crate) mod secret;
@@ -38,6 +40,7 @@ pub(crate) mod siwe;
 pub use ed25519::key::{RelayEd25519Key, load_relay_ed25519_key, verifying_key};
 pub use ed25519::sign::Ed25519Signer;
 pub use ed25519::verify::Ed25519Verifier;
+pub use envelope::{sign_envelope, verify_envelope};
 pub use error::PortalCryptoError;
 pub use secp256k1::address::{EthAddress, evm_address_from_pubkey};
 pub use secp256k1::eip191::sign_eip191_personal;

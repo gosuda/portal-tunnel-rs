@@ -27,6 +27,29 @@ impl Ed25519Verifier {
         Self { vk }
     }
 
+    /// Verify pre-canonicalized signing-input bytes for an envelope.
+    ///
+    /// Used by [`crate::envelope::verify::verify_envelope`] **only**. The
+    /// envelope flow builds its own canonical signing input via
+    /// [`portal_wire::envelope::Envelope::signing_input`], so we **must not**
+    /// rebuild the length-prefix framing here — the bytes are already
+    /// domain-separated by portal-wire.
+    ///
+    /// Uses `verify_strict` to reject malleable signatures.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PortalCryptoError::Envelope`] if the signature is invalid.
+    pub(crate) fn verify_strict_signing_input(
+        &self,
+        bytes: &[u8],
+        sig: &ed25519_dalek::Signature,
+    ) -> Result<(), PortalCryptoError> {
+        self.vk
+            .verify_strict(bytes, sig)
+            .map_err(|e| PortalCryptoError::Envelope(e.to_string()))
+    }
+
     /// Verify that `sig` is a valid signature over `payload` under role `R`'s
     /// SEC-007 domain separator.
     ///
