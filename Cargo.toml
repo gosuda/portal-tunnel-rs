@@ -82,7 +82,7 @@ alloy = { version = "2.0", default-features = false, features = ["provider-http"
 
 # Crypto + traits
 k256 = { version = "0.13", features = ["ecdsa"] }
-ed25519-dalek = { version = "2", features = ["rand_core"] }
+ed25519-dalek = { version = "2", features = ["rand_core", "zeroize"] }
 trait_variant = "0.1"
 
 # TUI (R15)
@@ -109,6 +109,7 @@ proptest = "1"
 wiremock = "0.6"
 assert_cmd = "2"
 predicates = "3"
+tempfile = "3"
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }

@@ -24,5 +24,8 @@ tracing = { workspace = true }
 zeroize = { workspace = true }
 portal-wire = { workspace = true }
 
+[dev-dependencies]
+tempfile = { workspace = true }
+
 [lints]
 workspace = true
