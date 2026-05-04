@@ -1,11 +1,47 @@
 [package]
 name = "portal-acme"
 version = "0.1.0"
-description = "ACME issuance with DNS-01 across local, Cloudflare, Route53, and Google Cloud DNS."
+description = "ACME (RFC 8555) issuance + DNS-01 providers (Local, Cloudflare, Route53, Cloud DNS) for portal-tunnel-rs."
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+
+[features]
+default = ["local", "cloudflare", "route53", "gcloud"]
+local = ["dep:rcgen"]
+cloudflare = ["dep:cloudflare"]
+route53 = ["dep:aws-sdk-route53"]
+gcloud = ["dep:google-cloud-dns-v1"]
+
+[dependencies]
+bon = { workspace = true }
+bytes = { workspace = true }
+compact_str = { workspace = true }
+eyre = { workspace = true }
+instant-acme = { workspace = true }
+jiff = { workspace = true }
+rand_core = { workspace = true }
+secrecy = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "fs", "io-util", "time", "sync"] }
+tokio-util = { workspace = true, features = ["rt"] }
+tracing = { workspace = true }
+zeroize = { workspace = true }
+
+# Per-feature deps:
+rcgen = { workspace = true, optional = true }
+cloudflare = { workspace = true, optional = true }
+aws-sdk-route53 = { workspace = true, optional = true }
+google-cloud-dns-v1 = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "test-util"] }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+wiremock = { workspace = true }
 
 [lints]
 workspace = true
