@@ -361,6 +361,13 @@ pub fn error_status(err: &KeylessError) -> (StatusCode, &'static str, String) {
             "rate_limited",
             "per-tenant rate limit exceeded".to_owned(),
         ),
+        KeylessError::RoutingContextMismatch(_) => (
+            // SEC-015: explicit security-policy refusal — 403 (NOT 400)
+            // signals authorisation failure, not input-shape complaint.
+            StatusCode::FORBIDDEN,
+            "routing_context_mismatch",
+            "routed hostname does not authorise the requested cert subject".to_owned(),
+        ),
         KeylessError::QueueFull => (
             StatusCode::SERVICE_UNAVAILABLE,
             "bridge_queue_full",
@@ -486,6 +493,14 @@ mod tests {
             "bridge_queue_full"
         );
         assert_eq!(error_status(&KeylessError::BridgeClosed).1, "bridge_closed");
+        assert_eq!(
+            error_status(&KeylessError::RoutingContextMismatch("x".into())).1,
+            "routing_context_mismatch"
+        );
+        assert_eq!(
+            error_status(&KeylessError::RoutingContextMismatch("x".into())).0,
+            StatusCode::FORBIDDEN
+        );
     }
 
     #[test]

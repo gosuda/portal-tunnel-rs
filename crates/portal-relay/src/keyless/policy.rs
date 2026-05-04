@@ -72,7 +72,7 @@ use rustls::{SignatureAlgorithm, SignatureScheme};
 
 use crate::keyless::error::KeylessError;
 use crate::keyless::material::KeylessSigningKey;
-use crate::keyless::wire::SignRequest;
+use crate::keyless::wire::{RoutingContext, SignRequest};
 
 // ---------------------------------------------------------------------------
 // Per-tenant rate-limit defaults
@@ -287,6 +287,11 @@ impl KeylessPolicy {
     ///
     /// # Errors
     ///
+    /// - [`KeylessError::RoutingContextMismatch`] — SEC-015: the
+    ///   request's `routed_hostname` does not authorise the
+    ///   `requested_cert_subject` (handler maps to HTTP 403).  Run
+    ///   FIRST so the security-policy refusal short-circuits before
+    ///   any allocation, lookup, or signer-pool capacity is spent.
     /// - [`KeylessError::UnknownKeyId`] — `key_id` not in `known_keys`.
     /// - [`KeylessError::SchemeMismatch`] — `scheme.algorithm()` does
     ///   not match the loaded key's `algorithm`.
@@ -299,6 +304,13 @@ impl KeylessPolicy {
         subject: &str,
         req: &SignRequest,
     ) -> Result<Arc<KnownKey>, KeylessError> {
+        // --- Step 0 (SEC-015): routing-context refuse-to-sign --------------
+        // Runs BEFORE every other check.  A signing-policy refusal is the
+        // strictest verdict the keyless oracle can render, so it short-
+        // circuits ahead of input-shape validation and rate-limit
+        // accounting.  Mismatch → 403 Forbidden at the handler.
+        check_routing_context(&req.routing_context)?;
+
         // --- Step 1: known key id ------------------------------------------
         let known = self.known_key(req.key_id.as_str()).ok_or_else(|| {
             KeylessError::UnknownKeyId(format!("no key registered under id {:?}", req.key_id))
@@ -426,6 +438,90 @@ impl Default for KeylessPolicy {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// SEC-015 routing-context refuse-to-sign check.
+///
+/// Returns `Ok(())` iff `ctx.routed_hostname` authorises
+/// `ctx.requested_cert_subject` under the v0.1 matching rule:
+///
+/// - **Direct match.** `routed_hostname == requested_cert_subject`,
+///   compared case-insensitively per RFC 6125 §6.4.
+/// - **Single-label wildcard.** `requested_cert_subject = "*.<suffix>"`
+///   matches `routed_hostname = "<label>.<suffix>"` iff
+///   `<label>` is non-empty, contains no dot, and `<suffix>` itself
+///   contains at least one dot.  This forbids degenerate patterns like
+///   `*.com` (too broad) and limits wildcard coverage to a single
+///   label — `*.example.com` covers `foo.example.com` but NOT
+///   `example.com` (apex) and NOT `foo.bar.example.com` (sub-sub).
+///
+/// Anything else — embedded wildcards (`foo.*.com`), trailing dots
+/// (`example.com.`), pure `*`, or arbitrary mismatches — is refused.
+///
+/// # Errors
+///
+/// Returns [`KeylessError::RoutingContextMismatch`] when the
+/// authorisation rule above is not satisfied.  The handler maps this
+/// to HTTP 403 (NOT 400) so the wire signals an explicit
+/// security-policy refusal rather than an input-shape complaint.
+pub fn check_routing_context(ctx: &RoutingContext) -> Result<(), KeylessError> {
+    let routed = ctx.routed_hostname.as_str();
+    let requested = ctx.requested_cert_subject.as_str();
+
+    if hostname_authorises(routed, requested) {
+        Ok(())
+    } else {
+        Err(KeylessError::RoutingContextMismatch(format!(
+            "routed_hostname {routed:?} does not authorise requested_cert_subject {requested:?}"
+        )))
+    }
+}
+
+/// Pure helper for [`check_routing_context`].  Returns `true` iff
+/// `routed` is authorised by the cert-subject pattern `requested`
+/// under the v0.1 matching rule documented on the public function.
+fn hostname_authorises(routed: &str, requested: &str) -> bool {
+    if routed.is_empty() || requested.is_empty() {
+        return false;
+    }
+    // Reject trailing-dot forms on either side; FQDN-with-dot is a
+    // DNS-resolution detail, not part of the cert/SNI surface this
+    // check evaluates.
+    if routed.ends_with('.') || requested.ends_with('.') {
+        return false;
+    }
+
+    // Wildcard pattern `*.<suffix>`: single-label prefix only.
+    if let Some(suffix) = requested.strip_prefix("*.") {
+        // `*.<suffix>` MUST have a meaningful suffix — `*.com` is
+        // refused because the authorisation surface is "every site
+        // under .com".
+        if !suffix.contains('.') {
+            return false;
+        }
+        // Suffix must not itself contain wildcards.
+        if suffix.contains('*') {
+            return false;
+        }
+        // routed = "<label>.<suffix>" where <label> has no dot.
+        let Some(dot_idx) = routed.find('.') else {
+            return false;
+        };
+        let label = &routed[..dot_idx];
+        let routed_suffix = &routed[dot_idx + 1..];
+        return !label.is_empty()
+            && !label.contains('*')
+            && routed_suffix.eq_ignore_ascii_case(suffix);
+    }
+
+    // Embedded or trailing wildcards in the pattern (anything other
+    // than a leading `*.`) are refused.
+    if requested.contains('*') {
+        return false;
+    }
+
+    // Direct match, case-insensitive (RFC 6125 §6.4).
+    routed.eq_ignore_ascii_case(requested)
+}
 
 /// Map a [`SignatureScheme`] to its [`SignatureAlgorithm`] under the
 /// v0.1 keyless allow-list.
@@ -755,6 +851,131 @@ mod tests {
         assert!(
             tracked <= cap,
             "atomic-reservation loop violated: tracked={tracked} > cap={cap}"
+        );
+    }
+
+    // ---- SEC-015 routing-context matching matrix (U4) ---------------
+
+    fn ctx(routed: &str, requested: &str) -> RoutingContext {
+        RoutingContext {
+            routed_hostname: CompactString::new(routed),
+            requested_cert_subject: CompactString::new(requested),
+        }
+    }
+
+    #[test]
+    fn routing_direct_match_authorises() {
+        check_routing_context(&ctx("victim.com", "victim.com")).expect("direct match");
+    }
+
+    #[test]
+    fn routing_direct_match_is_case_insensitive() {
+        check_routing_context(&ctx("Victim.COM", "victim.com")).expect("rfc 6125 §6.4 case-insens");
+        check_routing_context(&ctx("victim.com", "VICTIM.COM")).expect("symmetric case-insens");
+    }
+
+    #[test]
+    fn routing_wildcard_matches_single_label() {
+        check_routing_context(&ctx("api.example.com", "*.example.com"))
+            .expect("wildcard covers single-label prefix");
+    }
+
+    #[test]
+    fn routing_wildcard_rejects_apex() {
+        let err = check_routing_context(&ctx("example.com", "*.example.com"))
+            .expect_err("wildcard does NOT cover apex");
+        assert!(matches!(err, KeylessError::RoutingContextMismatch(_)));
+    }
+
+    #[test]
+    fn routing_wildcard_rejects_subsubdomain() {
+        let err = check_routing_context(&ctx("foo.bar.example.com", "*.example.com"))
+            .expect_err("wildcard does NOT cover sub-subdomain");
+        assert!(matches!(err, KeylessError::RoutingContextMismatch(_)));
+    }
+
+    #[test]
+    fn routing_wildcard_rejects_too_broad_tld() {
+        let err = check_routing_context(&ctx("foo.com", "*.com"))
+            .expect_err("`*.com` is too broad and refused");
+        assert!(matches!(err, KeylessError::RoutingContextMismatch(_)));
+        let err = check_routing_context(&ctx("any.io", "*.io"))
+            .expect_err("`*.io` is too broad and refused");
+        assert!(matches!(err, KeylessError::RoutingContextMismatch(_)));
+    }
+
+    #[test]
+    fn routing_rejects_mismatched_hostname() {
+        let err = check_routing_context(&ctx("victim.com", "attacker.com"))
+            .expect_err("plain mismatch must refuse");
+        assert!(matches!(err, KeylessError::RoutingContextMismatch(_)));
+    }
+
+    #[test]
+    fn routing_rejects_embedded_wildcard() {
+        let err = check_routing_context(&ctx("foo.bar.com", "foo.*.com"))
+            .expect_err("embedded wildcard not allowed (only leading *.)");
+        assert!(matches!(err, KeylessError::RoutingContextMismatch(_)));
+    }
+
+    #[test]
+    fn routing_rejects_bare_star() {
+        let err =
+            check_routing_context(&ctx("anything.com", "*")).expect_err("bare `*` refused");
+        assert!(matches!(err, KeylessError::RoutingContextMismatch(_)));
+    }
+
+    #[test]
+    fn routing_rejects_empty_strings() {
+        assert!(matches!(
+            check_routing_context(&ctx("", "victim.com")),
+            Err(KeylessError::RoutingContextMismatch(_))
+        ));
+        assert!(matches!(
+            check_routing_context(&ctx("victim.com", "")),
+            Err(KeylessError::RoutingContextMismatch(_))
+        ));
+        assert!(matches!(
+            check_routing_context(&ctx("", "")),
+            Err(KeylessError::RoutingContextMismatch(_))
+        ));
+    }
+
+    #[test]
+    fn routing_rejects_trailing_dot_fqdn() {
+        // Trailing-dot FQDN form is a DNS-resolution detail, not part
+        // of the cert/SNI authorisation surface.
+        let err = check_routing_context(&ctx("victim.com.", "victim.com"))
+            .expect_err("routed trailing dot refused");
+        assert!(matches!(err, KeylessError::RoutingContextMismatch(_)));
+        let err = check_routing_context(&ctx("victim.com", "victim.com."))
+            .expect_err("requested trailing dot refused");
+        assert!(matches!(err, KeylessError::RoutingContextMismatch(_)));
+    }
+
+    #[test]
+    fn validate_runs_routing_check_before_other_steps() {
+        // Confirms Step 0 ordering: a request with a mismatching
+        // routing context fails BEFORE the unknown-key check, so
+        // the strictest verdict (security-policy refusal) short-
+        // circuits ahead of input-shape validation.
+        let policy = KeylessPolicy::new();
+        // No keys registered AND routing mismatch — must surface as
+        // RoutingContextMismatch (the SEC-015 verdict), not as
+        // UnknownKeyId.
+        let req = SignRequest {
+            key_id: CompactString::const_new("nonexistent"),
+            scheme: SignatureSchemeWire::from(SignatureScheme::RSA_PSS_SHA256),
+            payload: vec![0u8; 16],
+            routing_context: RoutingContext {
+                routed_hostname: CompactString::const_new("victim.com"),
+                requested_cert_subject: CompactString::const_new("attacker.com"),
+            },
+        };
+        let err = policy.validate("subject", &req).expect_err("must refuse");
+        assert!(
+            matches!(err, KeylessError::RoutingContextMismatch(_)),
+            "expected RoutingContextMismatch first; got {err:?}"
         );
     }
 }

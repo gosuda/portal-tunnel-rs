@@ -125,4 +125,20 @@ pub enum KeylessError {
     /// exhausted for the connecting client cert's subject.
     #[error("rate limited")]
     RateLimited,
+
+    /// SEC-015 ECH/inner-SNI mismatch: the request's
+    /// `routing_context.routed_hostname` (set by the upstream relay
+    /// routing layer) does not authorise the
+    /// `routing_context.requested_cert_subject` the tenant declared.
+    ///
+    /// This refusal closes the MITM primitive enumerated in roadmap
+    /// SEC-015 — a tenant terminating an inner SNI for `victim.com`
+    /// cannot ask the keyless oracle to sign for a cert subject that
+    /// does not authorise that hostname.  The handler maps this to
+    /// HTTP `403 Forbidden` (NOT 400) so the wire signals an explicit
+    /// security-policy refusal rather than an input-shape complaint.
+    ///
+    /// Phase 6b/A U4 — emitted by [`crate::keyless::policy::check_routing_context`].
+    #[error("routing context mismatch: {0}")]
+    RoutingContextMismatch(String),
 }
