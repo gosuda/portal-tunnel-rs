@@ -2582,6 +2582,8 @@ dependencies = [
  "bytes",
  "compact_str",
  "ed25519-dalek",
+ "http",
+ "iri-string",
  "jiff",
  "k256",
  "portal-wire",

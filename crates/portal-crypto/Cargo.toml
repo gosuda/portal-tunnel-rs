@@ -12,6 +12,8 @@ alloy = { workspace = true }
 bytes = { workspace = true }
 compact_str = { workspace = true }
 ed25519-dalek = { workspace = true }
+http = { workspace = true }
+iri-string = { workspace = true }
 jiff = { workspace = true }
 k256 = { workspace = true }
 postcard = { workspace = true }
