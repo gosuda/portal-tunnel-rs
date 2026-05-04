@@ -15,12 +15,15 @@ portal-crypto = { workspace = true }
 portal-wire = { workspace = true }
 quinn = { workspace = true }
 rand_core = { workspace = true }
+rcgen = { workspace = true }
 rustls = { workspace = true }
 secrecy = { workspace = true }
+socket2 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
+x509-cert = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]

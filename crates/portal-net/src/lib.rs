@@ -4,11 +4,16 @@
 
 #![forbid(unsafe_code)]
 
+pub mod dual_stack;
 pub mod error;
-pub(crate) mod quic;
+pub mod quic;
 
+pub use dual_stack::{
+    bind_dual_stack_tcp, bind_dual_stack_udp, canonicalize_ip, canonicalize_socket,
+};
 pub use error::NetError;
 pub use quic::identity::{
     QuicIdentityKey, generate_quic_identity_key, load_quic_identity_key,
     quic_identity_verifying_key, save_quic_identity_key,
 };
+pub use quic::{Endpoint, EndpointRole, SpkiPinVerifier};

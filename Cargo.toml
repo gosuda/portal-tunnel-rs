@@ -45,9 +45,21 @@ rustls = { version = "0.23.40", default-features = false, features = [
 
 # Transport + codec
 quinn = "0.11"
+# Self-signed cert generator for the QUIC backhaul identity (R2 surface 3).
+# `aws_lc_rs` feature avoids pulling `ring` per R13 (rustls-MANDATORY); `pem`
+# is enabled because rcgen's stable signing-key plumbing requires the `crypto`
+# feature group, which `pem` activates as a coupled dependency.
+rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde-big-array = "0.5"
+# socket2 powers the dual-stack `IPV6_V6ONLY=false` listener helper in
+# `portal-net::dual_stack` (R12). Pinned independent of tokio's transitive
+# pull so direct usage is grep-discoverable.
+socket2 = "0.6"
+# Pure-Rust X.509 parser used by `SpkiPinVerifier` to extract the leaf cert's
+# 32-byte ed25519 SubjectPublicKeyInfo for raw-pubkey pinning.
+x509-cert = { version = "0.2", default-features = false, features = ["std"] }
 bytes = { version = "1", features = ["serde"] }
 postcard = { version = "1", features = ["alloc", "use-std"] }
 winnow = "1"
