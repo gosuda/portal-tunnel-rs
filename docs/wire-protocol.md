@@ -62,6 +62,7 @@ Signing inputs for postcard-canonical blobs and envelopes are prefixed with exac
 3. `b"portal-tunnel/lease-token/v1"`
 4. `b"portal-tunnel/keyless-request/v1"`
 5. `b"portal-tunnel/reputation-delta/v1"`
+6. `b"portal-tunnel/binding-attestation/v1"`
 
 Cross-protocol confusion MUST be rejected by domain-separated signing in `portal-crypto` (Phase 2).
 

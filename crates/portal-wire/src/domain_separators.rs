@@ -10,6 +10,8 @@ pub const LEASE_TOKEN: &[u8] = b"portal-tunnel/lease-token/v1";
 pub const KEYLESS_REQUEST: &[u8] = b"portal-tunnel/keyless-request/v1";
 /// Prefix for [`crate::reputation::ReputationDelta`] canonical bytes (v0.2 wire).
 pub const REPUTATION_DELTA: &[u8] = b"portal-tunnel/reputation-delta/v1";
+/// Prefix for binding attestation payloads linking a SIWE identity to an ed25519 relay key.
+pub const BINDING_ATTESTATION: &[u8] = b"portal-tunnel/binding-attestation/v1";
 
 #[cfg(test)]
 mod tests {
@@ -23,9 +25,10 @@ mod tests {
             super::LEASE_TOKEN,
             super::KEYLESS_REQUEST,
             super::REPUTATION_DELTA,
+            super::BINDING_ATTESTATION,
         ];
         let uniq: HashSet<&[u8]> = all.iter().copied().collect();
-        assert_eq!(uniq.len(), 5);
+        assert_eq!(uniq.len(), 6);
     }
 
     #[test]
