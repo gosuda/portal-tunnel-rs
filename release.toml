@@ -1,0 +1,49 @@
+# cargo-release configuration — terminal release actions disabled until v1.0.
+#
+# Phase 7 U8.10 first slice. The cross-compile matrix workflow
+# (.github/workflows/release.yml) lands separately when Phase 6b/B U6+U7
+# pin the WG-fork-aware matrix shape. The git-cliff-driven CHANGELOG.md
+# replacement hook lands when CHANGELOG.md is initialized at the v0.1
+# pre-release commit; this file ships without that hook to avoid
+# referencing an absent file.
+#
+# **What this config does NOT prevent.** `cargo release --workspace
+# --execute` will still:
+#   - bump version fields in every member crate's `Cargo.toml`
+#   - create a local commit with the bumped versions
+#   - run any `[hooks]` blocks defined here (none currently configured)
+# These local mutations are recoverable via `git reset --hard HEAD~1` (or
+# `git restore .` before the commit lands) but they are NOT a no-op.
+#
+# **What this config DOES prevent.** Each of the three terminal actions
+# (`publish` to crates.io, `push` of commits/tags to a remote, `tag`
+# creation) is set to `false` at the top level. `cargo release --execute`
+# will refuse to perform any of those three regardless of CLI flags;
+# flipping a flag to `true` requires a same-commit edit to this file.
+#
+# **Operator guidance pre-v1.0.** Do NOT run `cargo release --workspace
+# --execute` until v1.0 ADR. The intended use of this file is to
+# document the v1.0+ config; pre-v1.0 release tags are created manually
+# by the maintainer who runs the release.
+
+# Disable cargo publish to crates.io. Stays `false` until R6 SDK
+# promotion ADR explicitly authorizes publication. The roadmap commits
+# to ship `portal-sdk` to crates.io only after the SDK API surface
+# stabilises post-v0.1.
+publish = false
+
+# Disable `git push` of commits and tags. Stays `false` until v1.0 ADR.
+# Pre-v1.0 releases are pushed manually after maintainer review.
+push = false
+
+# Disable `git tag` creation. Stays `false` until v1.0 ADR. Pre-v1.0
+# tags (v0.1, v0.2, ...) are created manually by the maintainer who
+# operates the release; the `release.yml` workflow handles artifact
+# publication only.
+tag = false
+
+# Apply settings uniformly across every workspace member.
+shared-version = true
+
+# Single combined commit per release rather than one commit per crate.
+consolidate-commits = true
