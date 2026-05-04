@@ -29,8 +29,17 @@ tracing = { workspace = true }
 # Secrecy for tenant key newtypes
 secrecy = { workspace = true }
 
+# TLS — required for the RFC 5705 EKM exporter helper in `mitm.rs`.
+# Pulled from the workspace pin (rustls 0.23 + aws_lc_rs provider per R13).
+rustls = { workspace = true }
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+# The MITM probe behavioral gate drives a full in-memory rustls
+# handshake; rcgen mints the self-signed cert and rustls itself is
+# imported directly to construct configs and the test's noop verifier.
+rcgen = { workspace = true }
+rustls = { workspace = true }
 
 [lints]
 workspace = true

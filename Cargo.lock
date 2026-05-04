@@ -4000,6 +4000,8 @@ dependencies = [
  "portal-crypto",
  "portal-net",
  "portal-wire",
+ "rcgen",
+ "rustls",
  "secrecy",
  "thiserror 2.0.18",
  "tokio",

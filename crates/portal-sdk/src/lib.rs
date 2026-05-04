@@ -21,15 +21,16 @@
 //! `docs/plans/2026-05-04-006-feat-portal-sdk-plan.md`. **B1** ships
 //! the crate scaffold (this `lib.rs`), [`error::SdkError`], and the
 //! [`events`] module ([`TunnelState`], [`TunnelEvent`],
-//! `broadcast`-channel factories). Subsequent batches add
-//! `relay_set`, `picker`, `mitm`, `expose`, `listener`, and
-//! `identity`.
+//! `broadcast`-channel factories). **B2** ships [`relay_set`],
+//! [`picker`], [`events`], and [`mitm`]; subsequent batches add
+//! `expose`, `listener`, and `identity`.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
 pub mod error;
 pub mod events;
+pub mod mitm;
 pub mod picker;
 pub mod relay_set;
 
@@ -37,5 +38,6 @@ pub use error::{SdkError, SdkResult};
 pub use events::{
     DEFAULT_EVENT_CHANNEL_CAPACITY, TunnelEvent, TunnelState, channel, channel_with_capacity,
 };
+pub use mitm::{MitmError, PROBE_EKM_LEN, derive_probe_ekm};
 pub use picker::{PickerConstraints, pick_relays};
 pub use relay_set::{AsnBin, MetadataProvenance, RelayCandidate, RelayMetadata, RelaySet};
