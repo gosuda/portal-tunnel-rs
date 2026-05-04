@@ -7,8 +7,17 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+## Enables `ApiHttpsKey` and `api_https_signing_key`, which wrap
+## `Arc<dyn rustls::sign::SigningKey>`.  Gated because `rustls` with the
+## `aws_lc_rs` feature pulls `aws-lc-sys → cmake`, which the workspace
+## `deny.toml` bans under default features (`all-features = false`).
+## portal-relay activates this feature when building the API HTTPS surface.
+rustls-integration = ["dep:rustls"]
+
 [dependencies]
 alloy = { workspace = true }
+rustls = { workspace = true, optional = true }
 bytes = { workspace = true }
 compact_str = { workspace = true }
 ed25519-dalek = { workspace = true }
