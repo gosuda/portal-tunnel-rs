@@ -18,6 +18,7 @@ use serde::Deserialize;
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::error::PortalCryptoError;
+use crate::secret::decode_hex_exact;
 
 // ---------------------------------------------------------------------------
 // Newtype
@@ -76,42 +77,6 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// Hex helper (no `hex` crate in workspace)
-// ---------------------------------------------------------------------------
-
-/// Decode a lowercase or uppercase hex string into exactly `N` bytes.
-///
-/// Returns `Err` if the string is not valid hex or its decoded byte-length
-/// differs from `N`.
-fn decode_hex_exact<const N: usize>(s: &str) -> Result<Zeroizing<[u8; N]>, PortalCryptoError> {
-    if s.len() != N * 2 {
-        return Err(PortalCryptoError::Ed25519(format!(
-            "expected {}-byte hex string ({} chars), got {} chars",
-            N,
-            N * 2,
-            s.len()
-        )));
-    }
-    let mut out = Zeroizing::new([0u8; N]);
-    for (i, pair) in s.as_bytes().chunks(2).enumerate() {
-        let hi = hex_nibble(pair[0]).map_err(|e| PortalCryptoError::Ed25519(e.to_owned()))?;
-        let lo = hex_nibble(pair[1]).map_err(|e| PortalCryptoError::Ed25519(e.to_owned()))?;
-        out[i] = (hi << 4) | lo;
-    }
-    Ok(out)
-}
-
-/// Convert a single ASCII hex character to its nibble value.
-const fn hex_nibble(b: u8) -> Result<u8, &'static str> {
-    match b {
-        b'0'..=b'9' => Ok(b - b'0'),
-        b'a'..=b'f' => Ok(b - b'a' + 10),
-        b'A'..=b'F' => Ok(b - b'A' + 10),
-        _ => Err("invalid hex character in ed25519 key material"),
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -149,7 +114,8 @@ pub fn load_relay_ed25519_key(
     // `data` is still live here; both are dropped (and zeroized) at end of scope.
 
     // `seed` is `Zeroizing<[u8; 32]>` — wiped on drop.
-    let seed = decode_hex_exact::<32>(&raw.ed25519_secret_key)?;
+    let seed =
+        decode_hex_exact::<32>(&raw.ed25519_secret_key).map_err(PortalCryptoError::Ed25519)?;
     Ok(SecretBox::new(Box::new(RelayEd25519Key(seed))))
 }
 
@@ -222,8 +188,7 @@ mod tests {
         let dir = tempfile::tempdir()?;
         let path = dir.path().join("key.json");
         // 4 bytes of hex — far too short for a 32-byte key.
-        std::fs::File::create(&path)?
-            .write_all(br#"{"ed25519_secret_key": "aabbccdd"}"#)?;
+        std::fs::File::create(&path)?.write_all(br#"{"ed25519_secret_key": "aabbccdd"}"#)?;
         let result = load_relay_ed25519_key(&path);
         assert!(
             matches!(result, Err(crate::error::PortalCryptoError::Ed25519(_))),
