@@ -12,7 +12,7 @@ default = ["local", "cloudflare", "route53", "gcloud"]
 local = ["dep:rcgen"]
 cloudflare = ["dep:cloudflare"]
 route53 = ["dep:aws-sdk-route53"]
-gcloud = ["dep:google-cloud-dns-v1"]
+gcloud = ["dep:google-cloud-dns-v1", "dep:google-cloud-auth", "dep:google-cloud-gax"]
 
 [dependencies]
 bon = { workspace = true }
@@ -36,6 +36,8 @@ rcgen = { workspace = true, optional = true }
 cloudflare = { workspace = true, optional = true }
 aws-sdk-route53 = { workspace = true, optional = true }
 google-cloud-dns-v1 = { workspace = true, optional = true }
+google-cloud-auth = { workspace = true, optional = true }
+google-cloud-gax = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

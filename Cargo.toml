@@ -129,8 +129,14 @@ aws-sdk-route53 = { version = "1", default-features = false, features = [
 cloudflare = { version = "0.14", default-features = false, features = ["rustls-tls"] }
 # Native Google Cloud DNS client (Apache-2.0). Pulls rustls/aws-lc-rs by
 # default; resolves FEAS-7 in favour of the native SDK over the prior
-# `gcp_auth + REST` shim.
+# `gcp_auth + REST` shim. `google-cloud-auth` ships the service-account
+# credential builder used in production and the anonymous-credential
+# builder used by the wiremock contract test (skips OAuth fetch);
+# `google-cloud-gax` exposes the `with_endpoint` / `with_credentials`
+# client-builder surface shared across all Google native SDKs.
 google-cloud-dns-v1 = "1.3"
+google-cloud-auth = "1"
+google-cloud-gax = "1"
 
 # Overlay (Phase 6b)
 smoltcp = { version = "0.13", default-features = false }

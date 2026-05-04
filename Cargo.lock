@@ -2504,6 +2504,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "54a26c047222f874ea87177368ad07c65a9f66534ad3a3f9401f1322c802ccac"
 dependencies = [
  "async-trait",
+ "aws-lc-rs",
  "base64",
  "bytes",
  "chrono",
@@ -2511,6 +2512,7 @@ dependencies = [
  "hex",
  "hmac 0.13.0",
  "http 1.4.0",
+ "jsonwebtoken",
  "reqwest 0.13.3",
  "rustc_version 0.4.1",
  "rustls",
@@ -3351,6 +3353,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonwebtoken"
+version = "10.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0529410abe238729a60b108898784df8984c87f6054c9c4fcacc47e4803c1ce1"
+dependencies = [
+ "aws-lc-rs",
+ "base64",
+ "getrandom 0.2.17",
+ "js-sys",
+ "serde",
+ "serde_json",
+ "signature",
+]
+
+[[package]]
 name = "k256"
 version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3857,7 +3874,9 @@ dependencies = [
  "cloudflare",
  "compact_str",
  "eyre",
+ "google-cloud-auth",
  "google-cloud-dns-v1",
+ "google-cloud-gax",
  "instant-acme",
  "jiff",
  "rand_core 0.6.4",
