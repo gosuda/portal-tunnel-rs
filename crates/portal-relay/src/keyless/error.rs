@@ -1,13 +1,15 @@
-//! Error type for the keyless PEM loader, signer adapter, and
-//! async bridge.
+//! Error type for the keyless PEM loader, signer adapter, async
+//! bridge, and U3 axum handler / policy.
 //!
 //! Phase 6b/A Batch 1 first half (U1) shipped the loader-side
 //! variants: `MalformedPem`, `UnsupportedAlgorithm`, `InvalidKey`.
 //! Batch 1 second half (U2) adds the signer + async-bridge variants:
 //! `SignFailed`, `WorkerPanic`, `BridgeClosed`, `QueueFull`.
+//! Batch 2 first half (U3) adds the handler / policy variants:
+//! `UnknownKeyId`, `SchemeMismatch`, `PayloadTooLarge`, `RateLimited`.
 //!
-//! The variant set is `#[non_exhaustive]` so adding U3+ arms (axum
-//! handler / policy / SEC-015) is not a breaking change.
+//! The variant set is `#[non_exhaustive]` so adding U4+ arms (SEC-015
+//! routing-context refusal) is not a breaking change.
 
 use thiserror::Error;
 
@@ -81,4 +83,46 @@ pub enum KeylessError {
     /// `mpsc::Sender::try_send` returns `TrySendError::Full`.
     #[error("bridge queue full")]
     QueueFull,
+
+    /// The request's `key_id` is not registered in the relay's known
+    /// keys map.  Surfaced by [`crate::keyless::policy`] before the
+    /// bridge ever sees the request — the signer worker pool is NOT
+    /// invoked for unknown key ids.
+    ///
+    /// Phase 6b/A U3 — handler maps this to HTTP `400 Bad Request`
+    /// with wire code `unknown_key_id`.
+    #[error("unknown key id: {0}")]
+    UnknownKeyId(String),
+
+    /// The request's `scheme` does not match the loaded key's
+    /// algorithm (e.g. an RSA key was asked to produce an ECDSA
+    /// signature, or vice versa).  Refusal happens in the policy
+    /// layer; the worker pool never observes this request.
+    ///
+    /// Phase 6b/A U3 — handler maps this to HTTP `400 Bad Request`
+    /// with wire code `scheme_mismatch`.
+    #[error("scheme mismatch: {0}")]
+    SchemeMismatch(String),
+
+    /// The request's `payload` exceeds the SEC-014 keyless payload
+    /// budget (`portal_wire::limits::KEYLESS_PAYLOAD_BUDGET`).
+    ///
+    /// Phase 6b/A U3 — handler maps this to HTTP `400 Bad Request`
+    /// with wire code `payload_too_large`.
+    #[error("payload too large: {observed} > {budget}")]
+    PayloadTooLarge {
+        /// Observed payload length in bytes.
+        observed: usize,
+        /// Configured budget in bytes (the inclusive ceiling).
+        budget: usize,
+    },
+
+    /// The per-tenant governor rate limiter rejected this request.
+    /// The handler maps this to HTTP `429 Too Many Requests`.
+    ///
+    /// Phase 6b/A U3 — emitted by [`crate::keyless::policy`]'s
+    /// per-subject rate limit guard when the configured quota is
+    /// exhausted for the connecting client cert's subject.
+    #[error("rate limited")]
+    RateLimited,
 }

@@ -27,9 +27,21 @@
 //! lands, this module exposes only the type-level R2 isolation
 //! plus the U2 sign surface.
 //!
-//! - U3 (next): axum mTLS endpoint + SEC-004 protections +
-//!   signrpc-equivalent wire shape.
-//! - U4: SEC-015 routing-context refuse-to-sign guard.
+//! Batch 2 first half (U3) adds:
+//! - [`wire`] — `SignRequest` / `SignResponse` / `KeylessErrorBody` /
+//!   `RoutingContext` (greenfield rename of the Go reference's
+//!   `signrpc::*` shapes) + the SEC-007 [`wire::canonical_signing_input`]
+//!   helper.
+//! - [`policy::KeylessPolicy`] — the four-step SEC-004 validation
+//!   pipeline (known-key id, scheme-algorithm match, payload budget,
+//!   per-tenant rate limit) plus an atomic cardinality cap on the
+//!   per-subject limiter map (memory-DoS guard).
+//! - [`api::build_keyless_router`] — the axum `Router` mount + sign
+//!   handler.  The mTLS [`rustls::ServerConfig`] is constructed
+//!   locally inside `keyless::api` and never aliased into
+//!   `state/` or `listeners/` (R2 trust-boundary discipline).
+//!
+//! - U4 (deferred): SEC-015 routing-context refuse-to-sign guard.
 //!
 //! ## Trust-boundary discipline (R2)
 //!
@@ -50,12 +62,26 @@
 //! `portal_crypto::load_all_keys` plus the multi-key-return regex CI
 //! gate cover the bundle-loader bypass.
 
+pub mod api;
 pub mod bridge;
 pub mod error;
 pub mod material;
+pub mod policy;
 pub mod signer;
+pub mod wire;
 
+pub use api::{
+    KEYLESS_SIGN_PATH, KeylessApiState, SubjectExtension, build_keyless_router,
+    build_keyless_server_config, subject_from_extension,
+};
 pub use bridge::{Bridge, BridgeConfig};
 pub use error::KeylessError;
 pub use material::{KeylessSigningKey, load_keyless_signing_key};
+pub use policy::{
+    KEYLESS_TENANT_BURST, KEYLESS_TENANT_SUSTAINED, KeylessPolicy, KnownKey, MAX_TRACKED_SUBJECTS,
+};
 pub use signer::KeylessSignerAdapter;
+pub use wire::{
+    KeylessErrorBody, RoutingContext, SignRequest, SignResponse, SignatureSchemeWire,
+    canonical_signing_input,
+};

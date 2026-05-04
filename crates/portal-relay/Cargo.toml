@@ -53,15 +53,39 @@ repository.workspace = true
 #   `rustls::crypto::aws_lc_rs::sign::any_supported_type` for delegating
 #   crypto primitives — workspace policy is "use rustls's own provider,
 #   don't roll our own", per ADR-0014 / ADR-0016).
+#
+# Phase 6b/A Batch 2 first half (U3 — keyless axum mTLS endpoint + SEC-004
+# protections + signrpc-equivalent wire) adds:
+# - portal-wire (KEYLESS_REQUEST domain separator + KEYLESS_PAYLOAD_BUDGET
+#   limit constant — wire-protocol surface lives in portal-wire per the
+#   U16 drift gate).
+# - postcard (canonical SignRequest signing-input encoding — SEC-007).
+# - governor (per-tenant rate limit keyed by client-cert subject; papaya-
+#   backed map of `DefaultDirectRateLimiter` instances).
+# - hyper { server, http1 } + hyper-util + http + tower (axum's Service
+#   primitive plumbed onto a `tokio_rustls::TlsAcceptor` so the keyless
+#   ServerConfig is constructed locally to this module — never aliased
+#   into state/ or listeners/, per R2 trust-boundary discipline).
+# - tokio-rustls (TlsAcceptor over a TcpListener for the mTLS endpoint
+#   bind in `keyless::api`).
+# - rcgen + tokio-rustls + http-body-util (dev-only; integration test
+#   spins up a real mTLS server with rcgen-generated CA + client + server
+#   certs, then issues a real TLS handshake with `tokio_rustls::TlsConnector`).
 [dependencies]
 axum = { workspace = true }
-compact_str = { workspace = true }
+compact_str = { workspace = true, features = ["serde"] }
+governor = { workspace = true }
+http = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
 jiff = { workspace = true }
 papaya = { workspace = true }
 pkcs1 = { workspace = true }
 pkcs8 = { workspace = true }
 portal-crypto = { workspace = true, features = ["rustls-integration"] }
 portal-net = { workspace = true }
+portal-wire = { workspace = true }
+postcard = { workspace = true }
 rustls = { workspace = true }
 rustls-pki-types = { workspace = true }
 sec1 = { workspace = true }
@@ -69,12 +93,18 @@ secrecy = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "fs", "io-util", "sync", "time"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "fs", "io-util", "sync", "time", "net"] }
+tokio-rustls = { workspace = true }
 tokio-util = { workspace = true }
+tower = { workspace = true }
 tracing = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
+aws-lc-rs = { workspace = true }
+http-body-util = { workspace = true }
+pkcs1 = { workspace = true }
+rcgen = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 

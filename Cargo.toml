@@ -33,9 +33,20 @@ tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec", "rt"] }
 axum = "0.8"
 http = "1"
+http-body-util = "0.1"
 hyper = { version = "1", features = ["full"] }
+hyper-util = { version = "0.1", features = ["tokio", "server-auto", "service"] }
 iri-string = "0.7"
 tower = "0.5"
+# Async TLS (server + client) layered on rustls — used by the keyless mTLS
+# integration test (Phase 6b/A U3) and any future tenant-TLS surfaces that
+# need a `TlsAcceptor` / `TlsConnector` over a tokio stream. `default-features
+# = false` keeps the dep aligned with the workspace's aws-lc-rs provider
+# pin (R13).
+tokio-rustls = { version = "0.26", default-features = false, features = [
+    "aws-lc-rs",
+    "tls12",
+] }
 
 # TLS — rustls MANDATORY (R13). aws_lc_rs provider; prefer-post-quantum opts the
 # X25519+ML-KEM-768 hybrid KEX in once rustls negotiates it. Server-side ECH is
@@ -124,6 +135,13 @@ k256 = { version = "0.13", features = ["ecdsa"] }
 ed25519-dalek = { version = "2", features = ["pkcs8", "rand_core", "zeroize"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 trait_variant = { package = "trait-variant", version = "0.1" }
+# aws-lc-rs is a transitive dep through `rustls`'s `aws_lc_rs` feature; we
+# additionally declare it at workspace level so dev-deps can `use aws_lc_rs`
+# directly for signature-verification helpers in integration tests
+# (notably the keyless mTLS round-trip test in `portal-relay`). Default
+# features are kept to inherit the same prebuilt-NASM / fips toggles
+# rustls relies on so the dev-dep does not silently rebuild aws-lc-rs.
+aws-lc-rs = "1"
 
 # TUI (R15)
 ratatui = { version = "0.30", default-features = false }

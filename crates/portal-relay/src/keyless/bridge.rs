@@ -148,6 +148,35 @@ impl BridgeConfig {
             queue_depth: 256,
         }
     }
+
+    /// Construct an explicit-size [`BridgeConfig`].
+    ///
+    /// Exposed so out-of-crate callers (notably the keyless mTLS
+    /// integration test in `crates/portal-relay/tests/`) can build a
+    /// `BridgeConfig` despite the type being `#[non_exhaustive]` —
+    /// without this constructor the struct expression
+    /// `BridgeConfig { worker_count, queue_depth }` is rejected at
+    /// the crate boundary.
+    ///
+    /// Both fields are taken as [`NonZeroUsize`] so the constructor
+    /// statically enforces the same invariants `Bridge::spawn`'s
+    /// inner `usize::max(1, …)` floors imply: a 0-supervisor pool
+    /// would deadlock the bridge, and `mpsc::channel(0)` panics —
+    /// invariants we shouldn't restate at every caller.  Future
+    /// additive fields land on this builder via separate
+    /// `with_*` setters rather than as positional args.
+    ///
+    /// [`NonZeroUsize`]: std::num::NonZeroUsize
+    #[must_use]
+    pub const fn with_workers_and_queue(
+        worker_count: std::num::NonZeroUsize,
+        queue_depth: std::num::NonZeroUsize,
+    ) -> Self {
+        Self {
+            worker_count: worker_count.get(),
+            queue_depth: queue_depth.get(),
+        }
+    }
 }
 
 impl Default for BridgeConfig {
