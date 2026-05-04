@@ -10,23 +10,24 @@
 //! ## Implementation status
 //!
 //! Phase 4 is landing in batches per
-//! `docs/plans/2026-05-04-004-feat-portal-acme-plan.md`. **The `Manager`
-//! lifecycle façade and the `instant-acme` client wrapper do NOT yet
-//! exist in this crate** — they are scheduled for unit U8 (Batch 6).
-//! Phase 4 Batch 1 ships the trait surface
-//! ([`provider::DnsProvider`]), configuration ([`config::AcmeConfig`]),
-//! and filesystem helpers ([`persist::write_atomic_with_mode`]). Phase
-//! 4 Batch 2 ships the local self-signed provider
-//! ([`providers::local::LocalProvider`]). Subsequent batches add the
-//! cloud-DNS providers and the `Manager` driver. Until U8 lands, callers
-//! invoke the Local provider directly — there is no top-level façade
-//! to consume.
+//! `docs/plans/2026-05-04-004-feat-portal-acme-plan.md`. Phase 4 Batch
+//! 1 ships the trait surface ([`provider::DnsProvider`]), configuration
+//! ([`config::AcmeConfig`]), and filesystem helpers
+//! ([`persist::write_atomic_with_mode`]). Phase 4 Batch 2 ships the
+//! local self-signed provider ([`providers::local::LocalProvider`]).
+//! Phase 4 Batch 6 (U8) ships the [`Manager`] lifecycle façade with
+//! the local-self-signed path fully wired; the ACME (Cloudflare,
+//! Route53, Google Cloud) dispatch arms return
+//! [`error::AcmeError::Config`] until B3-B5 + the `instant-acme`
+//! client wrapper land. Phase 5 (`portal-relay`) consumes the
+//! `Manager` directly — local-mode boot is unblocked as of B6.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
 pub mod config;
 pub mod error;
+pub mod manager;
 pub mod persist;
 pub mod provider;
 
@@ -48,4 +49,5 @@ pub use config::{
     Route53Credentials,
 };
 pub use error::{AcmeError, AcmeResult};
+pub use manager::{CertificateHandoff, Manager, Mode, ProviderSelector};
 pub use provider::{DnsProvider, DnsRecord};
