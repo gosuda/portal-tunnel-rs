@@ -12,6 +12,10 @@ pub enum Error {
     /// Unknown [`crate::channel::Channel`](Channel) discriminant.
     #[error("unknown channel tag: {0}")]
     UnknownChannelTag(u8),
+    /// Unknown [`crate::channel::TcpProxyKind`](crate::channel::TcpProxyKind)
+    /// sub-discriminant byte (the byte following a `Channel::TcpProxy` tag).
+    #[error("unknown tcp-proxy kind: {0}")]
+    UnknownTcpProxyKind(u8),
     /// Payload exceeds the per-channel SEC-014 cap.
     #[error("frame exceeds limit for channel")]
     FrameTooLarge,

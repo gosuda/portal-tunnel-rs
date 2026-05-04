@@ -49,6 +49,8 @@ pub enum Audience {
     Keyless,
     /// Hop-forward attestation (overlay).
     HopForward,
+    /// QUIC backhaul control channel (relay-server-side handshake).
+    QuicBackhaul,
 }
 
 /// Operation the [`Envelope`] is allowed to perform once verified.
@@ -127,5 +129,24 @@ mod tests {
         assert_eq!(a, b);
         let c = env.signing_input(b"sep-b").unwrap();
         assert_ne!(a, c);
+    }
+
+    #[test]
+    fn quic_backhaul_audience_postcard_round_trips() {
+        let env = Envelope {
+            payload: Bytes::from_static(b"backhaul-payload"),
+            sig: [0u8; 64],
+            claims: Claims {
+                nonce: [9u8; 16],
+                not_before: Timestamp::UNIX_EPOCH,
+                not_after: Timestamp::UNIX_EPOCH,
+                audience: Audience::QuicBackhaul,
+                purpose: Purpose::LeaseAccess,
+            },
+        };
+        let bytes = env.to_bytes().unwrap();
+        let decoded = Envelope::from_bytes(&bytes).unwrap();
+        assert_eq!(decoded.claims.audience, Audience::QuicBackhaul);
+        assert_eq!(decoded, env);
     }
 }

@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 bytes = { workspace = true }
 ed25519-dalek = { workspace = true }
+jiff = { workspace = true }
 papaya = { workspace = true }
 portal-crypto = { workspace = true }
 portal-wire = { workspace = true }
@@ -27,6 +28,10 @@ x509-cert = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
+# Self-reference activates `insecure-test-constructors` so unit tests can
+# reach `ed25519_from_seed_for_test` without leaking the gate to production
+# (jiff is already in [dependencies] for the QUIC backhaul control window).
+portal-crypto = { workspace = true, features = ["insecure-test-constructors"] }
 tempfile = { workspace = true }
 
 [lints]

@@ -16,4 +16,4 @@ pub use quic::identity::{
     QuicIdentityKey, generate_quic_identity_key, load_quic_identity_key,
     quic_identity_verifying_key, save_quic_identity_key,
 };
-pub use quic::{Endpoint, EndpointRole, SpkiPinVerifier};
+pub use quic::{Endpoint, EndpointRole, InboundStream, SpkiPinVerifier, TcpProxyKind};

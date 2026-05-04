@@ -50,6 +50,32 @@ impl TryFrom<u8> for Channel {
     }
 }
 
+/// Sub-discriminant byte that follows a [`Channel::TcpProxy`] tag.
+///
+/// Appears on the first frame of a TCP proxy stream. The byte values are
+/// part of the wire register (Phase 1) — a single source of truth for
+/// both the relay-side dispatcher and the SDK-side opener.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum TcpProxyKind {
+    /// Raw TCP forwarding (no origin-side TLS termination).
+    Raw = 0x01,
+    /// TLS forwarding (origin-side TLS termination).
+    Tls = 0x02,
+}
+
+impl TryFrom<u8> for TcpProxyKind {
+    type Error = Error;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0x01 => Ok(Self::Raw),
+            0x02 => Ok(Self::Tls),
+            other => Err(Error::UnknownTcpProxyKind(other)),
+        }
+    }
+}
+
 /// Framing: `[tag:u8][len:u32_be][payload:len]`.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ChannelCodec;
@@ -123,5 +149,20 @@ mod tests {
         let mut codec = ChannelCodec;
         let e = codec.decode(&mut buf).unwrap_err();
         assert!(matches!(e, Error::LegacyKeepaliveByte));
+    }
+
+    #[test]
+    fn tcp_proxy_kind_round_trips() {
+        for kind in [TcpProxyKind::Raw, TcpProxyKind::Tls] {
+            let byte = kind as u8;
+            let back = TcpProxyKind::try_from(byte).unwrap();
+            assert_eq!(kind, back);
+        }
+    }
+
+    #[test]
+    fn tcp_proxy_kind_rejects_unknown_byte() {
+        let result = TcpProxyKind::try_from(0xff);
+        assert!(matches!(result, Err(Error::UnknownTcpProxyKind(0xff))));
     }
 }
