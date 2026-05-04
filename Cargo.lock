@@ -3964,6 +3964,18 @@ dependencies = [
 [[package]]
 name = "portal-relay-bin"
 version = "0.1.0"
+dependencies = [
+ "clap",
+ "compact_str",
+ "eyre",
+ "jiff",
+ "portal-acme",
+ "portal-relay",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "portal-sdk"

@@ -11,5 +11,26 @@ repository.workspace = true
 name = "portal-relay"
 path = "src/main.rs"
 
+[dependencies]
+# Cross-crate
+portal-acme = { workspace = true }
+portal-relay = { workspace = true }
+
+# CLI parsing
+clap = { workspace = true, features = ["derive"] }
+
+# Async runtime
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "time"] }
+tokio-util = { workspace = true, features = ["rt"] }
+
+# Errors + tracing
+eyre = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+
+# Compact strings + jiff for config types
+compact_str = { workspace = true }
+jiff = { workspace = true }
+
 [lints]
 workspace = true
