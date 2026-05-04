@@ -13,6 +13,7 @@ non-trivial decision per phase. Status lifecycle: `proposed` → `accepted` →
 | [0005](0005-siwe-rs-stewardship.md) | siwe-rs stewardship and v0.2 fork-trigger criterion | accepted |
 | [0014](0014-portal-relay-overlay-architecture.md) | Overlay architecture — sealed `WgDevice` + smoltcp + QUIC-on-smoltcp-UDP hop-mux | accepted |
 | [0015](0015-wireguard-userspace-fork-pick.md) | WireGuard userspace fork — defguard_boringtun primary, NepTUN secondary (pending license review) | accepted |
+| [0016](0016-keyless-async-bridge.md) | Keyless async bridge — bounded mpsc + spawn_blocking dispatch | accepted |
 
 ## Amendment procedure
 

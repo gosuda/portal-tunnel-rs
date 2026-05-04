@@ -1,15 +1,18 @@
-//! Error type for the keyless PEM loader and (Phase 6b/A U2+) signer.
+//! Error type for the keyless PEM loader, signer adapter, and
+//! async bridge.
 //!
-//! Phase 6b/A Batch 1 first half (U1) ships only the loader-side
-//! variants: `MalformedPem`, `UnsupportedAlgorithm`, `InvalidKey`. The
-//! signer / async-bridge variants land alongside U2.
+//! Phase 6b/A Batch 1 first half (U1) shipped the loader-side
+//! variants: `MalformedPem`, `UnsupportedAlgorithm`, `InvalidKey`.
+//! Batch 1 second half (U2) adds the signer + async-bridge variants:
+//! `SignFailed`, `WorkerPanic`, `BridgeClosed`, `QueueFull`.
 //!
-//! The variant set is `#[non_exhaustive]` so adding signer arms in U2
-//! is not a breaking change.
+//! The variant set is `#[non_exhaustive]` so adding U3+ arms (axum
+//! handler / policy / SEC-015) is not a breaking change.
 
 use thiserror::Error;
 
-/// Errors produced by the keyless PEM loader and (forthcoming) signer.
+/// Errors produced by the keyless PEM loader, signer adapter, and
+/// async-bridge worker pool.
 #[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum KeylessError {
@@ -38,4 +41,44 @@ pub enum KeylessError {
     /// missing curve parameters, etc.).
     #[error("invalid key body: {0}")]
     InvalidKey(String),
+
+    /// The signer's `sign(...)` call failed.  Wraps the rustls / aws-lc-rs
+    /// error string so the failure is visible at the bridge boundary
+    /// without leaking the underlying provider's typed error into our
+    /// public surface.
+    ///
+    /// Phase 6b/A U2 — surfaced when a worker observes a signing-time
+    /// error from the inner `rustls::sign::Signer::sign` call.
+    #[error("sign failed: {0}")]
+    SignFailed(String),
+
+    /// A worker task ended without delivering a reply (the
+    /// `oneshot::Sender` was dropped before sending).  The most likely
+    /// cause is a worker panic — `JoinSet`-tracked workers surface their
+    /// panic to the caller via this variant rather than silently
+    /// hanging.
+    ///
+    /// Phase 6b/A U2 — emitted by `Bridge::sign` when the reply channel
+    /// closes without producing a value.
+    #[error("worker panicked or exited without reply")]
+    WorkerPanic,
+
+    /// The bridge's request channel was already closed (all workers
+    /// have exited; cancellation has already drained the pool).  No
+    /// further sign requests can be served on this `Bridge` instance.
+    ///
+    /// Phase 6b/A U2 — emitted by `Bridge::sign` when
+    /// `mpsc::Sender::try_send` returns `TrySendError::Closed`.
+    #[error("bridge channel closed")]
+    BridgeClosed,
+
+    /// The bridge's request queue is at capacity and the caller did
+    /// not block.  At U3 the axum handler maps this to HTTP `503
+    /// Service Unavailable` so backpressure is observable at the wire
+    /// (see ADR-0016 §Decision).
+    ///
+    /// Phase 6b/A U2 — emitted by `Bridge::sign` when
+    /// `mpsc::Sender::try_send` returns `TrySendError::Full`.
+    #[error("bridge queue full")]
+    QueueFull,
 }

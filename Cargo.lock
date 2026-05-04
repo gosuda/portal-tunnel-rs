@@ -3996,6 +3996,7 @@ dependencies = [
  "pkcs8",
  "portal-crypto",
  "portal-net",
+ "rustls",
  "rustls-pki-types",
  "sec1",
  "secrecy",

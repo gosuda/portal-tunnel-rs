@@ -6,20 +6,29 @@
 //! Phase 6b/A lands incrementally per
 //! `docs/plans/2026-05-04-007-feat-portal-relay-overlay-keyless-plan.md`.
 //!
-//! Batch 1 first half (U1) ships this module skeleton and:
+//! Batch 1 first half (U1) shipped this module skeleton and:
 //! - [`KeylessSigningKey`] — opaque [`secrecy::SecretBox<KeyMaterial>`]
 //!   newtype + [`load_keyless_signing_key`] PEM loader.
 //! - [`KeylessError`] — `thiserror`, `#[non_exhaustive]` variants.
 //!
-//! Subsequent units fill in the rest of the surface; until each
-//! lands, this module exposes only the type-level R2 isolation.
+//! Batch 1 second half (U2) adds the rustls-side surface:
+//! - [`signer::KeylessSignerAdapter`] — sync rustls
+//!   [`rustls::sign::SigningKey`] impl that delegates crypto
+//!   primitives to the aws-lc-rs provider (R13 / ADR-0014 — workspace
+//!   policy is "use rustls's own provider, don't roll our own").
+//! - [`bridge::Bridge`] — bounded async-to-sync bridge: a tokio
+//!   `mpsc` queue feeding a JoinSet-tracked supervisor pool that
+//!   dispatches each sync `Signer::sign` onto tokio's blocking pool
+//!   via `spawn_blocking`.  Backpressure surfaces as
+//!   [`KeylessError::QueueFull`] (handler maps to HTTP 503).
+//!   ADR-0016 captures the design + rejected alternatives.
 //!
-//! - U2 (next): `KeylessSignerAdapter` — sync rustls
-//!   [`rustls::sign::SigningKey`] impl + tokio mpsc + worker-pool
-//!   bridge that exposes async `sign(...)`. ADR-0016 (async-bridge
-//!   decision) lands with U2.
-//! - U3: axum mTLS endpoint + SEC-004 protections + signrpc-equivalent
-//!   wire shape.
+//! Subsequent units fill in the rest of the surface; until each
+//! lands, this module exposes only the type-level R2 isolation
+//! plus the U2 sign surface.
+//!
+//! - U3 (next): axum mTLS endpoint + SEC-004 protections +
+//!   signrpc-equivalent wire shape.
 //! - U4: SEC-015 routing-context refuse-to-sign guard.
 //!
 //! ## Trust-boundary discipline (R2)
@@ -41,8 +50,12 @@
 //! `portal_crypto::load_all_keys` plus the multi-key-return regex CI
 //! gate cover the bundle-loader bypass.
 
+pub mod bridge;
 pub mod error;
 pub mod material;
+pub mod signer;
 
+pub use bridge::{Bridge, BridgeConfig};
 pub use error::KeylessError;
 pub use material::{KeylessSigningKey, load_keyless_signing_key};
+pub use signer::KeylessSignerAdapter;
