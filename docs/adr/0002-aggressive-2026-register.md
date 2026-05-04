@@ -116,6 +116,19 @@ Bumping the workspace MSRV to match the toughest dep avoids per-crate MSRV
 fragmentation and aligns with the Rust ecosystem's typical 6-month MSRV-bump
 cadence.
 
+### Amendment 2026-05-04 — bump 1.91 → 1.95
+
+Per user directive ("Rust latest version is 1.95!!!"), `rust-toolchain.toml`
+and `[workspace.package].rust-version` bump from **1.91** → **1.95** to
+align with the current latest stable Rust. Rationale: consume current
+ecosystem features (edition 2024 polish, async-fn-in-trait stability, const-
+fn assertions used in `portal-crypto::DomainSeparator::new`). 1.91 → 1.95 is
+a 4-release bump within the Rust ecosystem's typical 6-month MSRV cadence;
+existing dep floors (`aws-sdk-route53@1.110` MSRV 1.91) remain satisfied.
+The CI matrix `cargo msrv verify` job and the per-toolchain build matrix in
+`.github/workflows/ci.yml` were updated in the same commit. The original
+1.91-pin prose above is preserved as the historical decision record.
+
 ## Consequences
 
 ### Positive

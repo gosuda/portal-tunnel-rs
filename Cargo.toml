@@ -15,7 +15,7 @@ members = [
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.91"
+rust-version = "1.95"
 license = "MIT"
 repository = "https://github.com/gosuda/portal-tunnel-rs"
 
@@ -92,7 +92,7 @@ ratatui = { version = "0.30", default-features = false }
 ratatui-crossterm = "0.1"
 
 # DNS providers (R14 / Phase 4) — aws-sdk-route53 explicitly opts out of the
-# legacy hyper-0.14+rustls-0.21 stack per FEAS-R2-4. MSRV floor 1.91.
+# legacy hyper-0.14+rustls-0.21 stack per FEAS-R2-4. MSRV floor 1.95.
 aws-sdk-route53 = { version = "1", default-features = false, features = [
     "behavior-version-latest",
     "rt-tokio",

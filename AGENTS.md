@@ -56,7 +56,7 @@ ADR amendment in the same commit as the dep / lint / config change — see
 |---|---|
 | Edition | 2024 |
 | Resolver | 3 |
-| MSRV | `1.91` (declared in `[workspace.package]`) |
+| MSRV | `1.95` (declared in `[workspace.package]`) |
 | `unsafe_code` | `forbid` (zero unsafe blocks in workspace) |
 | Clippy lints | `pedantic` + `cargo` + `nursery` warn at `priority = -1`; `unwrap_used` + `expect_used` deny |
 | Per-lint silence | `#[expect(lint_name, reason = "…")]` — never `#[allow]` |
