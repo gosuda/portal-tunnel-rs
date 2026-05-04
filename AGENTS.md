@@ -79,6 +79,14 @@ The full register, banned-crates list, and per-pick rationale live in
 [ADR-0002](docs/adr/0002-aggressive-2026-register.md). The cargo-deny `bans`
 table operationally enforces the bans.
 
+## Async traits with Send bounds
+
+Use explicit `impl Future<Output = ...> + Send + 'a` return-position syntax in
+traits that require Send futures. `trait_variant` macro triggers `clippy::future_not_send`
+at unreachable proc-macro spans that cannot be suppressed with item-level
+`#[expect]`; this fails the `-D warnings` CI gate. (See `crates/portal-crypto/src/ens/alloy_resolver.rs`
+for the canonical pattern.)
+
 ## Atomic commits / tidy-first
 
 One concern per commit. ≤200 LoC substantive diff (file moves and generated

@@ -39,7 +39,7 @@ use crate::EthAddress;
 #[derive(Debug, Error)]
 pub enum EnsError {
     /// The name was not found in the ENS registry (no resolver registered).
-    #[error("ENS name not found: {0:?}")]
+    #[error("ENS name not found: {0}")]
     NameNotFound(String),
 
     /// An RPC or contract error occurred while resolving the name.
@@ -66,6 +66,14 @@ pub enum EnsError {
 /// `clippy::future_not_send` at a span outside the reach of item-level
 /// `#[expect]` attributes, causing the `-D warnings` gate to fail.  The trait
 /// is therefore defined directly with the `Send + Sync` bounds callers require.
+///
+/// # Object safety
+///
+/// This trait is **not object-safe** because `resolve` returns
+/// `impl Future`. Callers must hold the concrete type (or a type-erased
+/// wrapper such as `Arc<AlloyEnsResolver>`) directly. If dynamic dispatch
+/// is needed in Phase 5, introduce a `BoxedEnsResolver` newtype that
+/// wraps `Pin<Box<dyn Future<...> + Send>>`.
 pub trait EnsResolver: Send + Sync {
     /// Resolve an ENS name to an Ethereum address.
     ///
