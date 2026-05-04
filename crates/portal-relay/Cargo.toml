@@ -22,15 +22,21 @@ repository.workspace = true
 # - serde + serde_json (typed JSON write/read surface)
 # - tracing (warn on stale .tmp orphan during read_json)
 # - tokio { rt } (spawn_blocking for parent-directory fsync on POSIX)
+#
+# Phase 5 Batch 4 (U7 minimal lease registry) adds:
+# - papaya (lock-free `HashMap` for the identity + hostname tables)
+# - jiff (Timestamp values on `LeaseRecord`)
 [dependencies]
 compact_str = { workspace = true }
+jiff = { workspace = true }
+papaya = { workspace = true }
 portal-crypto = { workspace = true, features = ["rustls-integration"] }
 portal-net = { workspace = true }
 secrecy = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "fs", "io-util"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "fs", "io-util", "sync"] }
 tracing = { workspace = true }
 
 [dev-dependencies]

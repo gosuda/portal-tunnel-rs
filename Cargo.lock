@@ -3888,6 +3888,8 @@ name = "portal-relay"
 version = "0.1.0"
 dependencies = [
  "compact_str",
+ "jiff",
+ "papaya",
  "portal-crypto",
  "portal-net",
  "secrecy",
