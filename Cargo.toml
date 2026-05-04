@@ -102,6 +102,10 @@ zeroize = { version = "1.8", features = ["derive"] }
 compact_str = { version = "0.9", features = ["serde"] }
 papaya = "0.2"
 arc-swap = "1"
+# Sync `RwLock` consumed by `portal-relay::overlay::wg_device`
+# (Phase 6b/B U6) for the per-peer state map; tokio's async locks
+# would force `apply_peers` async unnecessarily.
+parking_lot = "0.12"
 governor = "0.10"
 figment = { version = "0.10", features = ["env", "json", "toml"] }
 

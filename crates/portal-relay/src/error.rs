@@ -40,6 +40,11 @@ pub enum RelayError {
     /// malformed key body). Phase 6b/A U1.
     #[error("keyless: {0}")]
     Keyless(#[from] crate::keyless::KeylessError),
+
+    /// Overlay subsystem failure (`WgDevice` adapter init, peer
+    /// config validation, packet I/O). Phase 6b/B U6.
+    #[error("overlay: {0}")]
+    Overlay(#[from] crate::overlay::OverlayError),
 }
 
 /// Crate-wide `Result<T, RelayError>`.

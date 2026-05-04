@@ -36,6 +36,7 @@ pub mod discovery;
 pub mod error;
 pub mod keyless;
 pub mod listeners;
+pub mod overlay;
 pub mod policy;
 pub mod proxy;
 pub mod reload;

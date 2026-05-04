@@ -71,21 +71,38 @@ repository.workspace = true
 # - rcgen + tokio-rustls + http-body-util (dev-only; integration test
 #   spins up a real mTLS server with rcgen-generated CA + client + server
 #   certs, then issues a real TLS handshake with `tokio_rustls::TlsConnector`).
+#
+# Phase 6b/B Batch 1 (U6 — sealed `WgDevice` trait + defguard_boringtun
+# adapter) adds:
+# - defguard_boringtun (the userspace WireGuard data plane — primary
+#   fork per ADR-0015; consumed only via `noise::Tunn` + `x25519` +
+#   `noise::rate_limiter::RateLimiter` so the fully-safe public API
+#   surface is preserved per ADR-0014's `unsafe_code = "forbid"` hard
+#   gate). cargo-vet audit lands in the same Phase 5/U6 vet workflow
+#   that owns supply-chain gating.
+# - parking_lot (sync `RwLock` for the per-peer state map in
+#   `overlay::wg_device`; tokio's async lock would force
+#   `apply_peers` async unnecessarily).
+# - rand_core (workspace pin v0.6) — `OsRng` for the `with_random_key`
+#   construction-site path (unit tests + the U7 first-run init).
 [dependencies]
 axum = { workspace = true }
 compact_str = { workspace = true, features = ["serde"] }
+defguard_boringtun = { workspace = true }
 governor = { workspace = true }
 http = { workspace = true }
 hyper = { workspace = true }
 hyper-util = { workspace = true }
 jiff = { workspace = true }
 papaya = { workspace = true }
+parking_lot = { workspace = true }
 pkcs1 = { workspace = true }
 pkcs8 = { workspace = true }
 portal-crypto = { workspace = true, features = ["rustls-integration"] }
 portal-net = { workspace = true }
 portal-wire = { workspace = true }
 postcard = { workspace = true }
+rand_core = { workspace = true }
 rustls = { workspace = true }
 rustls-pki-types = { workspace = true }
 sec1 = { workspace = true }
