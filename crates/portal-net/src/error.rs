@@ -14,9 +14,32 @@ pub enum NetError {
     #[error("tls: {0}")]
     Tls(#[from] rustls::Error),
 
-    /// QUIC error (connection or endpoint).
+    /// QUIC runtime error from the underlying quinn endpoint (connection,
+    /// migration, transport-level fault). Reserved for genuine quinn-emitted
+    /// failures; programmer errors (role misuse) and connect-time failures
+    /// have their own variants for caller discrimination.
     #[error("quic: {0}")]
     Quic(String),
+
+    /// QUIC connect-time failure surfaced by [`quinn::Endpoint::connect`]
+    /// (e.g., invalid `server_name`, no client config, transport-init error).
+    /// Distinct from [`NetError::Quic`] so SDK-side retry policy can match a
+    /// connect failure without absorbing every QUIC-adjacent error.
+    #[error("connect: {0}")]
+    Connect(String),
+
+    /// Programmer error: an [`crate::quic::Endpoint`] method was called on a
+    /// role that does not support it (e.g., `accept()` on a Client endpoint,
+    /// `connect()` on a Server endpoint). Carries the method name and the
+    /// role found so callers and tests can match on a structured variant
+    /// rather than substring-matching an error message.
+    #[error("role mismatch: {method}() not valid on {found} endpoint")]
+    RoleMismatch {
+        /// The method that was invoked.
+        method: &'static str,
+        /// The role of the endpoint at call time.
+        found: &'static str,
+    },
 
     /// Wire codec decode failure (from portal-wire).
     #[error("wire-decode: {0}")]

@@ -19,6 +19,13 @@ use ed25519_dalek::VerifyingKey;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{DigitallySignedStruct, Error as TlsError, SignatureScheme};
+use x509_cert::der::asn1::ObjectIdentifier;
+
+/// RFC 8410 ed25519 algorithm OID (1.3.101.112). The pinned identity MUST
+/// be advertised under this OID in the leaf cert's `SubjectPublicKeyInfo`.
+/// A 32-byte SPKI body under any other OID (e.g., X25519 = 1.3.101.110) is
+/// rejected even if the byte-pattern collides with the pinned bytes.
+const ED25519_OID: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.112");
 
 /// `rustls` server-cert verifier that pins on a 32-byte ed25519 public key.
 #[derive(Debug)]
@@ -52,9 +59,19 @@ impl ServerCertVerifier for SpkiPinVerifier {
 
         let cert = x509_cert::Certificate::from_der(end_entity.as_ref())
             .map_err(|_| TlsError::InvalidCertificate(rustls::CertificateError::BadEncoding))?;
-        let spki_bytes = cert
-            .tbs_certificate
-            .subject_public_key_info
+        let spki = &cert.tbs_certificate.subject_public_key_info;
+
+        // OID guard: reject any SPKI whose AlgorithmIdentifier is not the
+        // RFC 8410 ed25519 OID. Without this guard, a 32-byte X25519 SPKI
+        // (OID 1.3.101.110) whose bytes coincidentally collide with the
+        // pinned ed25519 value would be accepted.
+        if spki.algorithm.oid != ED25519_OID {
+            return Err(TlsError::InvalidCertificate(
+                rustls::CertificateError::BadEncoding,
+            ));
+        }
+
+        let spki_bytes = spki
             .subject_public_key
             .as_bytes()
             .ok_or(TlsError::InvalidCertificate(
@@ -100,6 +117,15 @@ impl ServerCertVerifier for SpkiPinVerifier {
         cert: &CertificateDer<'_>,
         dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, TlsError> {
+        // The relay's self-signed leaf is ed25519; the TLS 1.3
+        // CertificateVerify MUST be signed with the same key. Reject any
+        // other negotiated scheme up-front rather than relying on the
+        // aws-lc-rs algorithm dispatch to fail by key-format mismatch.
+        if dss.scheme != SignatureScheme::ED25519 {
+            return Err(TlsError::PeerIncompatible(
+                rustls::PeerIncompatible::NoSignatureSchemesInCommon,
+            ));
+        }
         rustls::crypto::verify_tls13_signature(
             message,
             cert,
@@ -109,13 +135,12 @@ impl ServerCertVerifier for SpkiPinVerifier {
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        // Although the relay's self-signed cert is ed25519, the TLS 1.3
-        // CertificateVerify transcript signature is negotiated separately;
-        // delegate to the configured `aws-lc-rs` provider so all schemes the
-        // provider can verify are advertised.
-        self.aws_lc_provider
-            .signature_verification_algorithms
-            .supported_schemes()
+        // Wire-shape contract: advertise ed25519 as the only acceptable
+        // CertificateVerify signature scheme so the ClientHello's
+        // `signature_algorithms` extension truthfully describes what the
+        // verifier will accept (matches the ed25519-only filter in
+        // `verify_tls13_signature`).
+        vec![SignatureScheme::ED25519]
     }
 }
 
@@ -190,13 +215,67 @@ mod tests {
     }
 
     #[test]
-    fn verifier_supported_schemes_nonempty() {
+    fn verifier_supported_schemes_is_ed25519_only() {
         let key = generate_quic_identity_key();
         let pinned = quic_identity_verifying_key(&key);
         let verifier = SpkiPinVerifier::new(pinned);
+        assert_eq!(
+            verifier.supported_verify_schemes(),
+            vec![SignatureScheme::ED25519],
+            "wire-shape: only ed25519 must be advertised in signature_algorithms",
+        );
+    }
+
+    // verify_tls13_signature scheme filter and verify_tls12_signature
+    // contract are not independently testable from outside rustls:
+    // `DigitallySignedStruct::new` is `pub(crate)` in rustls 0.23.x, so a
+    // unit test cannot construct one. The contracts ARE enforced at the
+    // handshake layer (supported_verify_schemes returns ed25519-only, so
+    // rustls rejects non-ed25519 schemes during signature_algorithms
+    // negotiation before reaching the verifier). The defense-in-depth
+    // checks in the function bodies are visible by inspection and exercised
+    // end-to-end by a future Phase 5 integration test.
+
+    /// Construct a malformed cert whose SPKI body is 32 bytes but advertised
+    /// under the X25519 OID (1.3.101.110) instead of ed25519 (1.3.101.112).
+    /// The verifier MUST reject even if the 32 bytes happen to match the pin.
+    #[test]
+    fn verifier_rejects_non_ed25519_oid_with_matching_bytes() {
+        // Generate a real ed25519 cert as a template, then patch the OID via
+        // x509-cert's encode/decode round trip so the SPKI body stays the
+        // same but the algorithm OID differs.
+        use x509_cert::der::{Decode as _, Encode as _};
+
+        let key = generate_quic_identity_key();
+        let pinned = quic_identity_verifying_key(&key);
+        let (cert_der, _priv_der) = self_signed_cert(&key).unwrap();
+        let mut cert =
+            x509_cert::Certificate::from_der(cert_der.as_ref()).unwrap();
+        // Mutate the SPKI algorithm OID to X25519 (1.3.101.110). The
+        // resulting cert is structurally well-formed but its claimed key
+        // type does not match the actual key bytes.
+        cert.tbs_certificate.subject_public_key_info.algorithm.oid =
+            ObjectIdentifier::new_unwrap("1.3.101.110");
+        let mutated_der = cert.to_der().unwrap();
+        let mutated_cert = CertificateDer::from(mutated_der);
+
+        let verifier = SpkiPinVerifier::new(pinned);
+        let server_name = ServerName::try_from("any.invalid").unwrap();
+        let result = verifier.verify_server_cert(
+            &mutated_cert,
+            &[],
+            &server_name,
+            &[],
+            now_unix(),
+        );
         assert!(
-            !verifier.supported_verify_schemes().is_empty(),
-            "aws-lc-rs provider must advertise at least one signature scheme",
+            matches!(
+                result,
+                Err(TlsError::InvalidCertificate(
+                    rustls::CertificateError::BadEncoding,
+                )),
+            ),
+            "non-ed25519 OID must be rejected even with matching bytes: {result:?}",
         );
     }
 }

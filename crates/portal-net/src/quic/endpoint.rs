@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ed25519_dalek::VerifyingKey;
+use portal_wire::constants::ALPN;
 use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use secrecy::{ExposeSecret as _, SecretBox};
@@ -27,13 +28,6 @@ use crate::dual_stack::bind_dual_stack_udp;
 use crate::error::NetError;
 use crate::quic::identity::QuicIdentityKey;
 use crate::quic::verifier::SpkiPinVerifier;
-
-/// QUIC backhaul ALPN identifier (greenfield wire). Phase 1's `portal-wire`
-/// is the canonical home for wire constants; this module-private literal
-/// duplicates it for the Phase 3 boundary so the ALPN bytes ship on the
-/// trust-boundary side without a cross-crate import cycle. Phase 5's wiring
-/// (U6 backhaul handshake) will reconcile to a single re-exported symbol.
-const ALPN_PORTAL_2: &[u8] = b"portal/2";
 
 /// Mode of an [`Endpoint`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,7 +76,7 @@ impl Endpoint {
         })?
         .with_no_client_auth()
         .with_single_cert(vec![cert_der], priv_der)?;
-        rustls_cfg.alpn_protocols = vec![ALPN_PORTAL_2.to_vec()];
+        rustls_cfg.alpn_protocols = vec![ALPN.to_vec()];
         // Quinn requires the ServerConfig to be wrapped in `QuicServerConfig`
         // which validates that TLS 1.3 is enabled and an initial cipher suite
         // is available (AES-128-GCM-SHA256 is provided by aws-lc-rs).
@@ -90,7 +84,7 @@ impl Endpoint {
             NetError::Tls(rustls::Error::General(format!("quic server cfg: {e}")))
         })?;
         let mut quinn_cfg = quinn::ServerConfig::with_crypto(Arc::new(quic_server_cfg));
-        quinn_cfg.transport_config(Arc::new(default_transport_config()?));
+        quinn_cfg.transport_config(Arc::new(default_transport_config()));
 
         let socket = bind_dual_stack_udp(addr.ip(), addr.port(), false)?;
         let inner = quinn::Endpoint::new(
@@ -133,12 +127,12 @@ impl Endpoint {
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(SpkiPinVerifier::new(pinned_relay_pubkey)))
         .with_no_client_auth();
-        client_cfg.alpn_protocols = vec![ALPN_PORTAL_2.to_vec()];
+        client_cfg.alpn_protocols = vec![ALPN.to_vec()];
         let quic_client_cfg = QuicClientConfig::try_from(client_cfg).map_err(|e| {
             NetError::Tls(rustls::Error::General(format!("quic client cfg: {e}")))
         })?;
         let mut quinn_cfg = quinn::ClientConfig::new(Arc::new(quic_client_cfg));
-        quinn_cfg.transport_config(Arc::new(default_transport_config()?));
+        quinn_cfg.transport_config(Arc::new(default_transport_config()));
 
         let socket = bind_dual_stack_udp(bind_addr.ip(), bind_addr.port(), false)?;
         let mut inner = quinn::Endpoint::new(
@@ -174,18 +168,19 @@ impl Endpoint {
     /// into a connection.
     ///
     /// Returns `Ok(None)` if the endpoint has been closed; returns
-    /// [`NetError::Quic`] with `"role mismatch"` if invoked on a
-    /// [`EndpointRole::Client`] endpoint (the underlying quinn endpoint has
-    /// no `ServerConfig` and would otherwise hang indefinitely).
+    /// [`NetError::RoleMismatch`] if invoked on a [`EndpointRole::Client`]
+    /// endpoint (the underlying quinn endpoint has no `ServerConfig` and
+    /// would otherwise hang indefinitely).
     ///
     /// # Errors
     ///
-    /// Returns [`NetError::Quic`] when the role is not `Server`.
+    /// Returns [`NetError::RoleMismatch`] when the role is not `Server`.
     pub async fn accept(&self) -> Result<Option<quinn::Incoming>, NetError> {
         if self.role != EndpointRole::Server {
-            return Err(NetError::Quic(
-                "role mismatch: accept() called on a Client endpoint".to_owned(),
-            ));
+            return Err(NetError::RoleMismatch {
+                method: "accept",
+                found: "Client",
+            });
         }
         Ok(self.inner.accept().await)
     }
@@ -196,30 +191,26 @@ impl Endpoint {
     ///
     /// # Errors
     ///
-    /// Returns [`NetError::Quic`] with `"role mismatch"` if invoked on a
-    /// [`EndpointRole::Server`] endpoint, or with the quinn error string on
-    /// connection failure.
+    /// Returns [`NetError::RoleMismatch`] if invoked on a
+    /// [`EndpointRole::Server`] endpoint, or [`NetError::Connect`] on a
+    /// connection-construction failure (invalid `server_name`, missing
+    /// client config, transport-init error).
     pub fn connect(
         &self,
         addr: SocketAddr,
         server_name: &str,
     ) -> Result<quinn::Connecting, NetError> {
         if self.role != EndpointRole::Client {
-            return Err(NetError::Quic(
-                "role mismatch: connect() called on a Server endpoint".to_owned(),
-            ));
+            return Err(NetError::RoleMismatch {
+                method: "connect",
+                found: "Server",
+            });
         }
         self.inner
             .connect(addr, server_name)
-            .map_err(|e| NetError::Quic(e.to_string()))
+            .map_err(|e| NetError::Connect(e.to_string()))
     }
 
-    /// Direct access to the underlying quinn endpoint for advanced operators
-    /// (used by integration tests + Phase 5 admin shutdown loops).
-    #[must_use]
-    pub const fn quinn(&self) -> &quinn::Endpoint {
-        &self.inner
-    }
 }
 
 /// Default transport config: 15s keep-alive, 60s idle timeout, 16 max bidi
@@ -230,19 +221,24 @@ impl Endpoint {
     reason = "Duration::from_mins is unstable on 1.95; from_secs(60) is the \
               MSRV-compatible idiom."
 )]
-fn default_transport_config() -> Result<quinn::TransportConfig, NetError> {
+fn default_transport_config() -> quinn::TransportConfig {
     let mut cfg = quinn::TransportConfig::default();
     cfg.keep_alive_interval(Some(Duration::from_secs(15)));
-    let idle: quinn::IdleTimeout = Duration::from_secs(60).try_into().map_err(
-        |e: quinn::VarIntBoundsExceeded| {
-            NetError::Quic(format!("idle timeout out of range: {e}"))
-        },
-    )?;
+    // 60s is well within the VarInt budget (max 2^62 - 1 ms per RFC 9000 §16.1).
+    // Compile-time-invariant; the unreachable error path is silenced via expect.
+    #[expect(
+        clippy::expect_used,
+        reason = "60s is compile-time-invariant within VarInt budget; the only \
+                  way this could fire is a quinn API regression."
+    )]
+    let idle: quinn::IdleTimeout = Duration::from_secs(60)
+        .try_into()
+        .expect("60s fits in VarInt — RFC 9000 §16.1");
     cfg.max_idle_timeout(Some(idle));
     cfg.max_concurrent_bidi_streams(16u32.into());
     cfg.datagram_receive_buffer_size(Some(64 * 1024));
     cfg.datagram_send_buffer_size(64 * 1024);
-    Ok(cfg)
+    cfg
 }
 
 /// Generate a self-signed X.509 wrapping the ed25519 keypair from the
@@ -305,9 +301,16 @@ mod tests {
         let key = generate_quic_identity_key();
         let endpoint = Endpoint::server("[::]:0".parse().unwrap(), key).unwrap();
         let local = endpoint.local_addr().unwrap();
+        // R12 contract observable at the endpoint layer: requesting `[::]:0`
+        // MUST yield an IPv6 socket. The `IPV6_V6ONLY=false` invariant on the
+        // socket itself is asserted by `dual_stack::tests::
+        // bind_dual_stack_udp_default_is_dual_stack`, which exercises the
+        // exact helper this constructor calls; quinn's `Endpoint` does not
+        // expose its underlying socket, so the only endpoint-observable
+        // invariant here is the bound address family.
         assert!(
-            local.is_ipv6() || local.is_ipv4(),
-            "endpoint bound on some addr family",
+            local.is_ipv6(),
+            "Endpoint::server on `[::]:0` must bind v6, got: {local:?}",
         );
         assert_eq!(endpoint.role(), EndpointRole::Server);
     }
@@ -351,8 +354,12 @@ mod tests {
         .with_no_client_auth()
         .with_single_cert(vec![cert_der], priv_der)
         .unwrap();
-        cfg.alpn_protocols = vec![ALPN_PORTAL_2.to_vec()];
+        cfg.alpn_protocols = vec![ALPN.to_vec()];
         assert_eq!(cfg.alpn_protocols, vec![b"portal/2".to_vec()]);
+        assert_eq!(
+            ALPN, b"portal/2",
+            "portal_wire::constants::ALPN must be the canonical greenfield ALPN",
+        );
     }
 
     #[tokio::test]
@@ -362,8 +369,14 @@ mod tests {
         let target: SocketAddr = "127.0.0.1:1".parse().unwrap();
         let result = endpoint.connect(target, "ignored.invalid");
         assert!(
-            matches!(result, Err(NetError::Quic(ref msg)) if msg.contains("role mismatch")),
-            "connect on Server endpoint must return role-mismatch Quic error: {result:?}",
+            matches!(
+                result,
+                Err(NetError::RoleMismatch {
+                    method: "connect",
+                    found: "Server",
+                }),
+            ),
+            "connect on Server endpoint must return structured RoleMismatch: {result:?}",
         );
     }
 
@@ -374,8 +387,14 @@ mod tests {
         let client = Endpoint::client("[::]:0".parse().unwrap(), pinned).unwrap();
         let result = client.accept().await;
         assert!(
-            matches!(result, Err(NetError::Quic(ref msg)) if msg.contains("role mismatch")),
-            "accept on Client endpoint must return role-mismatch Quic error: {result:?}",
+            matches!(
+                result,
+                Err(NetError::RoleMismatch {
+                    method: "accept",
+                    found: "Client",
+                }),
+            ),
+            "accept on Client endpoint must return structured RoleMismatch: {result:?}",
         );
     }
 }
