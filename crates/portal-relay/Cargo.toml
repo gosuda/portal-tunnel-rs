@@ -11,9 +11,23 @@ repository.workspace = true
 # unit (U3..U17) lands its own deps alongside the consuming code.
 # Adding deps here ahead of consumers would defeat the cargo-machete
 # gate.
+#
+# Phase 5 Batch 2 (U3 listeners + U4 partial identity) adds:
+# - portal-net (R12-canon re-export, QuicIdentityKey, NetError pass-through)
+# - portal-crypto (ApiHttpsKey newtype field on RelayIdentity)
+# - secrecy (SecretBox<KeyType> R2 trust-boundary newtypes)
+# - tokio { fs, io-util } (async filesystem load path for the identity dir)
 [dependencies]
 compact_str = { workspace = true }
+portal-crypto = { workspace = true, features = ["rustls-integration"] }
+portal-net = { workspace = true }
+secrecy = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "fs", "io-util"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
 workspace = true

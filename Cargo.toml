@@ -23,6 +23,7 @@ repository = "https://github.com/gosuda/portal-tunnel-rs"
 # Internal member crates
 portal-wire = { path = "crates/portal-wire", version = "0.1.0" }
 portal-crypto = { path = "crates/portal-crypto", version = "0.1.0" }
+portal-net = { path = "crates/portal-net", version = "0.1.0" }
 
 # Async runtime + HTTP stack
 tokio = { version = "1", features = ["full"] }

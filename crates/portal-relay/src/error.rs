@@ -1,11 +1,13 @@
 //! Crate-level error type for `portal-relay`.
 //!
-//! Phase 5 Batch 1 ships a minimal variant set covering the
-//! pass-throughs the skeleton itself exercises. The `portal-net`
-//! (`NetError`) and `portal-acme` (`AcmeError`) pass-through arms are
-//! deferred until their owning workspace deps land in `[workspace.
-//! dependencies]` (the unit that first consumes them adds the dep
-//! and the variant in the same commit).
+//! Phase 5 Batch 1 shipped a minimal variant set covering the
+//! pass-throughs the skeleton itself exercises. Phase 5 Batch 2 adds
+//! the `Net(#[from] portal_net::NetError)` arm now that U3 listeners
+//! + U4 identity loader pull `portal-net` into the dep graph.
+//!
+//! The `portal-acme` (`AcmeError`) pass-through arm remains deferred
+//! until its owning unit lands (the unit that first consumes it adds
+//! the dep and the variant in the same commit).
 
 use thiserror::Error;
 
@@ -20,6 +22,10 @@ pub enum RelayError {
     /// I/O failure (filesystem or socket).
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
+
+    /// portal-net error pass-through (key load, listener bind, etc.).
+    #[error("net: {0}")]
+    Net(#[from] portal_net::NetError),
 
     /// portal-crypto error pass-through (string form until the unit
     /// that first consumes a typed variant lands).
