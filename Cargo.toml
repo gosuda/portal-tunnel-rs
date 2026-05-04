@@ -135,6 +135,13 @@ google-cloud-dns-v1 = "1.3"
 # Overlay (Phase 6b)
 smoltcp = { version = "0.13", default-features = false }
 brotli = "8"
+# Userspace WireGuard data plane — primary pick per ADR-0015 (Apache-2.0
+# OR MIT, server-side-validated under defguard's commercial gateway,
+# safe public API, IPv6 carriage tracked). The sealed `WgDevice`
+# adapter (ADR-0014) wraps this dep at U6 consumption time. Secondary
+# fork (NepTUN) is documented in ADR-0015 behind a license-review gate
+# and is not declared here — promotion lands as an ADR amendment.
+defguard_boringtun = "0.6.5"
 
 # Dev-deps register (consumed by member crates' [dev-dependencies])
 divan = "0.1"
