@@ -26,8 +26,15 @@ repository.workspace = true
 # Phase 5 Batch 4 (U7 minimal lease registry) adds:
 # - papaya (lock-free `HashMap` for the identity + hostname tables)
 # - jiff (Timestamp values on `LeaseRecord`)
+#
+# Phase 5 Batch 6 (U8 api envelope + per-surface state + empty router
+# scaffolds) adds:
+# - axum (Router + Json + IntoResponse for the API surface)
+# - http (StatusCode constants on the API error envelope)
 [dependencies]
+axum = { workspace = true }
 compact_str = { workspace = true }
+http = { workspace = true }
 jiff = { workspace = true }
 papaya = { workspace = true }
 portal-crypto = { workspace = true, features = ["rustls-integration"] }
