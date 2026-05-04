@@ -30,8 +30,12 @@
 
 pub mod error;
 pub mod events;
+pub mod picker;
+pub mod relay_set;
 
 pub use error::{SdkError, SdkResult};
 pub use events::{
     DEFAULT_EVENT_CHANNEL_CAPACITY, TunnelEvent, TunnelState, channel, channel_with_capacity,
 };
+pub use picker::{PickerConstraints, pick_relays};
+pub use relay_set::{AsnBin, MetadataProvenance, RelayCandidate, RelayMetadata, RelaySet};
