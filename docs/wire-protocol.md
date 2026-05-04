@@ -89,7 +89,7 @@ struct Envelope {
 
 - `nonce: [u8; 16]` — replay window identifier.
 - `not_before`, `not_after` — validity window (`jiff::Timestamp`, serde-compatible for tooling).
-- `audience` — sealed enum: which trust surface receives this (`RelayApiAdmin`, `RelayApiSdk`, `RelayApiDiscovery`, `Keyless`, `HopForward`).
+- `audience` — sealed enum: which trust surface receives this (`RelayApiAdmin`, `RelayApiSdk`, `RelayApiDiscovery`, `Keyless`, `HopForward`, `QuicBackhaul`).
 - `purpose` — sealed enum: operation binding (`Register`, `Renew`, `Unregister`, `HopAttest`, `KeylessSign`, `DiscoveryAnnounce`, `LeaseAccess`).
 
 Wrong audience or purpose for a handler: verification fails closed.

@@ -49,12 +49,17 @@ pub async fn send_control_envelope(
             "envelope {len} bytes exceeds {CONTROL_ENVELOPE_MAX}",
         )));
     }
-    send.write_u32(len)
-        .await
-        .map_err(|e| NetError::Io(std::io::Error::other(e.to_string())))?;
+    // tokio AsyncWriteExt::write_u32 → io::Error directly (preserves
+    // ErrorKind via the #[from] path on NetError::Io).
+    send.write_u32(len).await.map_err(NetError::Io)?;
+    // quinn::SendStream::write_all is the *intrinsic* method (shadowing
+    // tokio AsyncWriteExt) and returns quinn::WriteError. Wrap into
+    // io::Error::other(e) so the source() chain remains traversable;
+    // outer ErrorKind becomes Other but quinn::WriteError carries its own
+    // typed variants for ConnectionLost / Stopped.
     send.write_all(&bytes)
         .await
-        .map_err(|e| NetError::Io(std::io::Error::other(e.to_string())))?;
+        .map_err(|e| NetError::Io(std::io::Error::other(e)))?;
     Ok(())
 }
 
@@ -68,10 +73,9 @@ pub async fn recv_control_envelope(
 ) -> Result<Envelope, NetError> {
     use tokio::io::AsyncReadExt as _;
 
-    let len = recv
-        .read_u32()
-        .await
-        .map_err(|e| NetError::Io(std::io::Error::other(e.to_string())))?;
+    // tokio AsyncReadExt::read_u32 → io::Error → NetError::Io directly
+    // (preserves ErrorKind for caller-side discrimination).
+    let len = recv.read_u32().await.map_err(NetError::Io)?;
     let len_usize = usize::try_from(len)
         .map_err(|_| NetError::WireDecode(format!("envelope length {len} exceeds usize")))?;
     if len_usize > CONTROL_ENVELOPE_MAX {
@@ -80,9 +84,15 @@ pub async fn recv_control_envelope(
         )));
     }
     let mut buf = vec![0u8; len_usize];
+    // quinn::RecvStream::read_exact returns quinn::ReadExactError (not
+    // io::Error), so we MUST wrap into io::Error here. `Error::other(e)`
+    // preserves the source() chain (it boxes the error rather than
+    // stringifying), at the cost of an outer ErrorKind::Other — quinn's
+    // ReadExactError already carries its own typed variants for
+    // ConnectionLost / FinishedEarly so the kind-loss is acceptable.
     recv.read_exact(&mut buf)
         .await
-        .map_err(|e| NetError::Io(std::io::Error::other(e.to_string())))?;
+        .map_err(|e| NetError::Io(std::io::Error::other(e)))?;
     Envelope::from_bytes(&buf).map_err(|e| NetError::WireDecode(format!("envelope decode: {e}")))
 }
 
@@ -115,19 +125,34 @@ pub fn build_control_claims(now: Timestamp, nonce: [u8; 16]) -> Claims {
     }
 }
 
+/// Constant payload returned by every [`verify_control_envelope`] failure
+/// so the variant *and* its `String` content are byte-identical regardless
+/// of the underlying mode (time-window, audience, purpose, signature). A
+/// peer or downstream logger keyed on the error message therefore cannot
+/// distinguish failure modes from observable handshake responses.
+///
+/// The relay SHOULD `tracing::debug!` the underlying typed error
+/// internally so operators retain visibility, but it MUST NOT echo that
+/// detail across a trust boundary.
+const HANDSHAKE_REJECT_MESSAGE: &str = "verification failed";
+
 /// Verify a control-handshake envelope against expected audience/purpose
 /// and the supplied tenant signing key. Returns the payload bytes on
 /// success.
 ///
 /// Verification delegates to portal-crypto's `verify_envelope` — see
 /// `portal_crypto::verify_envelope` for the cheap-first verification order
-/// (time → audience → purpose → signature).
+/// (time → audience → purpose → signature). Note: this provides
+/// *uniform-error-class* not *constant-time* verification; an attacker who
+/// can time the response can still distinguish signature-failure from
+/// time/audience-failure because the cheap checks short-circuit before
+/// the signature verify. Constant-time is out of scope for U6.
 ///
 /// # Errors
-/// Returns [`NetError::BackhaulHandshake`] for any verification failure
-/// (audience mismatch, expired claims, bad signature, etc.) — the relay
-/// MUST collapse to one external error class so attackers cannot
-/// distinguish failure modes.
+/// Returns [`NetError::BackhaulHandshake`] with the constant
+/// [`HANDSHAKE_REJECT_MESSAGE`] for ANY verification failure (audience,
+/// expired, purpose, signature) — failure modes are NOT distinguishable
+/// from the error payload.
 pub fn verify_control_envelope(
     env: &Envelope,
     tenant_verifier: &portal_crypto::Ed25519Verifier,
@@ -135,16 +160,26 @@ pub fn verify_control_envelope(
 ) -> Result<Bytes, NetError> {
     use portal_crypto::{RelayDescriptor, verify_envelope};
 
-    let payload_slice = verify_envelope::<RelayDescriptor>(
+    match verify_envelope::<RelayDescriptor>(
         env,
         tenant_verifier,
         Audience::QuicBackhaul,
         Purpose::LeaseAccess,
         now,
-    )
-    .map_err(|e| NetError::BackhaulHandshake(e.to_string()))?;
-    // Detach the borrow into an owned Bytes for caller convenience.
-    Ok(Bytes::copy_from_slice(payload_slice))
+    ) {
+        Ok(_payload_slice) => {
+            // Refcount-bump rather than allocating a fresh buffer: env.payload
+            // is already a `Bytes`, so cloning the field decouples the
+            // returned lifetime from `env` without copying.
+            Ok(env.payload.clone())
+        }
+        Err(detail) => {
+            tracing::debug!(?detail, "control envelope verify failed");
+            Err(NetError::BackhaulHandshake(
+                HANDSHAKE_REJECT_MESSAGE.to_owned(),
+            ))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -233,5 +268,78 @@ mod tests {
             .unwrap_or(Timestamp::MAX);
         let result = verify_control_envelope(&env, &verifier, later);
         assert!(matches!(result, Err(NetError::BackhaulHandshake(_))));
+    }
+
+    /// All four verification failure modes (audience, expired, purpose,
+    /// signature) MUST surface byte-identical `BackhaulHandshake` payloads
+    /// so observers cannot fingerprint the failure class. This test pins
+    /// the side-channel-uniform contract.
+    #[test]
+    fn verify_control_envelope_failure_modes_are_indistinguishable() {
+        let key = ed25519_from_seed_for_test([0x11_u8; 32]);
+        let vk = verifying_key(&key);
+        let signer = Ed25519Signer::new(&key);
+        let verifier = Ed25519Verifier::new(vk);
+
+        let now = fixed_now();
+        let payload = Bytes::from_static(b"x");
+
+        // Build each failing envelope from a freshly-constructed claim set
+        // so the test reads top-to-bottom without struct-update plumbing
+        // and clippy's redundant_clone lint stays happy. Claims is a small
+        // value type — rebuilding is cheaper than the cognitive overhead
+        // of a shared baseline + struct-update spreads.
+
+        // 1) Wrong audience.
+        let mut claims = build_control_claims(now, [0u8; 16]);
+        claims.audience = Audience::Keyless;
+        let env_bad_aud =
+            sign_envelope::<RelayDescriptor>(claims, payload.clone(), &signer).unwrap();
+
+        // 2) Wrong purpose.
+        let mut claims = build_control_claims(now, [0u8; 16]);
+        claims.purpose = Purpose::Register;
+        let env_bad_pur =
+            sign_envelope::<RelayDescriptor>(claims, payload.clone(), &signer).unwrap();
+
+        // 3) Expired (verify with `later` against valid claims).
+        let env_valid = sign_envelope::<RelayDescriptor>(
+            build_control_claims(now, [0u8; 16]),
+            payload.clone(),
+            &signer,
+        )
+        .unwrap();
+        let later = now
+            .saturating_add(SignedDuration::from_secs(7200))
+            .unwrap_or(Timestamp::MAX);
+
+        // 4) Bad signature (flip a sig byte).
+        let mut env_bad_sig = sign_envelope::<RelayDescriptor>(
+            build_control_claims(now, [0u8; 16]),
+            payload,
+            &signer,
+        )
+        .unwrap();
+        env_bad_sig.sig[0] ^= 0xff;
+
+        let messages: Vec<String> = [
+            verify_control_envelope(&env_bad_aud, &verifier, now),
+            verify_control_envelope(&env_bad_pur, &verifier, now),
+            verify_control_envelope(&env_valid, &verifier, later),
+            verify_control_envelope(&env_bad_sig, &verifier, now),
+        ]
+        .into_iter()
+        .map(|r| match r {
+            Err(NetError::BackhaulHandshake(msg)) => msg,
+            other => panic!("expected BackhaulHandshake, got: {other:?}"),
+        })
+        .collect();
+
+        // All four must produce the EXACT same constant payload — anything
+        // varying between them would let an observer fingerprint the mode.
+        assert_eq!(messages[0], HANDSHAKE_REJECT_MESSAGE);
+        assert_eq!(messages[1], HANDSHAKE_REJECT_MESSAGE);
+        assert_eq!(messages[2], HANDSHAKE_REJECT_MESSAGE);
+        assert_eq!(messages[3], HANDSHAKE_REJECT_MESSAGE);
     }
 }

@@ -83,22 +83,18 @@ pub async fn dispatch_inbound(
 ) -> Result<InboundStream, NetError> {
     use tokio::io::AsyncReadExt as _;
 
-    let tag_byte = recv.read_u8().await.map_err(|e| match e.kind() {
-        std::io::ErrorKind::UnexpectedEof => {
-            NetError::Io(std::io::Error::new(e.kind(), "channel tag eof"))
-        }
-        _ => NetError::Io(std::io::Error::other(e.to_string())),
-    })?;
+    // tokio AsyncReadExt::read_u8 returns io::Error directly; the
+    // `#[from]` path on NetError::Io preserves the original ErrorKind for
+    // caller-side EOF / reset discrimination (which `Error::other(e)`
+    // would re-kind to ErrorKind::Other and lose).
+    let tag_byte = recv.read_u8().await.map_err(NetError::Io)?;
     let channel = Channel::try_from(tag_byte).map_err(|e: WireError| {
         NetError::WireDecode(format!("channel tag {tag_byte:#04x}: {e}"))
     })?;
     match channel {
         Channel::Control => Ok(InboundStream::Control { send, recv }),
         Channel::TcpProxy => {
-            let kind_byte = recv
-                .read_u8()
-                .await
-                .map_err(|e| NetError::Io(std::io::Error::new(e.kind(), e.to_string())))?;
+            let kind_byte = recv.read_u8().await.map_err(NetError::Io)?;
             let kind = TcpProxyKind::try_from(kind_byte).map_err(|e: WireError| {
                 NetError::WireDecode(format!("tcp-proxy kind {kind_byte:#04x}: {e}"))
             })?;
@@ -172,13 +168,9 @@ pub async fn open_outbound(
         .open_bi()
         .await
         .map_err(|e| NetError::Quic(format!("open_bi: {e}")))?;
-    send.write_u8(channel as u8)
-        .await
-        .map_err(|e| NetError::Io(std::io::Error::other(e.to_string())))?;
+    send.write_u8(channel as u8).await.map_err(NetError::Io)?;
     if let (Channel::TcpProxy, Some(kind)) = (channel, tcp_kind) {
-        send.write_u8(kind as u8)
-            .await
-            .map_err(|e| NetError::Io(std::io::Error::other(e.to_string())))?;
+        send.write_u8(kind as u8).await.map_err(NetError::Io)?;
     }
     Ok((send, recv))
 }
