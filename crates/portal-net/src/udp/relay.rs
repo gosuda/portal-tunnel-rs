@@ -160,32 +160,36 @@ impl MergedCancel {
 
 /// Look up or assign a `flow_id` for the canonicalized peer address.
 ///
-/// Publication order is `FlowState` BEFORE `addr_index` so a concurrent
+/// Publication order is `FlowState` BEFORE `addr_index`: a concurrent
 /// reader that observes a new index entry is guaranteed to find a
 /// matching live flow (no observer ever sees a "stale" id that is
 /// merely about-to-be-installed).
 ///
-/// Bounded CAS-retry loop:
+/// The function loops until it can return a `(peer, id)` pairing where
+/// the index points at a live flow. Each iteration either returns or
+/// makes the table state strictly more consistent — there is no bounded
+/// retry budget because the contention space is bounded by the number
+/// of concurrent peers, not by an empirical retry count.
+///
 /// 1. Probe `addr_index` for an existing id.
 /// 2. If present and the flow is live: refresh `last_seen` and return.
-/// 3. If present but the flow is missing: another writer may have
-///    purged the index already, or cleanup raced. Purge the stale entry
-///    only if it still names the observed id, then re-probe.
-/// 4. If absent: allocate a candidate id, install the `FlowState`
-///    first, then `try_insert` the index. On index conflict (a
-///    concurrent winner already published their own id), retire our
-///    flow entry and restart so we reuse the winner's id rather than
-///    leaking a phantom flow.
+/// 3. If present but the flow is missing: cleanup raced ahead of us.
+///    Purge the stale entry only if it still names the observed id,
+///    then loop and re-allocate.
+/// 4. If absent: allocate a candidate id, install the `FlowState` first
+///    (so any reader observing our index sees a backing flow), then
+///    `try_insert` the index. On index conflict (a concurrent winner
+///    already published their own id), retire our flow and loop so we
+///    reuse the winner's id rather than leaking a phantom flow.
 fn touch_flow(
     flows: &HashMap<u32, FlowState>,
     addr_index: &HashMap<SocketAddr, u32>,
     next_flow: &AtomicU32,
     peer: SocketAddr,
 ) -> u32 {
-    const MAX_TOUCH_RETRIES: usize = 8;
     let now = Instant::now();
 
-    for _ in 0..MAX_TOUCH_RETRIES {
+    loop {
         let idx = addr_index.pin();
         if let Some(&id) = idx.get(&peer) {
             let pin = flows.pin();
@@ -199,15 +203,15 @@ fn touch_flow(
                 );
                 return id;
             }
-            // Stale index entry. Drop only if it still names `id`.
+            // Stale index entry — flow was purged but addr_index lingered.
+            // Drop only if it still names `id` (don't trample a concurrent
+            // re-allocation that just published a different id), then loop.
             let _ = idx.remove_if(&peer, |_, &v| v == id);
             continue;
         }
 
-        let candidate = next_flow.fetch_add(1, Ordering::AcqRel);
+        let candidate = next_flow.fetch_add(1, Ordering::Relaxed);
         let pin = flows.pin();
-        // Install the flow FIRST so any reader that subsequently
-        // observes our index entry sees a backing FlowState.
         pin.insert(
             candidate,
             FlowState {
@@ -218,25 +222,12 @@ fn touch_flow(
         if idx.try_insert(peer, candidate).is_ok() {
             return candidate;
         }
-        // A concurrent winner already published their index entry.
-        // Retire the unreachable flow we just installed (only if it
-        // still belongs to us) and restart so we reuse THEIR id instead
-        // of leaking a phantom flow.
+        // A concurrent winner already published their index entry. Retire
+        // the unreachable flow we just installed (only if it still belongs
+        // to us) and loop so we reuse THEIR id instead of leaking a
+        // phantom flow.
         let _ = pin.remove_if(&candidate, |_, state| state.peer == peer);
     }
-
-    // Liveness fallback under pathological contention: install the
-    // flow first, then unconditionally publish the index.
-    let id = next_flow.fetch_add(1, Ordering::AcqRel);
-    flows.pin().insert(
-        id,
-        FlowState {
-            peer,
-            last_seen: now,
-        },
-    );
-    addr_index.pin().insert(peer, id);
-    id
 }
 
 async fn read_loop(
@@ -260,7 +251,7 @@ async fn read_loop(
                         flow_id,
                         payload: Bytes::copy_from_slice(&buf[..n]),
                     };
-                    if let Err(err) = sender.send(&frame).await {
+                    if let Err(err) = sender.send(&frame) {
                         tracing::warn!(?err, ?peer, "udp→backhaul forward failed");
                     }
                 }
@@ -329,7 +320,13 @@ async fn cleanup_loop(
                 }
                 for (id, peer) in to_drop {
                     pin.remove(&id);
-                    idx_pin.remove(&peer);
+                    // Conditional remove: only drop the index entry if it
+                    // still names the id we're purging. A concurrent
+                    // touch_flow may have re-allocated this peer to a new
+                    // id between our snapshot and now; an unconditional
+                    // remove would orphan that fresh allocation. Symmetric
+                    // with touch_flow's stale-index repair pattern.
+                    let _ = idx_pin.remove_if(&peer, |_, &v| v == id);
                 }
             }
         }

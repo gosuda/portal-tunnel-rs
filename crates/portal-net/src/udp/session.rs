@@ -2,11 +2,11 @@
 //! datagram surface. Owns the receive loop that decodes inbound
 //! `DatagramFrame`s and forwards them to a tokio mpsc channel.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 use portal_wire::datagram::DatagramFrame;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
@@ -14,6 +14,13 @@ use crate::error::NetError;
 
 /// Send half of the bidirectional datagram channel. Cloning is cheap
 /// (single Arc).
+///
+/// The bound connection is held under a `std::sync::Mutex` rather than
+/// `tokio::sync::Mutex`: every guard scope is purely synchronous (clone
+/// an `Arc`-backed `quinn::Connection`, drop the guard, then call the
+/// non-blocking `send_datagram`). A blocking mutex is the right tool for
+/// such hold-then-release-immediately access; the async mutex would
+/// serialize datagram senders through one waker queue with no benefit.
 #[derive(Clone)]
 pub struct DatagramSendHandle {
     inner: Arc<Mutex<Option<quinn::Connection>>>,
@@ -26,14 +33,26 @@ impl DatagramSendHandle {
     /// [`NetError::Quic`] when no connection is bound or the connection
     /// rejects the datagram. [`NetError::WireDecode`] when postcard
     /// encoding fails.
-    pub async fn send(&self, frame: &DatagramFrame) -> Result<(), NetError> {
+    ///
+    /// # Panics
+    /// Panics if the inner mutex has been poisoned (i.e., a previous
+    /// holder panicked while holding the guard). The bound connection
+    /// state is unrecoverable in that case so panic-propagation is the
+    /// honest signal.
+    pub fn send(&self, frame: &DatagramFrame) -> Result<(), NetError> {
         let bytes = postcard::to_allocvec(frame)
             .map_err(|e| NetError::WireDecode(format!("datagram encode: {e}")))?;
-        // Clone the `quinn::Connection` (cheap — it's `Arc`-backed) and
-        // release the mutex BEFORE the synchronous `send_datagram` call
-        // so concurrent senders are not serialised behind one another.
+        // Clone the `quinn::Connection` (cheap — Arc-backed) and release
+        // the mutex BEFORE the non-blocking `send_datagram` so concurrent
+        // senders only serialise on the mutex's atomic ops, not on QUIC.
         let conn = {
-            let guard = self.inner.lock().await;
+            #[expect(
+                clippy::expect_used,
+                reason = "Mutex poisoning indicates a panic in another holder; \
+                          datagram-send cannot meaningfully recover so propagate \
+                          the panic to surface the upstream bug."
+            )]
+            let guard = self.inner.lock().expect("DatagramSendHandle mutex poisoned");
             guard
                 .as_ref()
                 .ok_or_else(|| {
@@ -90,12 +109,26 @@ impl DatagramSession {
     /// token, which fires when the loop exits (peer disconnect, stop,
     /// or master cancel).
     ///
+    /// `quinn::Connection` is `Arc`-backed so the by-value parameter is
+    /// taken by reference here (callers retain ownership for any
+    /// follow-up operations) and cloned twice internally — once into
+    /// the mutex slot, once into the spawned recv loop.
+    ///
     /// # Errors
     /// Currently infallible; reserved for future config-validation paths.
-    pub async fn bind(&mut self, conn: quinn::Connection) -> Result<CancellationToken, NetError> {
+    ///
+    /// # Panics
+    /// Panics if the inner mutex has been poisoned.
+    pub fn bind(&mut self, conn: &quinn::Connection) -> Result<CancellationToken, NetError> {
         {
-            let mut guard = self.conn.lock().await;
+            #[expect(
+                clippy::expect_used,
+                reason = "Mutex poisoning indicates a panic in another holder; bind cannot recover."
+            )]
+            let mut guard = self.conn.lock().expect("DatagramSession conn mutex poisoned");
             if let Some(old) = guard.replace(conn.clone()) {
+                // `quinn::Connection::close` is non-blocking; safe to call
+                // under the std mutex.
                 old.close(0u32.into(), b"replaced");
             }
         }
@@ -116,6 +149,9 @@ impl DatagramSession {
 
     /// Cancel the master token, join the receive loop, and close the
     /// bound connection. Idempotent.
+    ///
+    /// # Panics
+    /// Panics if the inner mutex has been poisoned.
     pub async fn stop(&mut self) {
         self.cancel.cancel();
         while let Some(res) = self.tasks.join_next().await {
@@ -123,7 +159,11 @@ impl DatagramSession {
                 tracing::warn!(?err, "datagram session recv loop join error");
             }
         }
-        let mut guard = self.conn.lock().await;
+        #[expect(
+            clippy::expect_used,
+            reason = "Mutex poisoning indicates a panic in another holder; stop cannot recover."
+        )]
+        let mut guard = self.conn.lock().expect("DatagramSession conn mutex poisoned");
         if let Some(conn) = guard.take() {
             conn.close(0u32.into(), b"session stopped");
         }
@@ -195,15 +235,15 @@ mod tests {
     /// Sending without a prior `bind` returns the documented
     /// `NetError::Quic("no connection bound...")` rather than panicking
     /// or hanging on a dropped connection.
-    #[tokio::test]
-    async fn send_without_bind_returns_quic_no_connection() {
+    #[test]
+    fn send_without_bind_returns_quic_no_connection() {
         let (session, _rx) = DatagramSession::new(4, true);
         let handle = session.sender();
         let frame = DatagramFrame {
             flow_id: 1,
             payload: Bytes::from_static(b"hello"),
         };
-        match handle.send(&frame).await {
+        match handle.send(&frame) {
             Err(NetError::Quic(msg)) => assert!(
                 msg.contains("no connection bound"),
                 "unexpected message: {msg}",
