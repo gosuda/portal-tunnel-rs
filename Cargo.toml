@@ -50,6 +50,7 @@ bon = "3"
 # Time / secrets / strings / concurrency primitives
 jiff = { version = "0.2", features = ["serde"] }
 secrecy = "0.10"
+zeroize = { version = "1.8", features = ["derive"] }
 compact_str = { version = "0.9", features = ["serde"] }
 papaya = "0.2"
 arc-swap = "1"
