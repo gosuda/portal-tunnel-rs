@@ -17,13 +17,21 @@ repository.workspace = true
 # - portal-crypto (ApiHttpsKey newtype field on RelayIdentity)
 # - secrecy (SecretBox<KeyType> R2 trust-boundary newtypes)
 # - tokio { fs, io-util } (async filesystem load path for the identity dir)
+#
+# Phase 5 Batch 3 (U5 atomic JSON persistence) adds:
+# - serde + serde_json (typed JSON write/read surface)
+# - tracing (warn on stale .tmp orphan during read_json)
+# - tokio { rt } (spawn_blocking for parent-directory fsync on POSIX)
 [dependencies]
 compact_str = { workspace = true }
 portal-crypto = { workspace = true, features = ["rustls-integration"] }
 portal-net = { workspace = true }
 secrecy = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "fs", "io-util"] }
+tracing = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -6,5 +6,7 @@
 //! (B8).
 
 pub mod identity;
+pub mod persistence;
 
 pub use identity::{IdentityPaths, RelayIdentity, load_quic_only};
+pub use persistence::{STATE_FILE_MODE, read_json, write_json_atomic};
