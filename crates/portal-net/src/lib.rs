@@ -20,6 +20,9 @@ pub use quic::identity::{
     QuicIdentityKey, generate_quic_identity_key, load_quic_identity_key,
     quic_identity_verifying_key, save_quic_identity_key,
 };
-pub use quic::{Endpoint, EndpointRole, InboundStream, SpkiPinVerifier, TcpProxyKind};
+pub use quic::{
+    AcceptedStream, Endpoint, EndpointRole, InboundStream, SdkAcceptor, SpkiPinVerifier,
+    TcpProxyKind,
+};
 pub use tcp::TcpPortRelay;
-pub use udp::{DatagramSession, UdpRelay};
+pub use udp::{DatagramClient, DatagramSession, UdpRelay};
