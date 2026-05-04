@@ -75,7 +75,13 @@ deny = [
     { crate = "native-tls", reason = "rustls-MANDATORY (R13 / ADR-0002)" },
     { crate = "tokio-native-tls", reason = "rustls-MANDATORY (R13 / ADR-0002)" },
     { crate = "hyper-tls", reason = "rustls-MANDATORY; use hyper-rustls" },
-    { crate = "cmake", reason = "use cc; cmake build pulls a C toolchain footprint we do not need" },
+    # `cmake` was previously banned to avoid a C-toolchain footprint, but
+    # `aws-lc-rs` (R13 / ADR-0002 mandatory crypto provider) pulls
+    # `aws-lc-sys`, whose build script requires `cmake` to compile the C
+    # `aws-lc` library. cmake at build-time is therefore required for v0.1
+    # and runtime stays C-FFI-clean (the compiled library is statically
+    # linked into aws-lc-rs). Re-enabling the ban would force a switch off
+    # the workspace's pinned crypto provider, contradicting R13.
     # ---------------------------------------------------------------- Legacy direct picks
     # These are not commonly transitive in our register; full-tree ban is safe.
     { crate = "chrono", reason = "use jiff (R8 / ADR-0002)" },
