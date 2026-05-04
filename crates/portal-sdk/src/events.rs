@@ -126,7 +126,10 @@ pub const DEFAULT_EVENT_CHANNEL_CAPACITY: usize = 256;
 /// Convenience constructor: a fresh `(sender, receiver)` pair with
 /// the documented default capacity.
 #[must_use]
-pub fn channel() -> (broadcast::Sender<TunnelEvent>, broadcast::Receiver<TunnelEvent>) {
+pub fn channel() -> (
+    broadcast::Sender<TunnelEvent>,
+    broadcast::Receiver<TunnelEvent>,
+) {
     broadcast::channel(DEFAULT_EVENT_CHANNEL_CAPACITY)
 }
 
@@ -139,7 +142,10 @@ pub fn channel() -> (broadcast::Sender<TunnelEvent>, broadcast::Receiver<TunnelE
 #[must_use]
 pub fn channel_with_capacity(
     capacity: usize,
-) -> (broadcast::Sender<TunnelEvent>, broadcast::Receiver<TunnelEvent>) {
+) -> (
+    broadcast::Sender<TunnelEvent>,
+    broadcast::Receiver<TunnelEvent>,
+) {
     assert!(capacity > 0, "channel capacity must be > 0");
     broadcast::channel(capacity)
 }
