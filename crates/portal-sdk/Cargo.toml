@@ -7,5 +7,30 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[dependencies]
+# Cross-crate (Phase 1/2/3 outputs)
+portal-crypto = { workspace = true }
+portal-net = { workspace = true }
+portal-wire = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+tokio-util = { workspace = true, features = ["rt"] }
+
+# Domain primitives
+bytes = { workspace = true }
+compact_str = { workspace = true }
+jiff = { workspace = true }
+
+# Errors + tracing
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# Secrecy for tenant key newtypes
+secrecy = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+
 [lints]
 workspace = true

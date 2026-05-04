@@ -3968,6 +3968,19 @@ version = "0.1.0"
 [[package]]
 name = "portal-sdk"
 version = "0.1.0"
+dependencies = [
+ "bytes",
+ "compact_str",
+ "jiff",
+ "portal-crypto",
+ "portal-net",
+ "portal-wire",
+ "secrecy",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
 
 [[package]]
 name = "portal-wire"
