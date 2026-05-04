@@ -3947,7 +3947,6 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "compact_str",
- "http 1.4.0",
  "jiff",
  "papaya",
  "portal-crypto",
@@ -3958,6 +3957,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 

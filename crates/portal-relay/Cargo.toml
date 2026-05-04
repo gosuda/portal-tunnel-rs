@@ -29,12 +29,18 @@ repository.workspace = true
 #
 # Phase 5 Batch 6 (U8 api envelope + per-surface state + empty router
 # scaffolds) adds:
-# - axum (Router + Json + IntoResponse for the API surface)
-# - http (StatusCode constants on the API error envelope)
+# - axum (Router + Json + IntoResponse for the API surface;
+#   `axum::http::StatusCode` is re-exported and the only http-crate
+#   surface this crate currently consumes — there is no direct
+#   `http = { workspace = true }` dependency until a consumer
+#   actually imports `http::*` directly. cargo-machete enforces.)
+#
+# Phase 5 Batch 9 (U16 server orchestrator skeleton) adds:
+# - tokio-util (CancellationToken for janitor cancellation)
+# - tokio { time } (interval driver for the 5s lease janitor)
 [dependencies]
 axum = { workspace = true }
 compact_str = { workspace = true }
-http = { workspace = true }
 jiff = { workspace = true }
 papaya = { workspace = true }
 portal-crypto = { workspace = true, features = ["rustls-integration"] }
@@ -43,7 +49,8 @@ secrecy = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "fs", "io-util", "sync"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "fs", "io-util", "sync", "time"] }
+tokio-util = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]

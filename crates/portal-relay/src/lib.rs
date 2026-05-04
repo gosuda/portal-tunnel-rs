@@ -43,3 +43,4 @@ pub mod state;
 pub mod tui;
 
 pub use error::{RelayError, RelayResult};
+pub use server::{JANITOR_INTERVAL, LifecyclePhase, Server, ServerStatus};
