@@ -7,10 +7,20 @@
 //! relay re-reads them on its own cadence. There is no in-process
 //! handoff API across the phase boundary.
 //!
-//! Batch 1 of Phase 4 ships only the trait surface, configuration, and
-//! filesystem helpers; the `Manager` lifecycle façade and the
-//! `instant-acme` client wrapper land in subsequent batches per
-//! `docs/plans/2026-05-04-004-feat-portal-acme-plan.md` (units U3–U8).
+//! ## Implementation status
+//!
+//! Phase 4 is landing in batches per
+//! `docs/plans/2026-05-04-004-feat-portal-acme-plan.md`. **The `Manager`
+//! lifecycle façade and the `instant-acme` client wrapper do NOT yet
+//! exist in this crate** — they are scheduled for unit U8 (Batch 6).
+//! Phase 4 Batch 1 ships the trait surface
+//! ([`provider::DnsProvider`]), configuration ([`config::AcmeConfig`]),
+//! and filesystem helpers ([`persist::write_atomic_with_mode`]). Phase
+//! 4 Batch 2 ships the local self-signed provider
+//! ([`providers::local::LocalProvider`]). Subsequent batches add the
+//! cloud-DNS providers and the `Manager` driver. Until U8 lands, callers
+//! invoke the Local provider directly — there is no top-level façade
+//! to consume.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
