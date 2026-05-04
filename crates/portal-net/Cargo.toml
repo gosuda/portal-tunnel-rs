@@ -1,11 +1,30 @@
 [package]
 name = "portal-net"
 version = "0.1.0"
-description = "Transport layer — quinn-based QUIC backhaul, raw TCP/UDP relay, datagram session."
+description = "QUIC backhaul + TCP/UDP relay primitives for portal-tunnel-rs."
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+
+[dependencies]
+bytes = { workspace = true }
+ed25519-dalek = { workspace = true }
+papaya = { workspace = true }
+portal-crypto = { workspace = true }
+portal-wire = { workspace = true }
+quinn = { workspace = true }
+rand_core = { workspace = true }
+rustls = { workspace = true }
+secrecy = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

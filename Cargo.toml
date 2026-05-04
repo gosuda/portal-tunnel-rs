@@ -22,6 +22,7 @@ repository = "https://github.com/gosuda/portal-tunnel-rs"
 [workspace.dependencies]
 # Internal member crates
 portal-wire = { path = "crates/portal-wire", version = "0.1.0" }
+portal-crypto = { path = "crates/portal-crypto", version = "0.1.0" }
 
 # Async runtime + HTTP stack
 tokio = { version = "1", features = ["full"] }
@@ -89,7 +90,8 @@ alloy-ens = { version = "2.0", features = ["provider"] }
 
 # Crypto + traits
 k256 = { version = "0.13", features = ["ecdsa"] }
-ed25519-dalek = { version = "2", features = ["rand_core", "zeroize"] }
+ed25519-dalek = { version = "2", features = ["pkcs8", "rand_core", "zeroize"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
 trait_variant = { package = "trait-variant", version = "0.1" }
 
 # TUI (R15)
