@@ -9,11 +9,13 @@ repository.workspace = true
 
 [dependencies]
 bytes = { workspace = true }
+compact_str = { workspace = true }
 ed25519-dalek = { workspace = true }
 jiff = { workspace = true }
 papaya = { workspace = true }
 portal-crypto = { workspace = true }
 portal-wire = { workspace = true }
+postcard = { workspace = true }
 quinn = { workspace = true }
 rand_core = { workspace = true }
 rcgen = { workspace = true }

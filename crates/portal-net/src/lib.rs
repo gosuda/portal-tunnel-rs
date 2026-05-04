@@ -7,6 +7,8 @@
 pub mod dual_stack;
 pub mod error;
 pub mod quic;
+pub mod tcp;
+pub mod udp;
 
 pub use dual_stack::{
     bind_dual_stack_tcp, bind_dual_stack_udp, canonicalize_ip, canonicalize_socket,
@@ -17,3 +19,5 @@ pub use quic::identity::{
     quic_identity_verifying_key, save_quic_identity_key,
 };
 pub use quic::{Endpoint, EndpointRole, InboundStream, SpkiPinVerifier, TcpProxyKind};
+pub use tcp::TcpPortRelay;
+pub use udp::{DatagramSession, UdpRelay};

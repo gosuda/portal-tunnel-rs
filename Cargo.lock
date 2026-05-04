@@ -3048,11 +3048,13 @@ name = "portal-net"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "compact_str",
  "ed25519-dalek",
  "jiff",
  "papaya",
  "portal-crypto",
  "portal-wire",
+ "postcard",
  "quinn",
  "rand_core 0.6.4",
  "rcgen",
