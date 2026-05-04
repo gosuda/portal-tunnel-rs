@@ -23,4 +23,23 @@ disallowed-methods = [
     # is an intentional architectural sentinel (ADR-0002 R2): it would block any
     # call site the moment someone defines and calls `load_all_keys`.
     { path = "portal_crypto::load_all_keys", reason = "use the per-role load_*_key functions (R2 trust-boundary isolation per ADR-0002)", allow-invalid = true },
+
+    # Phase 7 U8.8 — utoipa coverage gate.
+    #
+    # Library crates (`portal-relay`, `portal-sdk`) MUST register routes via
+    # `utoipa_axum::OpenApiRouter::route` / `OpenApiRouter::nest` so utoipa's
+    # `ApiDoc::openapi()` carries the full surface; calling `axum::Router::route`
+    # / `Router::nest` bypasses the OpenAPI registration silently. Binary crates
+    # (`portal-relay-bin`, `portal-cli`, `portal-demo`) compose finalised routers
+    # at the mount site and may locally `#[expect(clippy::disallowed_methods,
+    # reason = "binary crate composes routers from documented utoipa registrations")]`
+    # at that single call site. Policy + escape procedure: docs/utoipa-coverage-policy.md.
+    #
+    # Belt-and-suspenders: the `utoipa-coverage-gate` job in
+    # `.github/workflows/ci.yml` runs an ast-grep scan that catches the syntactic
+    # shape regardless of import alias — clippy `disallowed-methods` resolves on
+    # qualified path, ast-grep on AST shape; together they catch each other's
+    # blind spots.
+    { path = "axum::Router::route", reason = "library crates: use utoipa_axum::OpenApiRouter::route; binary crates: #[expect(clippy::disallowed_methods, reason = \"composes utoipa-registered routers\")] at the mount site (Phase 7 U8.8 — see docs/utoipa-coverage-policy.md)" },
+    { path = "axum::Router::nest", reason = "library crates: use utoipa_axum::OpenApiRouter::nest; binary crates: #[expect(clippy::disallowed_methods, reason = \"composes utoipa-registered routers\")] at the mount site (Phase 7 U8.8 — see docs/utoipa-coverage-policy.md)" },
 ]

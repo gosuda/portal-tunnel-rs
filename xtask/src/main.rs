@@ -6,6 +6,7 @@ use std::process::Command;
 
 use clap::{Parser, Subcommand};
 
+mod openapi_export;
 mod wire_drift_check;
 
 /// Workspace maintenance tasks (`cargo xtask …`).
@@ -22,6 +23,8 @@ enum Commands {
     WireDriftCheck,
     /// Run fmt, clippy, nextest, deny, machete, coverage (mirrors CI intent; best-effort locally).
     Ci,
+    /// v0.2-backlog stub for the utoipa coverage CI gate (Phase 7 U8.8).
+    OpenapiExport,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -31,6 +34,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Commands::WireDriftCheck => wire_drift_check::run(&repo_root).map_err(Into::into),
         Commands::Ci => run_ci(&repo_root),
+        Commands::OpenapiExport => {
+            openapi_export::run();
+            Ok(())
+        }
     }
 }
 

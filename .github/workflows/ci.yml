@@ -206,6 +206,63 @@ jobs:
           path: lcov.info
           if-no-files-found: warn
 
+  # Phase 7 U8.8 — utoipa coverage gate (belt-and-suspenders to clippy
+  # `disallowed-methods` in `clippy.toml`).
+  #
+  # Library crates (`portal-relay`, `portal-sdk`) MUST register routes via
+  # `utoipa_axum::OpenApiRouter::route` / `OpenApiRouter::nest`. Direct calls
+  # to `axum::Router::route` / `Router::nest` from a library crate bypass the
+  # OpenAPI registration silently. Clippy `disallowed-methods` operates on
+  # resolved Rust paths (defeated by import alias); ast-grep operates on
+  # syntactic shape (defeated by macro expansion). Together they catch each
+  # other's blind spots — see docs/utoipa-coverage-policy.md.
+  #
+  # Binary crates (`portal-relay-bin`, `portal-cli`, `portal-demo`) compose
+  # finalised routers at the mount site; they may locally bypass with
+  # `#[expect(clippy::disallowed_methods, reason = "<reason>")]` per the policy.
+  utoipa-coverage-gate:
+    name: utoipa coverage gate (Phase 7 U8.8)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: ast-grep
+      - name: Library crates must use OpenApiRouter::route / OpenApiRouter::nest
+        run: |
+          set -euo pipefail
+          # Coverage split:
+          #   - clippy `disallowed-methods` (workspace `clippy.toml`) is the
+          #     PRIMARY gate. It resolves `axum::Router::route` / `Router::nest`
+          #     by DefId, so it catches both the associated-fn shape
+          #     `Router::route(&mut r, ...)` and the method-call shape
+          #     `r.route(...)` regardless of import alias.
+          #   - This ast-grep step is BELT-AND-SUSPENDERS for source-shape
+          #     evasions clippy can miss (typically: macro-expanded code that
+          #     does not surface to the lint pass; cfg-disabled code paths).
+          #     We pattern-match the canonical chained-builder forms
+          #     `Router::new().route(...)` and `Router::new().nest(...)`,
+          #     plus the qualified `axum::Router::new().route(...)`. Bound-to-
+          #     var rebinds (`let r = Router::new(); r.route(...)`) are caught
+          #     by clippy via type resolution, not by this step.
+          # ast-grep exit code: 0 always (match output goes to stdout).
+          # CI gate: any non-empty output = fail.
+          matches="$(
+            ast-grep run --pattern 'Router::new().route($$$ARGS)' \
+              --lang rust crates/portal-relay/src crates/portal-sdk/src
+            ast-grep run --pattern 'Router::new().nest($$$ARGS)' \
+              --lang rust crates/portal-relay/src crates/portal-sdk/src
+            ast-grep run --pattern 'axum::Router::new().route($$$ARGS)' \
+              --lang rust crates/portal-relay/src crates/portal-sdk/src
+            ast-grep run --pattern 'axum::Router::new().nest($$$ARGS)' \
+              --lang rust crates/portal-relay/src crates/portal-sdk/src
+          )"
+          if [ -n "$matches" ]; then
+            echo "::error::U8.8 utoipa coverage gate: library crates must call utoipa_axum::OpenApiRouter::route / OpenApiRouter::nest, not axum::Router. See docs/utoipa-coverage-policy.md."
+            echo "$matches"
+            exit 1
+          fi
+
   rustls-mandatory:
     name: cargo tree -i openssl returns empty
     runs-on: ubuntu-latest
