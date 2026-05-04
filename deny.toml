@@ -52,6 +52,13 @@ allow = [
     "CC0-1.0",
     "BSL-1.0",
     "OpenSSL",
+    # CDLA-Permissive-2.0 — Community Data License Agreement Permissive 2.0.
+    # Pulled transitively via `webpki-roots` (rustls trust-store snapshot).
+    # Permissive — terms allow redistribution and binary distribution
+    # without imposing share-alike requirements; equivalent in practical
+    # effect to MIT/BSD for non-data-shape use. Required for any rustls
+    # consumer in our register.
+    "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.93
 
@@ -83,8 +90,13 @@ deny = [
     # linked into aws-lc-rs). Re-enabling the ban would force a switch off
     # the workspace's pinned crypto provider, contradicting R13.
     # ---------------------------------------------------------------- Legacy direct picks
-    # These are not commonly transitive in our register; full-tree ban is safe.
-    { crate = "chrono", reason = "use jiff (R8 / ADR-0002)" },
+    # These are not commonly transitive in our register; full-tree ban is safe
+    # except where `wrappers` carve out a known transitive parent set.
+    {
+        crate = "chrono",
+        reason = "use jiff (R8 / ADR-0002); transitive-only via cloudflare + google-cloud-auth wrappers below",
+        wrappers = ["cloudflare", "google-cloud-auth"],
+    },
     { crate = "derive_builder", reason = "use bon (R8 / ADR-0002)" },
     { crate = "typed-builder", reason = "use bon (R8 / ADR-0002)" },
     { crate = "cargo-tarpaulin", reason = "use cargo-llvm-cov (R8 / ADR-0002)" },
