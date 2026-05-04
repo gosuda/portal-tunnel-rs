@@ -81,11 +81,16 @@ utoipa-axum = "0.2"
 instant-acme = "0.8"
 siwe = "=0.6.1"
 alloy = { version = "2.0", default-features = false, features = ["provider-http", "contract"] }
+# alloy-ens is the ENS resolver crate. The alloy umbrella's `ens` feature only
+# enables the bare `alloy-ens` default features (contract surface only).  The
+# `provider` feature is required for `ProviderEnsExt::resolve_name`; it must be
+# declared as a direct workspace dependency. Consumed by portal-crypto U11.
+alloy-ens = { version = "2.0", features = ["provider"] }
 
 # Crypto + traits
 k256 = { version = "0.13", features = ["ecdsa"] }
 ed25519-dalek = { version = "2", features = ["rand_core", "zeroize"] }
-trait_variant = "0.1"
+trait_variant = { package = "trait-variant", version = "0.1" }
 
 # TUI (R15)
 ratatui = { version = "0.30", default-features = false }

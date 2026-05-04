@@ -19,6 +19,7 @@ rustls-integration = ["dep:rustls"]
 
 [dependencies]
 alloy = { workspace = true }
+alloy-ens = { workspace = true }
 rustls = { workspace = true, optional = true }
 bytes = { workspace = true }
 compact_str = { workspace = true }
@@ -39,6 +40,8 @@ portal-wire = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+tokio = { workspace = true }
+wiremock = { workspace = true }
 
 [lints]
 workspace = true

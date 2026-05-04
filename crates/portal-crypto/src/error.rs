@@ -43,11 +43,9 @@ pub enum PortalCryptoError {
     #[error("envelope: {0}")]
     Envelope(String),
 
-    /// ENS / on-chain name resolution failure.
-    ///
-    /// Replaced by `EnsError` in U6.
-    #[error("ens: {0}")]
-    Ens(String),
+    /// ENS / on-chain name resolution failure (U11).
+    #[error(transparent)]
+    Ens(#[from] crate::ens::alloy_resolver::EnsError),
 
     /// Keyless signing oracle failure (Phase 6b).
     ///

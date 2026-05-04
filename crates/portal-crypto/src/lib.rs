@@ -13,7 +13,7 @@
 //! - **`KeylessSigningKey`** — ephemeral keyless signing oracle key (Phase 6b).
 //! - **`ApiHttpsKey`** — HTTPS mutual-TLS identity for the relay admin API (Phase 5).
 //!
-//! # Current surface (U1 + U2 + U3 + U4 + U5 + U6 + U7 + U8 + U9 + U10)
+//! # Current surface (U1 + U2 + U3 + U4 + U5 + U6 + U7 + U8 + U9 + U10 + U11)
 //!
 //! - [`PortalCryptoError`] — workspace-wide crypto error type.
 //! - [`DomainSeparator`] + [`Role`] — SEC-007 domain-separation typestate.
@@ -31,12 +31,14 @@
 //!   `ApiHttpsKey` wraps `Arc<dyn rustls::sign::SigningKey>` directly; it is structurally
 //!   inseparable from `rustls` and therefore gated on the `rustls-integration` feature.
 //!   All consumers of this type (i.e. `portal-relay`) must enable that feature.
+//! - [`EnsResolver`] + [`AlloyEnsResolver`] + [`EnsError`] — ENS name resolution (U11).
 
 #![forbid(unsafe_code)]
 
 #[cfg(feature = "rustls-integration")]
 pub(crate) mod api_https;
 pub(crate) mod ed25519;
+pub(crate) mod ens;
 pub(crate) mod envelope;
 pub mod error;
 pub(crate) mod keyless;
@@ -52,6 +54,7 @@ pub use api_https::{ApiHttpsKey, load_api_https_key};
 pub use ed25519::key::{RelayEd25519Key, load_relay_ed25519_key, verifying_key};
 pub use ed25519::sign::Ed25519Signer;
 pub use ed25519::verify::Ed25519Verifier;
+pub use ens::{AlloyEnsResolver, EnsError, EnsResolver};
 pub use envelope::{sign_envelope, verify_envelope};
 pub use error::PortalCryptoError;
 pub use keyless::{
