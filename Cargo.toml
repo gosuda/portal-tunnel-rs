@@ -46,6 +46,21 @@ rustls = { version = "0.23.40", default-features = false, features = [
     "std",
     "tls12",
 ] }
+# rustls-pki-types is the rustls ecosystem's stable DER/PEM private-key
+# representation. Phase 6b/A U1 (`portal-relay::keyless`) consumes the `alloc`
+# (`PemObject` slice iterator) and `std` (PEM-section iter helpers) features
+# to load PKCS#8 / PKCS#1 / SEC1 PEM bodies into `PrivateKeyDer<'static>`.
+rustls-pki-types = { version = "1", features = ["alloc", "std"] }
+# pkcs1 + pkcs8 + sec1 give us the algorithm-detection surface for the
+# keyless loader. PKCS#8 v1/v2 carries the algorithm OID in the inner
+# AlgorithmIdentifier; SEC1 carries the named-curve OID in `parameters [0]`;
+# PKCS#1 is the bare RSA `RSAPrivateKey` structure. Phase 6b/A U1 uses these
+# three crates to refuse-to-load anything that is not RSA or ECDSA-P256 AND
+# to surface `InvalidKey` for structurally-broken RSA / EC bodies (rather
+# than deferring the failure to the U2 signer-construction site).
+pkcs1 = { version = "0.7", default-features = false, features = ["std"] }
+pkcs8 = { version = "0.10", features = ["std"] }
+sec1 = { version = "0.7", default-features = false, features = ["der", "alloc"] }
 
 # Transport + codec
 quinn = "0.11"

@@ -34,6 +34,7 @@ pub mod api;
 pub mod config;
 pub mod discovery;
 pub mod error;
+pub mod keyless;
 pub mod listeners;
 pub mod policy;
 pub mod proxy;

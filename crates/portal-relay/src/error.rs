@@ -35,6 +35,11 @@ pub enum RelayError {
     /// portal-wire decode/encode failure.
     #[error("wire: {0}")]
     Wire(String),
+
+    /// Keyless module failure (PEM parse, unsupported algorithm,
+    /// malformed key body). Phase 6b/A U1.
+    #[error("keyless: {0}")]
+    Keyless(#[from] crate::keyless::KeylessError),
 }
 
 /// Crate-wide `Result<T, RelayError>`.

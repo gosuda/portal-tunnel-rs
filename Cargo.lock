@@ -3840,6 +3840,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 
 [[package]]
+name = "pkcs1"
+version = "0.7.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8ffb9f10fa047879315e6625af03c164b16962a5368d724ed16323b68ace47f"
+dependencies = [
+ "der",
+ "pkcs8",
+ "spki",
+]
+
+[[package]]
 name = "pkcs8"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3981,8 +3992,12 @@ dependencies = [
  "compact_str",
  "jiff",
  "papaya",
+ "pkcs1",
+ "pkcs8",
  "portal-crypto",
  "portal-net",
+ "rustls-pki-types",
+ "sec1",
  "secrecy",
  "serde",
  "serde_json",
@@ -3991,6 +4006,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "zeroize",
 ]
 
 [[package]]

@@ -202,7 +202,8 @@ impl From<RelayError> for ApiError {
             | RelayError::Io(_)
             | RelayError::Net(_)
             | RelayError::Crypto(_)
-            | RelayError::Wire(_) => Self::internal(),
+            | RelayError::Wire(_)
+            | RelayError::Keyless(_) => Self::internal(),
         }
     }
 }

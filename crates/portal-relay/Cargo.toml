@@ -38,13 +38,25 @@ repository.workspace = true
 # Phase 5 Batch 9 (U16 server orchestrator skeleton) adds:
 # - tokio-util (CancellationToken for janitor cancellation)
 # - tokio { time } (interval driver for the 5s lease janitor)
+#
+# Phase 6b/A Batch 1 first half (U1 — keyless module skeleton + PEM loader)
+# adds:
+# - rustls-pki-types (PEM → PrivateKeyDer<'static> variant detection)
+# - pkcs1 (RFC 8017 RSAPrivateKey structural validation on load)
+# - pkcs8 (PKCS#8 v1/v2 AlgorithmIdentifier OID inspection + body validation)
+# - sec1 (SEC1 EcPrivateKey curve-OID inspection for P-256 enforcement)
+# - zeroize (Zeroizing<Vec<u8>> wrap inside the private KeyMaterial enum)
 [dependencies]
 axum = { workspace = true }
 compact_str = { workspace = true }
 jiff = { workspace = true }
 papaya = { workspace = true }
+pkcs1 = { workspace = true }
+pkcs8 = { workspace = true }
 portal-crypto = { workspace = true, features = ["rustls-integration"] }
 portal-net = { workspace = true }
+rustls-pki-types = { workspace = true }
+sec1 = { workspace = true }
 secrecy = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -52,6 +64,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "fs", "io-util", "sync", "time"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
+zeroize = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
