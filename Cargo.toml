@@ -26,6 +26,7 @@ portal-crypto = { path = "crates/portal-crypto", version = "0.1.0" }
 portal-net = { path = "crates/portal-net", version = "0.1.0" }
 portal-acme = { path = "crates/portal-acme", version = "0.1.0" }
 portal-relay = { path = "crates/portal-relay", version = "0.1.0" }
+portal-sdk = { path = "crates/portal-sdk", version = "0.1.0" }
 
 # Async runtime + HTTP stack
 tokio = { version = "1", features = ["full"] }

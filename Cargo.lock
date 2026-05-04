@@ -3878,6 +3878,12 @@ dependencies = [
 [[package]]
 name = "portal-cli"
 version = "0.1.0"
+dependencies = [
+ "clap",
+ "portal-sdk",
+ "tracing",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "portal-crypto"
@@ -3912,6 +3918,13 @@ dependencies = [
 [[package]]
 name = "portal-demo"
 version = "0.1.0"
+dependencies = [
+ "clap",
+ "eyre",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "portal-net"
