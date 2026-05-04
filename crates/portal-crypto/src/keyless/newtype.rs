@@ -114,6 +114,10 @@ impl Zeroize for KeylessSigningKeyHandle {
 pub fn load_keyless_signing_key(
     _path: &Path,
 ) -> Result<SecretBox<KeylessSigningKeyHandle>, PortalCryptoError> {
+    // Note: unlike load_api_https_key, no file-existence probe is made.
+    // All errors are PortalCryptoError::Keyless until Phase 6b wires the real
+    // loader. Phase 6b should add a metadata probe here to surface
+    // PortalCryptoError::Io for missing paths.
     // STUB: PEM loading not yet wired (Phase 6b).
     // rustls-pemfile is not pinned in [workspace.dependencies].
     Err(PortalCryptoError::Keyless(

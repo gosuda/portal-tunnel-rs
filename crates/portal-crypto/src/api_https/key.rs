@@ -67,7 +67,7 @@ impl Zeroize for ApiHttpsKey {
 ///
 /// `rustls-pemfile` is not yet pinned in `[workspace.dependencies]`.  Until
 /// Phase 5 wires the real loader, this function always returns
-/// [`PortalCryptoError::Keyless`] with a message describing the deferral.
+/// [`PortalCryptoError::HttpsKey`] with a message describing the deferral.
 ///
 /// Phase 5 will replace the stub body with:
 /// 1. Read the file via [`std::fs::read`].
@@ -79,7 +79,7 @@ impl Zeroize for ApiHttpsKey {
 /// # Errors
 ///
 /// - [`PortalCryptoError::Io`] — if the file cannot be opened or read.
-/// - [`PortalCryptoError::Keyless`] — always, until Phase 5 (stub).
+/// - [`PortalCryptoError::HttpsKey`] — always, until Phase 5 (stub).
 pub fn load_api_https_key(path: &Path) -> Result<SecretBox<ApiHttpsKey>, PortalCryptoError> {
     // Surface an Io error for a completely missing path so that the mandatory
     // test (`load_api_https_key_returns_error_for_missing_path`) can assert
@@ -88,7 +88,7 @@ pub fn load_api_https_key(path: &Path) -> Result<SecretBox<ApiHttpsKey>, PortalC
 
     // STUB: PEM loading not yet wired (Phase 5).
     // rustls-pemfile is not pinned in [workspace.dependencies].
-    Err(PortalCryptoError::Keyless(
+    Err(PortalCryptoError::HttpsKey(
         "PEM loading not yet wired (Phase 5)".to_owned(),
     ))
 }

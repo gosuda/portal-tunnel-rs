@@ -126,6 +126,19 @@ pub trait KeylessSigningKey: Send + Sync {
     /// in `self.supported_schemes()`.
     /// Returns [`KeylessError::SignFailed`] when the cryptographic operation
     /// itself fails.
+    ///
+    /// # Returns
+    ///
+    /// Raw signature bytes whose length and encoding depend on `input.scheme`:
+    /// - [`SignatureScheme::Ed25519`][]: exactly 64 bytes (RFC 8032 §5.1.6).
+    /// - [`SignatureScheme::EcdsaNistP256Sha256`][]: DER-encoded
+    ///   `SEQUENCE { r, s }` (variable, typically 70–72 bytes for P-256).
+    /// - [`SignatureScheme::RsaPssSha256`][]: fixed-length equal to the RSA
+    ///   modulus size in bytes (e.g., 256 bytes for RSA-2048).
+    ///
+    /// Callers are responsible for satisfying each protocol's required
+    /// signature encoding and length constraints before placing the output
+    /// into a protocol message.
     fn sign(&self, input: &SigningInput<'_>) -> Result<Vec<u8>, KeylessError>;
 
     /// Returns the set of [`SignatureScheme`]s that this key supports.

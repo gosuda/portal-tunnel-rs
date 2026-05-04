@@ -54,6 +54,10 @@ pub enum PortalCryptoError {
     /// Replaced by `KeylessError` in U7.
     #[error("keyless: {0}")]
     Keyless(String),
+
+    /// API HTTPS key load / parse failure (U10 / Phase 5).
+    #[error("api-https-key: {0}")]
+    HttpsKey(String),
 }
 
 // Compile-time assertion: PortalCryptoError must be Send + Sync + 'static.

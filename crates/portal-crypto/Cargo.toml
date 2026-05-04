@@ -13,6 +13,8 @@ repository.workspace = true
 ## `aws_lc_rs` feature pulls `aws-lc-sys → cmake`, which the workspace
 ## `deny.toml` bans under default features (`all-features = false`).
 ## portal-relay activates this feature when building the API HTTPS surface.
+## portal-relay MUST activate this feature when wiring the API HTTPS surface
+## (Phase 5): `portal-crypto = { workspace = true, features = ["rustls-integration"] }`.
 rustls-integration = ["dep:rustls"]
 
 [dependencies]
