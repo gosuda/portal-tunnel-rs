@@ -7,5 +7,13 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+# Phase 5 Batch 1 ships only the skeleton modules; each subsequent
+# unit (U3..U17) lands its own deps alongside the consuming code.
+# Adding deps here ahead of consumers would defeat the cargo-machete
+# gate.
+[dependencies]
+compact_str = { workspace = true }
+thiserror = { workspace = true }
+
 [lints]
 workspace = true

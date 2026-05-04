@@ -1,0 +1,28 @@
+# cargo-vet workspace policy.
+#
+# Enforces "safe-to-deploy" for production dependencies and
+# "safe-to-run" for `[dev-dependencies]`-only crates. Imports the
+# Mozilla, Bytecode Alliance, and Embark Studios curated audit sets
+# per the cargo-vet book's Tier-1 recommendation.
+
+[cargo-vet]
+version = "0.10"
+
+# Workspace member crates inherit cargo-vet's default first-party
+# policy (effectively `safe-to-deploy` for production deps and
+# `safe-to-run` for dev-only deps). Per-crate overrides go in
+# `[policy.<crate-name>]` tables as the workspace grows; the bare
+# `[policy]` table is not a valid cargo-vet shape.
+
+[imports.mozilla]
+url = "https://raw.githubusercontent.com/mozilla/supply-chain/main/audits.toml"
+
+[imports.bytecode-alliance]
+url = "https://raw.githubusercontent.com/bytecodealliance/wasmtime/main/supply-chain/audits.toml"
+
+[imports.embark-studios]
+url = "https://raw.githubusercontent.com/EmbarkStudios/rust-ecosystem/main/audits.toml"
+
+# `safe-to-run` is the standard relaxed criteria for dev-deps;
+# cargo-vet ships it as a built-in alias of safe-to-deploy minus the
+# transitive-deploy guarantee.

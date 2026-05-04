@@ -146,6 +146,26 @@ jobs:
         with:
           command: check
 
+  # Phase 5 U1: cargo-vet supply-chain audit. Warn-only during Phase 5
+  # per the Mozilla cargo-vet book's incremental-adoption posture
+  # (`continue-on-error: true`). Promotes to a blocking gate in Phase 7
+  # release work once the workspace's own audit corpus has been
+  # bootstrapped via `cargo vet certify`.
+  cargo-vet:
+    name: cargo vet check (warn-only, Phase 5)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95"
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-vet
+      - run: cargo vet check
+
   machete:
     name: cargo machete
     runs-on: ubuntu-latest

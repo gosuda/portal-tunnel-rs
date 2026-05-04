@@ -73,6 +73,16 @@ fn run_ci(repo_root: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     if !cmd_ok(repo_root, "cargo", &["deny", "check"]) {
         failures.push("cargo deny check");
     }
+    // Phase 5 U1: cargo-vet supply-chain audit. Warn-only during Phase 5
+    // per the Mozilla cargo-vet book's incremental-adoption posture; the
+    // workspace promotes this to a hard gate in Phase 7 release work.
+    // Failure modes covered: cargo-vet not installed, no network for
+    // imported audit sets, missing audits on first run. None of these
+    // should fail `xtask ci` until the workspace has bootstrapped its
+    // own audit corpus.
+    if !cmd_ok(repo_root, "cargo", &["vet", "check"]) {
+        eprintln!("xtask ci: cargo vet check failed (warn-only, Phase 5)");
+    }
     if !cmd_ok(repo_root, "cargo", &["machete"]) {
         failures.push("cargo machete");
     }

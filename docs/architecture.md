@@ -91,6 +91,12 @@ At-rest encryption strategy for `identity.json`, ACME private keys, and DNS-
 provider credentials (SEC-005) is a Phase 5 deliverable. v0.1 plaintext-on-
 disk is acknowledged in `SECURITY.md`.
 
+### Supply-chain auditing
+
+Dependency auditing is governed by `cargo-vet` under
+`supply-chain/{audits,config}.toml`; gate timeline and the `cargo vet
+certify` workflow live in [`CONTRIBUTING.md`](../CONTRIBUTING.md).
+
 ## `trait_variant` Send-bound migration shape (R9)
 
 Edition 2024 native `async fn` in trait is the default. The compiler infers

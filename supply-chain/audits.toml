@@ -1,0 +1,10 @@
+# cargo-vet audits — first-party + curated audits.
+#
+# This file accumulates `[[audits.<crate>]]` entries as the workspace
+# certifies dependencies via `cargo vet certify`. Initially empty;
+# Mozilla's imported audit set + the workspace's own `safe-to-deploy`
+# / `safe-to-run` policies cover the bootstrap state.
+
+[criteria]
+# Re-affirm the standard Mozilla criteria so `cargo vet` does not
+# require manual `[criteria]` configuration on first run.

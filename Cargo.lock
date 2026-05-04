@@ -3886,6 +3886,10 @@ dependencies = [
 [[package]]
 name = "portal-relay"
 version = "0.1.0"
+dependencies = [
+ "compact_str",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "portal-relay-bin"
@@ -4355,7 +4359,7 @@ dependencies = [
  "quinn",
  "rustls",
  "rustls-pki-types",
- "rustls-platform-verifier 0.6.2",
+ "rustls-platform-verifier 0.7.0",
  "serde",
  "serde_json",
  "serde_urlencoded",

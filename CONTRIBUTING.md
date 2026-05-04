@@ -81,6 +81,31 @@ plans directory) sequences work into 8 phases. Phase 0 (this commit set)
 ships the workspace foundation. Phases 1-7 each spawn a downstream `/ce-plan`
 run before code lands — see `docs/plans/` for in-flight phase plans.
 
+## Certifying dependencies (`cargo-vet`)
+
+When `cargo vet check` flags a missing audit during local
+verification, do **not** run `cargo vet certify` reflexively to
+silence the gate. A certification is an attestation that the
+contributor has read the dep's source at the named version and
+satisfied themselves it meets the cargo-vet criteria (no malicious
+behavior, no unsafe-without-justification, no shell-out, etc. for
+`safe-to-deploy`; the relaxed `safe-to-run` set for dev-only deps).
+See the [cargo-vet book](https://mozilla.github.io/cargo-vet/) for
+the full criteria reference.
+
+After completing that review, record the attestation:
+
+```sh
+cargo vet certify <crate-name> <version> --criteria safe-to-deploy
+# or for dev-only deps:
+cargo vet certify <crate-name> <version> --criteria safe-to-run
+```
+
+The entry is appended to `supply-chain/audits.toml`. If a review
+isn't feasible (large crate, time-boxed contribution), open an issue
+requesting an exemption rather than certifying without review;
+imported audit sets and policy live in `supply-chain/config.toml`.
+
 ## Reporting bugs / security issues
 
 Bugs: open a GitHub issue with reproduction steps and `cargo --version` /
