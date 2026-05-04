@@ -95,8 +95,15 @@ pub fn build_binding(
 ///
 /// This is the value that [`super::challenge::build`] embeds in the SIWE
 /// `statement` field and that [`verify_binding`] extracts and validates.
-#[must_use]
-pub fn into_siwe_statement(att: &BindingAttestation) -> CompactString {
+///
+/// # Errors
+///
+/// Returns [`PortalCryptoError::Siwe`] if `att.nonce` fails the EIP-4361
+/// §4.2 charset/length rule. Bindings produced by [`verify_binding`] are
+/// guaranteed to satisfy the rule (the message-level nonce check runs
+/// first), so this only fires when callers construct a [`BindingAttestation`]
+/// directly via [`build_binding`] with an out-of-spec nonce.
+pub fn into_siwe_statement(att: &BindingAttestation) -> Result<CompactString, PortalCryptoError> {
     canonical_statement(&att.ed25519_pubkey, &att.nonce)
 }
 
@@ -106,15 +113,27 @@ pub fn into_siwe_statement(att: &BindingAttestation) -> CompactString {
 /// `super::challenge::build` calls this so it shares the exact same template
 /// with [`into_siwe_statement`] / [`verify_binding`]; editing either side in
 /// isolation cannot silently drift the wire-visible string.
-#[must_use]
+///
+/// # Errors
+///
+/// Returns [`PortalCryptoError::Siwe`] if `nonce` violates the EIP-4361 §4.2
+/// nonce charset rule (alphanumeric, length ≥ 8). Enforcing this at the
+/// template-build site prevents an attacker-controlled nonce containing the
+/// `)` suffix character from breaking the hand-rolled parser in
+/// [`verify_binding`].
 pub fn canonical_statement(
     ed25519_pubkey: &ed25519_dalek::VerifyingKey,
     nonce: &str,
-) -> CompactString {
+) -> Result<CompactString, PortalCryptoError> {
+    if nonce.len() < 8 || !nonce.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return Err(PortalCryptoError::Siwe(
+            "nonce must be ≥8 alphanumeric ASCII characters (EIP-4361 §4.2)".to_owned(),
+        ));
+    }
     let hex = bytes32_to_hex(&ed25519_pubkey.to_bytes());
-    CompactString::from(format!(
+    Ok(CompactString::from(format!(
         "{STMT_PREFIX}{hex}{STMT_INFIX}{nonce}{STMT_SUFFIX}"
-    ))
+    )))
 }
 
 /// Verify a SIWE message and extract the SIWE→ed25519 binding attestation.

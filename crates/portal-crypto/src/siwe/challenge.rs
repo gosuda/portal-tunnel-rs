@@ -111,8 +111,10 @@ pub fn build(
 
     // Single canonical template — drift between challenge.rs and binding.rs
     // is structurally impossible because both call sites go through
-    // `binding::canonical_statement` (SEC-002 anti-drift invariant).
-    let statement = super::binding::canonical_statement(&ed25519_pk, nonce).into_string();
+    // `binding::canonical_statement` (SEC-002 anti-drift invariant). The
+    // EIP-4361 §4.2 nonce charset/length rule is enforced inside that helper
+    // and propagates as PortalCryptoError::Siwe.
+    let statement = super::binding::canonical_statement(&ed25519_pk, nonce)?.into_string();
 
     let issued_at = jiff_to_siwe_ts(now)?;
     let expiration_time = Some(jiff_to_siwe_ts(expires_at)?);
