@@ -9,5 +9,6 @@ pub(crate) mod quic;
 
 pub use error::NetError;
 pub use quic::identity::{
-    QuicIdentityKey, generate_quic_key, load_quic_key, save_quic_key, verifying_key,
+    QuicIdentityKey, generate_quic_identity_key, load_quic_identity_key,
+    quic_identity_verifying_key, save_quic_identity_key,
 };

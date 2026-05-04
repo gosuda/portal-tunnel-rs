@@ -4,6 +4,14 @@
 //! seed in `Zeroizing<[u8; 32]>` (since `ed25519_dalek::SigningKey` implements
 //! `ZeroizeOnDrop` but not `Zeroize` directly, and `SecretBox<T>` requires
 //! `T: Zeroize`).
+//!
+//! ## Naming convention
+//!
+//! All free functions in this module are prefixed `quic_identity_*` (or use
+//! the `_quic_identity_key` suffix on action verbs) so re-exports at the
+//! crate root unambiguously describe a *QUIC endpoint identity key*, not a
+//! generic transport-layer key. This mirrors portal-crypto's
+//! `load_relay_ed25519_key` discipline (R2 surface naming).
 
 use std::path::Path;
 
@@ -35,22 +43,22 @@ impl QuicIdentityKey {
 ///
 /// # Errors
 ///
-/// Returns [`NetError::IdentityLoad`] for any I/O or PKCS#8 decode failure
+/// Returns [`NetError::Identity`] for any I/O or PKCS#8 decode failure
 /// (the I/O variant is intentionally remapped here to enforce the spec
 /// invariant that ed25519 key loading surfaces a single error variant).
-pub fn load_quic_key(path: &Path) -> Result<SecretBox<QuicIdentityKey>, NetError> {
+pub fn load_quic_identity_key(path: &Path) -> Result<SecretBox<QuicIdentityKey>, NetError> {
     let data: Zeroizing<Vec<u8>> = Zeroizing::new(
-        std::fs::read(path).map_err(|e| NetError::IdentityLoad(format!("read failed: {e}")))?,
+        std::fs::read(path).map_err(|e| NetError::Identity(format!("read failed: {e}")))?,
     );
     let sk = ed25519_dalek::SigningKey::from_pkcs8_der(&data)
-        .map_err(|e| NetError::IdentityLoad(format!("PKCS#8 decode failed: {e}")))?;
+        .map_err(|e| NetError::Identity(format!("PKCS#8 decode failed: {e}")))?;
     let seed: Zeroizing<[u8; 32]> = Zeroizing::new(sk.to_bytes());
     Ok(SecretBox::new(Box::new(QuicIdentityKey(seed))))
 }
 
 /// Generate a fresh `QuicIdentityKey` using the OS RNG.
 #[must_use]
-pub fn generate_quic_key() -> SecretBox<QuicIdentityKey> {
+pub fn generate_quic_identity_key() -> SecretBox<QuicIdentityKey> {
     let sk = ed25519_dalek::SigningKey::generate(&mut OsRng);
     let seed: Zeroizing<[u8; 32]> = Zeroizing::new(sk.to_bytes());
     SecretBox::new(Box::new(QuicIdentityKey(seed)))
@@ -63,15 +71,18 @@ pub fn generate_quic_key() -> SecretBox<QuicIdentityKey> {
 ///
 /// # Errors
 ///
-/// Returns [`NetError::IdentityLoad`] on PKCS#8 encode failure or
+/// Returns [`NetError::Identity`] on PKCS#8 encode failure or
 /// [`NetError::Io`] on filesystem failure.
-pub fn save_quic_key(key: &SecretBox<QuicIdentityKey>, path: &Path) -> Result<(), NetError> {
+pub fn save_quic_identity_key(
+    key: &SecretBox<QuicIdentityKey>,
+    path: &Path,
+) -> Result<(), NetError> {
     use std::io::Write as _;
 
     let sk = key.expose_secret().signing_key();
     let der = sk
         .to_pkcs8_der()
-        .map_err(|e| NetError::IdentityLoad(format!("PKCS#8 encode failed: {e}")))?;
+        .map_err(|e| NetError::Identity(format!("PKCS#8 encode failed: {e}")))?;
     let bytes: Zeroizing<Vec<u8>> = Zeroizing::new(der.as_bytes().to_vec());
 
     // Build a unique sibling temp path via OS RNG nonce.
@@ -115,19 +126,17 @@ pub fn save_quic_key(key: &SecretBox<QuicIdentityKey>, path: &Path) -> Result<()
 /// Return a path like `<dir>/.portal-net-tmp-<16-hex-chars>` that does not
 /// yet exist. The caller must open it with `create_new(true)`.
 fn unique_sibling_tmp(dir: &Path) -> std::path::PathBuf {
-    use std::fmt::Write as _;
     let mut nonce = [0u8; 8];
     OsRng.fill_bytes(&mut nonce);
-    let mut hex = String::with_capacity(16);
-    for b in nonce {
-        let _ = write!(hex, "{b:02x}");
-    }
+    let hex = format!("{:016x}", u64::from_ne_bytes(nonce));
     dir.join(format!(".portal-net-tmp-{hex}"))
 }
 
-/// Extract the public verifying key from a loaded identity.
+/// Extract the public verifying key from a loaded QUIC identity.
 #[must_use]
-pub fn verifying_key(key: &SecretBox<QuicIdentityKey>) -> ed25519_dalek::VerifyingKey {
+pub fn quic_identity_verifying_key(
+    key: &SecretBox<QuicIdentityKey>,
+) -> ed25519_dalek::VerifyingKey {
     key.expose_secret().signing_key().verifying_key()
 }
 
@@ -141,34 +150,56 @@ mod tests {
 
     #[test]
     fn generate_then_extract_pubkey_nonzero() {
-        let key = generate_quic_key();
-        let vk = verifying_key(&key);
+        let key = generate_quic_identity_key();
+        let vk = quic_identity_verifying_key(&key);
         assert_ne!(vk.to_bytes(), [0u8; 32]);
     }
 
     #[test]
     fn round_trip_save_then_load_yields_same_pubkey() {
-        let key = generate_quic_key();
-        let expected = verifying_key(&key);
+        let key = generate_quic_identity_key();
+        let expected = quic_identity_verifying_key(&key);
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("quic.der");
-        save_quic_key(&key, &path).unwrap();
-        let loaded = load_quic_key(&path).unwrap();
-        assert_eq!(expected, verifying_key(&loaded));
+        save_quic_identity_key(&key, &path).unwrap();
+        let loaded = load_quic_identity_key(&path).unwrap();
+        assert_eq!(expected, quic_identity_verifying_key(&loaded));
     }
 
     #[test]
-    fn load_missing_path_returns_identity_load_error() {
-        let result = load_quic_key(Path::new("/nonexistent/path/quic.der"));
-        assert!(matches!(result, Err(NetError::IdentityLoad(_))));
+    fn load_missing_path_returns_identity_error() {
+        let result = load_quic_identity_key(Path::new("/nonexistent/path/quic.der"));
+        assert!(matches!(result, Err(NetError::Identity(_))));
     }
 
     #[test]
-    fn load_malformed_pkcs8_returns_identity_load_error() {
+    fn load_malformed_pkcs8_returns_identity_error() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("bad.der");
         std::fs::write(&path, b"not pkcs8").unwrap();
-        let result = load_quic_key(&path);
-        assert!(matches!(result, Err(NetError::IdentityLoad(_))));
+        let result = load_quic_identity_key(&path);
+        assert!(matches!(result, Err(NetError::Identity(_))));
+    }
+
+    /// Verifies the Unix 0o600 permission promise documented on
+    /// [`save_quic_identity_key`]. The function ships an explicit security
+    /// invariant; an untested promise drifts.
+    #[cfg(unix)]
+    #[test]
+    fn saved_file_has_unix_mode_0o600() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let key = generate_quic_identity_key();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("quic.der");
+        save_quic_identity_key(&key, &path).unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "saved identity file must be 0o600 (got {:o})",
+            mode & 0o777,
+        );
     }
 }

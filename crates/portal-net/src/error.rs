@@ -22,9 +22,12 @@ pub enum NetError {
     #[error("wire-decode: {0}")]
     WireDecode(String),
 
-    /// ed25519 PKCS#8 key load or parse failure.
-    #[error("identity-load: {0}")]
-    IdentityLoad(String),
+    /// ed25519 identity-key fault. Covers both PKCS#8 *load* failures
+    /// (read-from-disk, decode) and *save* failures (encode, atomic-write).
+    /// A single variant keeps the trust-boundary surface narrow per R2 (one
+    /// error class for the QUIC identity key, regardless of direction).
+    #[error("identity: {0}")]
+    Identity(String),
 
     /// Listener bind failure.
     #[error("bind-failed: {0}")]
