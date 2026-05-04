@@ -21,7 +21,7 @@ repository = "https://github.com/gosuda/portal-tunnel-rs"
 
 [workspace.dependencies]
 # Internal member crates
-portal-wire = { path = "crates/portal-wire" }
+portal-wire = { path = "crates/portal-wire", version = "0.1.0" }
 
 # Async runtime + HTTP stack
 tokio = { version = "1", features = ["full"] }
@@ -33,7 +33,7 @@ tower = "0.5"
 # TLS — rustls MANDATORY (R13). aws_lc_rs provider; prefer-post-quantum opts the
 # X25519+ML-KEM-768 hybrid KEX in once rustls negotiates it. Server-side ECH is
 # tracked in rustls#1980 and will be added when it lands.
-rustls = { version = "0.23.22", default-features = false, features = [
+rustls = { version = "0.23.40", default-features = false, features = [
     "aws_lc_rs",
     "prefer-post-quantum",
     "std",
@@ -62,7 +62,7 @@ figment = { version = "0.10", features = ["env", "json", "toml"] }
 
 # Observability + errors
 metrics = "0.24"
-metrics-exporter-prometheus = { version = "0.17", default-features = false }
+metrics-exporter-prometheus = { version = "0.18", default-features = false }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 thiserror = "2"
@@ -96,14 +96,14 @@ aws-sdk-route53 = { version = "1", default-features = false, features = [
     "rt-tokio",
     "default-https-client",
 ] }
-gcp_auth = "0.13"
+gcp_auth = "0.12"
 
 # Overlay (Phase 6b)
 smoltcp = { version = "0.13", default-features = false }
-brotli = "9"
+brotli = "8"
 
 # Dev-deps register (consumed by member crates' [dev-dependencies])
-divan = "3"
+divan = "0.1"
 insta = "1"
 proptest = "1"
 wiremock = "0.6"
