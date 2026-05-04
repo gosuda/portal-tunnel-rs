@@ -6,6 +6,7 @@ use std::process::Command;
 
 use clap::{Parser, Subcommand};
 
+mod dep_audit;
 mod openapi_export;
 mod wire_drift_check;
 
@@ -25,6 +26,8 @@ enum Commands {
     Ci,
     /// v0.2-backlog stub for the utoipa coverage CI gate (Phase 7 U8.8).
     OpenapiExport,
+    /// Validate `docs/dep-spawning-audit.md` carries every required dep contract section (Phase 7 U8.7).
+    DepAudit,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -38,6 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             openapi_export::run();
             Ok(())
         }
+        Commands::DepAudit => dep_audit::run(&repo_root),
     }
 }
 

@@ -263,6 +263,26 @@ jobs:
             exit 1
           fi
 
+  # Phase 7 U8.7 — dep-spawning audit gate.
+  #
+  # Validates that `docs/dep-spawning-audit.md` carries every required dep
+  # contract section (quinn, axum+hyper, instant-acme, defguard_boringtun,
+  # plus the Per-dep contracts table and the R9 honest-claim section). The
+  # `xtask dep-audit` validator detects ATX headings only — fenced code
+  # blocks and blockquotes containing the literal section text do not
+  # satisfy the gate (see xtask/src/dep_audit.rs unit tests for the bypass
+  # cases).
+  dep-spawning-audit-gate:
+    name: dep-spawning audit (Phase 7 U8.7)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95"
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo run -p xtask --quiet -- dep-audit
+
   rustls-mandatory:
     name: cargo tree -i openssl returns empty
     runs-on: ubuntu-latest
