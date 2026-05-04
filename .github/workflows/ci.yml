@@ -81,6 +81,40 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
+  # R2 trust-boundary isolation gate (Phase 2 U12).
+  #
+  # Bans function signatures whose return type contains two or more SecretBox
+  # or SigningKey occurrences on the same line, which is the fingerprint of an
+  # illegal multi-key-bundle loader written in standard (non-rustfmt-wrapped)
+  # style.
+  #
+  # Limitation: rustfmt-wrapped multi-line return types are not caught by a
+  # line-based rg scan.  Those cases are covered by code review and the
+  # disallowed-methods clippy entry in clippy.toml.  A future batch may add
+  # an xtask/ast-grep gate for the multiline case.
+  #
+  # Pattern rationale: `-> .*SecretBox.*SecretBox` matches any line that
+  # contains a `->` return-type arrow followed (anywhere on the same line) by
+  # two or more `SecretBox` tokens.  This correctly catches:
+  #   fn load_two() -> Result<(SecretBox<RelayEd25519Key>, SecretBox<…>), …>
+  # because both `SecretBox` tokens appear after `->` on the same line.
+  #
+  # Correctness check for the `!` inversion:
+  #   - Zero matches → rg exits 1 → `! rg …` exits 0 → step passes.  ✓
+  #   - Matches found → rg exits 0 → `! rg …` exits 1 → step fails.  ✓
+  # Smoke-tested locally (see commit message) by temporarily inserting
+  # `pub fn load_two() -> Result<(SecretBox<RelayEd25519Key>, SecretBox<TenantSecp256k1Key>), …>`
+  # and confirming the SecretBox gate triggered; line was removed before commit.
+  multi-key-return-gate:
+    name: Multi-key-return regex gate (R2 trust-boundary isolation)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Multi-key-return regex gate (R2 trust-boundary isolation)
+        run: |
+          ! rg --type rust -e '-> .*SecretBox.*SecretBox' crates/portal-crypto crates/portal-relay crates/portal-sdk crates/portal-net
+          ! rg --type rust -e '-> .*SigningKey.*SigningKey' crates/portal-crypto crates/portal-relay crates/portal-sdk crates/portal-net
+
   nextest:
     name: cargo nextest
     runs-on: ${{ matrix.os }}

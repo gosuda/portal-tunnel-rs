@@ -39,6 +39,7 @@ zeroize = { workspace = true }
 portal-wire = { workspace = true }
 
 [dev-dependencies]
+proptest = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }
 wiremock = { workspace = true }

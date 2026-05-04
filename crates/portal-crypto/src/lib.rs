@@ -74,3 +74,18 @@ pub use siwe::binding::{BindingAttestation, build_binding, into_siwe_statement, 
 pub use siwe::challenge::{
     ChallengeBuilder, RegisterChallenge, build as build_siwe_challenge, verify_siwe,
 };
+
+// ---------------------------------------------------------------------------
+// Integration-test helpers (doc-hidden, not part of the public production API)
+// ---------------------------------------------------------------------------
+//
+// These re-exports make `from_seed_for_test` / `from_bytes_for_test` reachable
+// from the `crates/portal-crypto/tests/` integration-test compilation units,
+// which are separate crates and cannot see `pub(crate)` items.  `#[doc(hidden)]`
+// keeps them out of published rustdoc.  Phase 2 B8 / ADR-0002 R2.
+
+#[doc(hidden)]
+pub use ed25519::key::from_seed_for_test as ed25519_from_seed_for_test;
+
+#[doc(hidden)]
+pub use secp256k1::key::from_bytes_for_test as secp256k1_from_bytes_for_test;

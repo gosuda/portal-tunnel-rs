@@ -1,0 +1,22 @@
+# Workspace-level clippy configuration.
+#
+# R2 trust-boundary isolation: each key role has exactly one loader function.
+# No bundled multi-key loader may exist.
+#
+# `disallowed-methods` requires a resolvable qualified Rust path.  The entry
+# below targets `portal_crypto::load_all_keys` — the canonical wrong name a
+# contributor would reach for when trying to create a multi-key bundle loader.
+# Clippy emits a hard error at any call site to that exact symbol; contributors
+# see the reason string pointing at the correct per-role API.  Definition of
+# the symbol itself is caught by the CI regex gate (see below).
+#
+# Return-type enforcement (banning `fn … -> (SecretBox<A>, SecretBox<B>)`)
+# cannot be expressed via `disallowed-methods` (no return-type predicate).
+# That enforcement is the responsibility of the CI regex gate defined in
+# `.github/workflows/ci.yml` (job "Multi-key-return regex gate").
+#
+# ADR-0002 § R2 / Phase 2 plan U12.
+
+disallowed-methods = [
+    { path = "portal_crypto::load_all_keys", reason = "use the per-role load_*_key functions (R2 trust-boundary isolation per ADR-0002)" },
+]

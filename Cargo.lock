@@ -2802,6 +2802,7 @@ dependencies = [
  "k256",
  "portal-wire",
  "postcard",
+ "proptest",
  "rustls",
  "secrecy",
  "serde",

@@ -10,6 +10,7 @@ non-trivial decision per phase. Status lifecycle: `proposed` → `accepted` →
 | [0002](0002-aggressive-2026-register.md) | Aggressive 2026 Rust register; banned-crates | accepted |
 | [0003](0003-registry-fork-and-v2-1-8-migration.md) | Registry-fork strategy and v2.1.8 user-base migration posture | accepted |
 | [0004](0004-supported-clients-and-upgrade-encouragement.md) | Supported clients and upgrade-encouragement matrix (R13) | accepted |
+| [0005](0005-siwe-rs-stewardship.md) | siwe-rs stewardship and v0.2 fork-trigger criterion | accepted |
 
 ## Amendment procedure
 
