@@ -18,5 +18,9 @@
 # ADR-0002 § R2 / Phase 2 plan U12.
 
 disallowed-methods = [
-    { path = "portal_crypto::load_all_keys", reason = "use the per-role load_*_key functions (R2 trust-boundary isolation per ADR-0002)" },
+    # `allow-invalid = true` suppresses the "not a reachable function" warning
+    # that clippy emits when the guarded symbol does not yet exist. This entry
+    # is an intentional architectural sentinel (ADR-0002 R2): it would block any
+    # call site the moment someone defines and calls `load_all_keys`.
+    { path = "portal_crypto::load_all_keys", reason = "use the per-role load_*_key functions (R2 trust-boundary isolation per ADR-0002)", allow-invalid = true },
 ]

@@ -135,13 +135,14 @@ pub fn verifying_key(key: &SecretBox<RelayEd25519Key>) -> ed25519_dalek::Verifyi
 /// Construct a [`SecretBox<RelayEd25519Key>`] deterministically from a 32-byte
 /// seed.
 ///
-/// Not part of the public production API; exposed (without `#[cfg(test)]`) so
-/// that integration-test crates in `crates/portal-crypto/tests/` can use it
-/// without a separate file-based fixture.  The `#[doc(hidden)]` attribute
-/// suppresses it from published rustdoc.
+/// Not part of the public production API.  Gated on `cfg(test)` (for unit
+/// tests within this crate) and the `insecure-test-constructors` feature (for
+/// integration tests in `tests/` and external test harnesses that activate it).
+/// The `#[doc(hidden)]` attribute suppresses it from published rustdoc.
 ///
 /// Used by the Phase 2 Batch 8 proptest suite (`tests/ed25519_roundtrip.rs`)
 /// and SIWE binding integration tests (`tests/siwe_binding.rs`).
+#[cfg(any(test, feature = "insecure-test-constructors"))]
 #[doc(hidden)]
 #[must_use]
 pub fn from_seed_for_test(seed: [u8; 32]) -> SecretBox<RelayEd25519Key> {

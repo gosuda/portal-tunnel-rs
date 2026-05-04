@@ -144,13 +144,14 @@ pub fn public_key(
 /// Construct a [`SecretBox<TenantSecp256k1Key>`] deterministically from a
 /// 32-byte secret scalar.
 ///
-/// Not part of the public production API; exposed (without `#[cfg(test)]`) so
-/// that integration-test crates in `crates/portal-crypto/tests/` can use it
-/// without a separate file-based fixture.  The `#[doc(hidden)]` attribute
-/// suppresses it from published rustdoc.
+/// Not part of the public production API.  Gated on `cfg(test)` (for unit
+/// tests within this crate) and the `insecure-test-constructors` feature (for
+/// integration tests in `tests/` and external test harnesses that activate it).
+/// The `#[doc(hidden)]` attribute suppresses it from published rustdoc.
 ///
 /// Panics if `seed` is all-zero (invalid scalar), because test code that
 /// passes an all-zero seed has a bug.
+#[cfg(any(test, feature = "insecure-test-constructors"))]
 #[doc(hidden)]
 #[must_use]
 pub fn from_bytes_for_test(seed: [u8; 32]) -> SecretBox<TenantSecp256k1Key> {

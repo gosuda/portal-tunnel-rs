@@ -23,6 +23,9 @@
 //! Keeping it out of `sign.rs` prevents a class of bugs where sign and verify
 //! happen to agree because they share the same buggy code path.
 
+// `pub mod` (not `pub(crate)`) is intentional: clippy::redundant_pub_crate fires
+// because `ed25519` itself is declared `pub(crate)` in `lib.rs`, making an
+// inner `pub(crate)` redundant. Visibility is already capped at the crate root.
 pub mod key;
 pub mod sign;
 pub mod verify;

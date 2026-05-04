@@ -15,6 +15,9 @@
 //! # }
 //! ```
 
+// `pub mod` (not `pub(crate)`) is intentional: clippy::redundant_pub_crate fires
+// because `ens` itself is declared `pub(crate)` in `lib.rs`, making an inner
+// `pub(crate)` redundant. Visibility is already capped at the crate root.
 pub mod alloy_resolver;
 
 pub use alloy_resolver::{AlloyEnsResolver, EnsError, EnsResolver};

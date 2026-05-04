@@ -16,6 +16,14 @@ repository.workspace = true
 ## portal-relay MUST activate this feature when wiring the API HTTPS surface
 ## (Phase 5): `portal-crypto = { workspace = true, features = ["rustls-integration"] }`.
 rustls-integration = ["dep:rustls"]
+## Exposes deterministic seed-to-key constructors (`from_seed_for_test`,
+## `from_bytes_for_test`) that are UNSAFE for production use (fixed seeds
+## produce predictable keys).  Must never be enabled in production builds.
+## This crate's own integration tests (tests/ dir) activate it via the
+## self-referencing dev-dependency below (`portal-crypto = { path = ".",
+## features = ["insecure-test-constructors"] }`), because tests/ binaries
+## compile the library as a normal (non-cfg(test)) dependency.
+insecure-test-constructors = []
 
 [dependencies]
 alloy = { workspace = true }
@@ -39,6 +47,11 @@ zeroize = { workspace = true }
 portal-wire = { workspace = true }
 
 [dev-dependencies]
+# Self-reference: activates `insecure-test-constructors` so integration tests
+# in tests/ can reach `ed25519_from_seed_for_test` / `secp256k1_from_bytes_for_test`.
+# The library is compiled as a normal dep by tests/ binaries (not cfg(test)),
+# so cfg(test) alone cannot open those gates — the feature must be explicit.
+portal-crypto = { path = ".", features = ["insecure-test-constructors"] }
 proptest = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }

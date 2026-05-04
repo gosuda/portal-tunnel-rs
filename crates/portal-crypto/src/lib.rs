@@ -80,12 +80,16 @@ pub use siwe::challenge::{
 // ---------------------------------------------------------------------------
 //
 // These re-exports make `from_seed_for_test` / `from_bytes_for_test` reachable
-// from the `crates/portal-crypto/tests/` integration-test compilation units,
-// which are separate crates and cannot see `pub(crate)` items.  `#[doc(hidden)]`
-// keeps them out of published rustdoc.  Phase 2 B8 / ADR-0002 R2.
+// from the `crates/portal-crypto/tests/` integration-test compilation units.
+// They are gated on `cfg(test)` (unit tests within this crate) and the
+// `insecure-test-constructors` feature (integration tests in tests/ and
+// external harnesses that activate it).
+// `#[doc(hidden)]` keeps them out of published rustdoc.  Phase 2 B8 / ADR-0002 R2.
 
+#[cfg(any(test, feature = "insecure-test-constructors"))]
 #[doc(hidden)]
 pub use ed25519::key::from_seed_for_test as ed25519_from_seed_for_test;
 
+#[cfg(any(test, feature = "insecure-test-constructors"))]
 #[doc(hidden)]
 pub use secp256k1::key::from_bytes_for_test as secp256k1_from_bytes_for_test;

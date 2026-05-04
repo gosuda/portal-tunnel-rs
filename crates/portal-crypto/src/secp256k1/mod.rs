@@ -14,6 +14,9 @@
 //! - **[`eip191`]** — [`sign_eip191_personal`] which produces a 65-byte
 //!   Ethereum personal-message signature (`r || s || v`, `v ∈ {27, 28}`).
 
+// `pub mod` (not `pub(crate)`) is intentional: clippy::redundant_pub_crate fires
+// because `secp256k1` itself is declared `pub(crate)` in `lib.rs`, making an
+// inner `pub(crate)` redundant. Visibility is already capped at the crate root.
 pub mod address;
 pub mod eip191;
 pub mod key;

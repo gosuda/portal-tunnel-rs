@@ -6,6 +6,9 @@
 //!
 //! Public items are re-exported at the crate root by `lib.rs`.
 
+// `pub mod` (not `pub(crate)`) is intentional: clippy::redundant_pub_crate fires
+// because `keyless` itself is declared `pub(crate)` in `lib.rs`, making an
+// inner `pub(crate)` redundant. Visibility is already capped at the crate root.
 pub mod newtype;
 pub mod trait_def;
 
