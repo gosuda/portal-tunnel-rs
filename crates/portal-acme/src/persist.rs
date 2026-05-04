@@ -19,11 +19,7 @@ use crate::error::AcmeError;
 /// # Errors
 /// Returns [`AcmeError::Io`] on any FS failure. Best-effort cleanup of
 /// the temp file on error.
-pub async fn write_atomic_with_mode(
-    path: &Path,
-    bytes: &[u8],
-    mode: u32,
-) -> Result<(), AcmeError> {
+pub async fn write_atomic_with_mode(path: &Path, bytes: &[u8], mode: u32) -> Result<(), AcmeError> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let tmp = unique_sibling_tmp(parent);
 
@@ -100,7 +96,11 @@ mod tests {
         write_atomic_with_mode(&path, b"secret", 0o600)
             .await
             .unwrap();
-        let mode = tokio::fs::metadata(&path).await.unwrap().permissions().mode();
+        let mode = tokio::fs::metadata(&path)
+            .await
+            .unwrap()
+            .permissions()
+            .mode();
         assert_eq!(mode & 0o777, 0o600);
     }
 }

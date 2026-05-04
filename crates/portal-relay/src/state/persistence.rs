@@ -53,10 +53,7 @@ pub const STATE_FILE_MODE: u32 = 0o600;
 /// Returns [`RelayError::Io`] on any FS failure;
 /// [`RelayError::Config`] on JSON serialization failure (the value
 /// itself is malformed for serde).
-pub async fn write_json_atomic<T: Serialize + Sync>(
-    path: &Path,
-    value: &T,
-) -> RelayResult<()> {
+pub async fn write_json_atomic<T: Serialize + Sync>(path: &Path, value: &T) -> RelayResult<()> {
     let bytes = serde_json::to_vec_pretty(value)
         .map_err(|e| RelayError::Config(format!("serialize {}: {e}", path.display())))?;
     if let Some(parent) = path.parent() {
@@ -235,7 +232,9 @@ mod tests {
     async fn read_malformed_json_returns_config() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("bad.json");
-        tokio::fs::write(&path, b"{ this is not json").await.unwrap();
+        tokio::fs::write(&path, b"{ this is not json")
+            .await
+            .unwrap();
         let result: RelayResult<Sample> = read_json(&path).await;
         assert!(matches!(result, Err(RelayError::Config(_))));
     }

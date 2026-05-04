@@ -143,8 +143,7 @@ fn build_dual_stack_socket(
         let socket = Socket::new(Domain::IPV6, sock_type, protocol)?;
         socket.set_only_v6(false)?;
         socket.set_nonblocking(true)?;
-        let sock_addr: SockAddr =
-            SocketAddr::V6(SocketAddrV6::new(v6_addr, port, 0, 0)).into();
+        let sock_addr: SockAddr = SocketAddr::V6(SocketAddrV6::new(v6_addr, port, 0, 0)).into();
         Ok((socket, sock_addr))
     }
 }

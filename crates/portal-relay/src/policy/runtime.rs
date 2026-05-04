@@ -69,10 +69,6 @@ mod tests {
             .with_ip_filter(filter)
             .with_proxy_trust(trust);
         assert_eq!(runtime.ip_filter.len(), 1);
-        assert!(
-            runtime
-                .proxy_trust
-                .is_trusted("10.0.0.1".parse().unwrap())
-        );
+        assert!(runtime.proxy_trust.is_trusted("10.0.0.1".parse().unwrap()));
     }
 }

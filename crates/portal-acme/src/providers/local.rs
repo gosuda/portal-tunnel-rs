@@ -66,10 +66,7 @@ impl LocalProvider {
     /// # Errors
     /// Returns [`AcmeError::Cert`] on rcgen errors,
     /// [`AcmeError::Io`] on filesystem failure.
-    pub async fn generate_self_signed(
-        &self,
-        key_dir: &KeyDir,
-    ) -> AcmeResult<LocalCertPaths> {
+    pub async fn generate_self_signed(&self, key_dir: &KeyDir) -> AcmeResult<LocalCertPaths> {
         // 1. Build SAN list. Loopback identities are always present;
         //    optional `base_domain` is appended (apex + wildcard) when
         //    not `localhost`.
@@ -117,8 +114,7 @@ impl LocalProvider {
         // self-sign but cannot delegate further. This mirrors the Go
         // reference's `BasicConstraintsValid: true, IsCA: true` behaviour
         // while keeping the trust scope minimal for a dev cert.
-        params.is_ca =
-            rcgen::IsCa::Ca(rcgen::BasicConstraints::Constrained(0));
+        params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Constrained(0));
 
         // 10-year validity window. We anchor `not_before` to Jan 1 of
         // the current calendar year (slightly back-dated, harmless for
@@ -210,11 +206,7 @@ impl DnsProvider for LocalProvider {
         ))
     }
 
-    async fn ensure_a_records(
-        &self,
-        _hostname: &str,
-        _ipv4: std::net::Ipv4Addr,
-    ) -> AcmeResult<()> {
+    async fn ensure_a_records(&self, _hostname: &str, _ipv4: std::net::Ipv4Addr) -> AcmeResult<()> {
         Err(AcmeError::Config(
             "local provider does not manage A records".to_owned(),
         ))
@@ -249,7 +241,9 @@ mod tests {
         let provider = LocalProvider::new();
         let paths = provider.generate_self_signed(&key_dir).await.unwrap();
         let chain = tokio::fs::read_to_string(paths.fullchain()).await.unwrap();
-        let key = tokio::fs::read_to_string(paths.private_key()).await.unwrap();
+        let key = tokio::fs::read_to_string(paths.private_key())
+            .await
+            .unwrap();
         assert!(chain.contains("BEGIN CERTIFICATE"));
         assert!(chain.contains("END CERTIFICATE"));
         assert!(

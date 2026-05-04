@@ -40,11 +40,7 @@ impl DnsProvider for Route53Provider {
         ))
     }
 
-    async fn ensure_a_records(
-        &self,
-        _hostname: &str,
-        _ipv4: std::net::Ipv4Addr,
-    ) -> AcmeResult<()> {
+    async fn ensure_a_records(&self, _hostname: &str, _ipv4: std::net::Ipv4Addr) -> AcmeResult<()> {
         Err(AcmeError::Config(
             "route53 provider not implemented in B1 (Phase 4 B4)".to_owned(),
         ))

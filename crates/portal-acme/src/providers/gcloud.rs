@@ -41,11 +41,7 @@ impl DnsProvider for GcloudProvider {
         ))
     }
 
-    async fn ensure_a_records(
-        &self,
-        _hostname: &str,
-        _ipv4: std::net::Ipv4Addr,
-    ) -> AcmeResult<()> {
+    async fn ensure_a_records(&self, _hostname: &str, _ipv4: std::net::Ipv4Addr) -> AcmeResult<()> {
         Err(AcmeError::Config(
             "gcloud provider not implemented in B1 (Phase 4 B5)".to_owned(),
         ))

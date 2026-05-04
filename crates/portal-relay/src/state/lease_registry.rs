@@ -338,11 +338,19 @@ mod tests {
         let reg = LeaseRegistry::new();
         let id1 = IdentityKey([0x1u8; 32]);
         let id2 = IdentityKey([0x2u8; 32]);
-        reg.register(make_record(id1, "shared.portal.test", ten_minutes_from_now()))
-            .await
-            .unwrap();
+        reg.register(make_record(
+            id1,
+            "shared.portal.test",
+            ten_minutes_from_now(),
+        ))
+        .await
+        .unwrap();
         let result = reg
-            .register(make_record(id2, "shared.portal.test", ten_minutes_from_now()))
+            .register(make_record(
+                id2,
+                "shared.portal.test",
+                ten_minutes_from_now(),
+            ))
             .await;
         assert!(matches!(result, Err(RelayError::Config(_))));
     }

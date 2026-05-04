@@ -20,7 +20,7 @@ pub use state::{AdminState, DiscoveryState, SdkState};
 #[expect(
     clippy::double_must_use,
     reason = "wrapper-fn boundary contract: `axum::Router` is `#[must_use]` \
-              but constructor-return shape re-affirms it here",
+              but constructor-return shape re-affirms it here"
 )]
 pub fn build_sdk_router(state: SdkState) -> axum::Router {
     axum::Router::new().with_state(state)
@@ -33,7 +33,7 @@ pub fn build_sdk_router(state: SdkState) -> axum::Router {
 #[expect(
     clippy::double_must_use,
     reason = "wrapper-fn boundary contract: `axum::Router` is `#[must_use]` \
-              but constructor-return shape re-affirms it here",
+              but constructor-return shape re-affirms it here"
 )]
 pub fn build_admin_router(state: AdminState) -> axum::Router {
     axum::Router::new().with_state(state)
@@ -45,7 +45,7 @@ pub fn build_admin_router(state: AdminState) -> axum::Router {
 #[expect(
     clippy::double_must_use,
     reason = "wrapper-fn boundary contract: `axum::Router` is `#[must_use]` \
-              but constructor-return shape re-affirms it here",
+              but constructor-return shape re-affirms it here"
 )]
 pub fn build_discovery_router(state: DiscoveryState) -> axum::Router {
     axum::Router::new().with_state(state)

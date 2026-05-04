@@ -496,10 +496,7 @@ mod tests {
         server.start().await.unwrap();
         server.shutdown().await;
         server.start().await.unwrap();
-        assert_eq!(
-            server.status().await.phase,
-            LifecyclePhase::Running,
-        );
+        assert_eq!(server.status().await.phase, LifecyclePhase::Running,);
         server.shutdown().await;
     }
 

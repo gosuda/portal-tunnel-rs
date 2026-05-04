@@ -165,10 +165,13 @@ impl Manager {
     /// feature.
     #[cfg(feature = "local")]
     async fn ensure_certificate_local(&self) -> AcmeResult<CertificateHandoff> {
-        let provider = self.cfg.domains.first().map_or_else(
-            LocalProvider::new,
-            |base| LocalProvider::with_base_domain(base.clone()),
-        );
+        let provider = self
+            .cfg
+            .domains
+            .first()
+            .map_or_else(LocalProvider::new, |base| {
+                LocalProvider::with_base_domain(base.clone())
+            });
         let paths = provider.generate_self_signed(&self.cfg.key_dir).await?;
         Ok(CertificateHandoff {
             fullchain: paths.fullchain,
@@ -198,9 +201,7 @@ impl Manager {
     pub async fn start(&self) -> AcmeResult<()> {
         let mut guard = self.runtime.lock().await;
         if guard.is_some() {
-            return Err(AcmeError::Config(
-                "manager already started".to_owned(),
-            ));
+            return Err(AcmeError::Config("manager already started".to_owned()));
         }
         let cancel = CancellationToken::new();
         let mode = self.mode;

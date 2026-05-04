@@ -52,10 +52,9 @@ async fn quic_backhaul_round_trip_tcp_proxy_raw() {
         let conn = incoming.await.expect("server connection completes");
         // Open a server-initiated TcpProxy::Raw stream and send "ping",
         // then read the SDK side's "pong" response.
-        let (mut send, mut recv) =
-            open_outbound(&conn, Channel::TcpProxy, Some(TcpProxyKind::Raw))
-                .await
-                .unwrap();
+        let (mut send, mut recv) = open_outbound(&conn, Channel::TcpProxy, Some(TcpProxyKind::Raw))
+            .await
+            .unwrap();
         send.write_all(b"ping").await.unwrap();
         send.finish().unwrap();
         // quinn::RecvStream::read_to_end takes a size cap and returns
@@ -117,4 +116,3 @@ async fn quic_backhaul_round_trip_tcp_proxy_raw() {
         .expect("acceptor task did not panic");
     acc_result.expect("SdkAcceptor::run returns Ok on clean shutdown");
 }
-

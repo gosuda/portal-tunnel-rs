@@ -34,19 +34,18 @@ pub mod provider;
 pub mod providers {
     //! DNS-01 provider implementations gated by per-provider features.
 
-    #[cfg(feature = "local")]
-    pub mod local;
     #[cfg(feature = "cloudflare")]
     pub mod cloudflare;
-    #[cfg(feature = "route53")]
-    pub mod route53;
     #[cfg(feature = "gcloud")]
     pub mod gcloud;
+    #[cfg(feature = "local")]
+    pub mod local;
+    #[cfg(feature = "route53")]
+    pub mod route53;
 }
 
 pub use config::{
-    AcmeConfig, CloudflareToken, DirectoryUrl, GcloudServiceAccount, KeyDir,
-    Route53Credentials,
+    AcmeConfig, CloudflareToken, DirectoryUrl, GcloudServiceAccount, KeyDir, Route53Credentials,
 };
 pub use error::{AcmeError, AcmeResult};
 pub use manager::{CertificateHandoff, Manager, Mode, ProviderSelector};

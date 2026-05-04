@@ -68,9 +68,7 @@ pub async fn send_control_envelope(
 /// # Errors
 /// Returns [`NetError::Io`] on a truncated stream; [`NetError::WireDecode`]
 /// on a length-field overflow or postcard decode failure.
-pub async fn recv_control_envelope(
-    recv: &mut quinn::RecvStream,
-) -> Result<Envelope, NetError> {
+pub async fn recv_control_envelope(recv: &mut quinn::RecvStream) -> Result<Envelope, NetError> {
     use tokio::io::AsyncReadExt as _;
 
     // tokio AsyncReadExt::read_u32 → io::Error → NetError::Io directly
@@ -113,9 +111,7 @@ pub fn build_control_claims(now: Timestamp, nonce: [u8; 16]) -> Claims {
     // `Timestamp::saturating_add(SignedDuration)` clamps at `Timestamp::MAX`
     // and never errors (unlike the calendrical-Span overload), so an
     // unwrap-free expression is safe and surfaces the saturation semantic.
-    let not_after = now
-        .saturating_add(ttl)
-        .unwrap_or(jiff::Timestamp::MAX);
+    let not_after = now.saturating_add(ttl).unwrap_or(jiff::Timestamp::MAX);
     Claims {
         nonce,
         not_before: now,
@@ -188,8 +184,8 @@ mod tests {
     use super::*;
     use jiff::SignedDuration;
     use portal_crypto::{
-        Ed25519Signer, Ed25519Verifier, RelayDescriptor, ed25519_from_seed_for_test,
-        sign_envelope, verifying_key,
+        Ed25519Signer, Ed25519Verifier, RelayDescriptor, ed25519_from_seed_for_test, sign_envelope,
+        verifying_key,
     };
 
     fn fixed_now() -> Timestamp {
@@ -214,8 +210,7 @@ mod tests {
 
         let claims = build_control_claims(fixed_now(), [0xb6_u8; 16]);
         let payload = Bytes::from_static(b"lease-token-bytes");
-        let env =
-            sign_envelope::<RelayDescriptor>(claims, payload.clone(), &signer).unwrap();
+        let env = sign_envelope::<RelayDescriptor>(claims, payload.clone(), &signer).unwrap();
 
         let payload_back = verify_control_envelope(&env, &verifier, fixed_now()).unwrap();
         assert_eq!(payload_back.as_ref(), payload.as_ref());

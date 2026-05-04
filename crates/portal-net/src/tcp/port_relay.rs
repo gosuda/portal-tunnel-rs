@@ -39,11 +39,7 @@ impl TcpPortRelay {
     /// Build a new relay around `backhaul`. `identity_key` is for tracing
     /// correlation; `port` is the TCP port to bind in [`Self::start`].
     #[must_use]
-    pub fn new(
-        identity_key: CompactString,
-        port: u16,
-        backhaul: Arc<quinn::Connection>,
-    ) -> Self {
+    pub fn new(identity_key: CompactString, port: u16, backhaul: Arc<quinn::Connection>) -> Self {
         Self {
             identity_key,
             port,

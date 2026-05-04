@@ -122,10 +122,10 @@ impl PortAllocator {
             return;
         };
         let expires_at = now + inner.grace;
-        if let Some(prior) = inner.reserved.insert(
-            name,
-            Reservation { port, expires_at },
-        ) {
+        if let Some(prior) = inner
+            .reserved
+            .insert(name, Reservation { port, expires_at })
+        {
             // Lease had a prior different reservation; return THAT port to
             // the pool, mirroring Go's reservation-replace.
             if prior.port != port {
@@ -218,8 +218,7 @@ mod tests {
     #[tokio::test]
     async fn expired_reservation_is_cleaned_up_on_allocate() {
         // Use a tiny grace so the reservation expires quickly.
-        let allocator =
-            PortAllocator::new(9000, 9001, Duration::from_millis(10));
+        let allocator = PortAllocator::new(9000, 9001, Duration::from_millis(10));
         let p1 = allocator.allocate("alice").await.unwrap();
         allocator.release(p1).await;
         assert_eq!(allocator.reserved_count().await, 1);
@@ -227,7 +226,10 @@ mod tests {
         // Allocate for a DIFFERENT name. cleanup_expired must fire and
         // 9000 should land back in `available`.
         let p2 = allocator.allocate("bob").await.unwrap();
-        assert_eq!(p2, 9000, "expired reservation must release port back to pool");
+        assert_eq!(
+            p2, 9000,
+            "expired reservation must release port back to pool"
+        );
         assert_eq!(allocator.reserved_count().await, 0);
     }
 
@@ -247,6 +249,10 @@ mod tests {
         }
         ports.sort_unstable();
         ports.dedup();
-        assert_eq!(ports.len(), 100, "100 concurrent allocations must yield distinct ports");
+        assert_eq!(
+            ports.len(),
+            100,
+            "100 concurrent allocations must yield distinct ports"
+        );
     }
 }

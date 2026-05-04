@@ -125,12 +125,10 @@ pub struct DirectoryUrl(pub CompactString);
 
 impl DirectoryUrl {
     /// Let's Encrypt production directory.
-    pub const LE_PRODUCTION: &'static str =
-        "https://acme-v02.api.letsencrypt.org/directory";
+    pub const LE_PRODUCTION: &'static str = "https://acme-v02.api.letsencrypt.org/directory";
 
     /// Let's Encrypt staging directory (for tests).
-    pub const LE_STAGING: &'static str =
-        "https://acme-staging-v02.api.letsencrypt.org/directory";
+    pub const LE_STAGING: &'static str = "https://acme-staging-v02.api.letsencrypt.org/directory";
 
     /// Build a directory URL from a string slice.
     #[must_use]

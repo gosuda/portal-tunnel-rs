@@ -35,9 +35,7 @@ use std::sync::Arc;
 use clap::{ArgMatches, CommandFactory, FromArgMatches, Parser, Subcommand, parser::ValueSource};
 use compact_str::CompactString;
 use eyre::{Context as _, eyre};
-use portal_acme::{
-    AcmeConfig, DirectoryUrl, KeyDir, Manager as AcmeManager, ProviderSelector,
-};
+use portal_acme::{AcmeConfig, DirectoryUrl, KeyDir, Manager as AcmeManager, ProviderSelector};
 use portal_relay::Server;
 use tokio_util::sync::CancellationToken;
 
@@ -168,8 +166,7 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
         .build();
 
     let acme_mgr = Arc::new(
-        AcmeManager::new(acme_cfg, ProviderSelector::Local)
-            .context("construct ACME manager")?,
+        AcmeManager::new(acme_cfg, ProviderSelector::Local).context("construct ACME manager")?,
     );
     let handoff = acme_mgr
         .ensure_certificate()
@@ -222,9 +219,8 @@ fn install_signal_handler(cancel: CancellationToken) {
 async fn wait_for_shutdown_signal() {
     #[cfg(unix)]
     {
-        let sigterm_stream = tokio::signal::unix::signal(
-            tokio::signal::unix::SignalKind::terminate(),
-        );
+        let sigterm_stream =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate());
         match sigterm_stream {
             Ok(mut sigterm) => {
                 tokio::select! {

@@ -60,10 +60,7 @@ impl Endpoint {
                   the endpoint for the lifetime of the listener; passing by reference \
                   would invite caller misuse (re-using a key across endpoints)."
     )]
-    pub fn server(
-        addr: SocketAddr,
-        key: SecretBox<QuicIdentityKey>,
-    ) -> Result<Self, NetError> {
+    pub fn server(addr: SocketAddr, key: SecretBox<QuicIdentityKey>) -> Result<Self, NetError> {
         let (cert_der, priv_der) = self_signed_cert(&key)?;
         let mut rustls_cfg = rustls::ServerConfig::builder_with_provider(Arc::new(
             rustls::crypto::aws_lc_rs::default_provider(),
@@ -80,9 +77,8 @@ impl Endpoint {
         // Quinn requires the ServerConfig to be wrapped in `QuicServerConfig`
         // which validates that TLS 1.3 is enabled and an initial cipher suite
         // is available (AES-128-GCM-SHA256 is provided by aws-lc-rs).
-        let quic_server_cfg = QuicServerConfig::try_from(rustls_cfg).map_err(|e| {
-            NetError::Tls(rustls::Error::General(format!("quic server cfg: {e}")))
-        })?;
+        let quic_server_cfg = QuicServerConfig::try_from(rustls_cfg)
+            .map_err(|e| NetError::Tls(rustls::Error::General(format!("quic server cfg: {e}"))))?;
         let mut quinn_cfg = quinn::ServerConfig::with_crypto(Arc::new(quic_server_cfg));
         quinn_cfg.transport_config(Arc::new(default_transport_config()));
 
@@ -128,9 +124,8 @@ impl Endpoint {
         .with_custom_certificate_verifier(Arc::new(SpkiPinVerifier::new(pinned_relay_pubkey)))
         .with_no_client_auth();
         client_cfg.alpn_protocols = vec![ALPN.to_vec()];
-        let quic_client_cfg = QuicClientConfig::try_from(client_cfg).map_err(|e| {
-            NetError::Tls(rustls::Error::General(format!("quic client cfg: {e}")))
-        })?;
+        let quic_client_cfg = QuicClientConfig::try_from(client_cfg)
+            .map_err(|e| NetError::Tls(rustls::Error::General(format!("quic client cfg: {e}"))))?;
         let mut quinn_cfg = quinn::ClientConfig::new(Arc::new(quic_client_cfg));
         quinn_cfg.transport_config(Arc::new(default_transport_config()));
 
@@ -210,7 +205,6 @@ impl Endpoint {
             .connect(addr, server_name)
             .map_err(|e| NetError::Connect(e.to_string()))
     }
-
 }
 
 /// Default transport config: 15s keep-alive, 60s idle timeout, 16 max bidi
@@ -260,18 +254,18 @@ pub(crate) fn self_signed_cert(
         .map_err(|e| NetError::Identity(format!("rcgen keypair from pkcs8: {e}")))?;
     let mut params = rcgen::CertificateParams::new(Vec::<String>::new())
         .map_err(|e| NetError::Identity(format!("rcgen params: {e}")))?;
-    let pub_hex_short = sk
-        .verifying_key()
-        .to_bytes()
-        .iter()
-        .take(8)
-        .fold(String::new(), |mut acc, b| {
-            use std::fmt::Write as _;
-            // `write!` on `String` is infallible; the discarded result is the
-            // documented contract on the `core::fmt::Write` impl.
-            let _ = write!(acc, "{b:02x}");
-            acc
-        });
+    let pub_hex_short =
+        sk.verifying_key()
+            .to_bytes()
+            .iter()
+            .take(8)
+            .fold(String::new(), |mut acc, b| {
+                use std::fmt::Write as _;
+                // `write!` on `String` is infallible; the discarded result is the
+                // documented contract on the `core::fmt::Write` impl.
+                let _ = write!(acc, "{b:02x}");
+                acc
+            });
     params.distinguished_name = rcgen::DistinguishedName::new();
     params.distinguished_name.push(
         rcgen::DnType::CommonName,
@@ -330,10 +324,7 @@ mod tests {
         let endpoint = Endpoint::server("127.0.0.1:0".parse().unwrap(), key1).unwrap();
         let bound_port = endpoint.local_addr().unwrap().port();
         let key2 = generate_quic_identity_key();
-        let result = Endpoint::server(
-            format!("127.0.0.1:{bound_port}").parse().unwrap(),
-            key2,
-        );
+        let result = Endpoint::server(format!("127.0.0.1:{bound_port}").parse().unwrap(), key2);
         assert!(matches!(
             result,
             Err(NetError::BindFailed(_) | NetError::Io(_)),

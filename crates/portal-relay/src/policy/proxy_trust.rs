@@ -34,7 +34,10 @@ impl ProxyTrust {
     /// Construct a trust list from a vector of exact upstream IPs.
     #[must_use]
     pub fn from_trusted_ips(trusted: Vec<IpAddr>) -> Self {
-        let canonical: Vec<IpAddr> = trusted.into_iter().map(portal_net::canonicalize_ip).collect();
+        let canonical: Vec<IpAddr> = trusted
+            .into_iter()
+            .map(portal_net::canonicalize_ip)
+            .collect();
         Self {
             trusted: Arc::new(canonical),
         }

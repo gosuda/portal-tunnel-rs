@@ -215,7 +215,7 @@ pub type ApiResult<T> = Result<Json<ApiDataEnvelope<T>>, ApiError>;
 #[expect(
     clippy::double_must_use,
     reason = "wrapper-fn boundary contract: `Json<T>` is `#[must_use]` \
-              but the handler-return shape re-affirms it here",
+              but the handler-return shape re-affirms it here"
 )]
 pub const fn ok<T: Serialize>(value: T) -> Json<ApiDataEnvelope<T>> {
     Json(ApiDataEnvelope { data: value })

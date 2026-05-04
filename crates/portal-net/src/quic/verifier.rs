@@ -171,8 +171,7 @@ mod tests {
         let (cert_der, _priv_der) = self_signed_cert(&key).unwrap();
         let verifier = SpkiPinVerifier::new(pinned);
         let server_name = ServerName::try_from("any-cosmetic-name.invalid").unwrap();
-        let result =
-            verifier.verify_server_cert(&cert_der, &[], &server_name, &[], now_unix());
+        let result = verifier.verify_server_cert(&cert_der, &[], &server_name, &[], now_unix());
         assert!(
             result.is_ok(),
             "verifier should accept matching pubkey: {result:?}",
@@ -187,8 +186,7 @@ mod tests {
         let (cert_der, _priv_der) = self_signed_cert(&server_key).unwrap();
         let verifier = SpkiPinVerifier::new(pinned);
         let server_name = ServerName::try_from("any.invalid").unwrap();
-        let result =
-            verifier.verify_server_cert(&cert_der, &[], &server_name, &[], now_unix());
+        let result = verifier.verify_server_cert(&cert_der, &[], &server_name, &[], now_unix());
         assert!(
             matches!(result, Err(TlsError::InvalidCertificate(_))),
             "verifier should reject mismatched pubkey: {result:?}",
@@ -249,8 +247,7 @@ mod tests {
         let key = generate_quic_identity_key();
         let pinned = quic_identity_verifying_key(&key);
         let (cert_der, _priv_der) = self_signed_cert(&key).unwrap();
-        let mut cert =
-            x509_cert::Certificate::from_der(cert_der.as_ref()).unwrap();
+        let mut cert = x509_cert::Certificate::from_der(cert_der.as_ref()).unwrap();
         // Mutate the SPKI algorithm OID to X25519 (1.3.101.110). The
         // resulting cert is structurally well-formed but its claimed key
         // type does not match the actual key bytes.
@@ -261,13 +258,7 @@ mod tests {
 
         let verifier = SpkiPinVerifier::new(pinned);
         let server_name = ServerName::try_from("any.invalid").unwrap();
-        let result = verifier.verify_server_cert(
-            &mutated_cert,
-            &[],
-            &server_name,
-            &[],
-            now_unix(),
-        );
+        let result = verifier.verify_server_cert(&mutated_cert, &[], &server_name, &[], now_unix());
         assert!(
             matches!(
                 result,

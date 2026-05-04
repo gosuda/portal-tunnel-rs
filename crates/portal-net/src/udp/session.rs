@@ -52,12 +52,13 @@ impl DatagramSendHandle {
                           datagram-send cannot meaningfully recover so propagate \
                           the panic to surface the upstream bug."
             )]
-            let guard = self.inner.lock().expect("DatagramSendHandle mutex poisoned");
+            let guard = self
+                .inner
+                .lock()
+                .expect("DatagramSendHandle mutex poisoned");
             guard
                 .as_ref()
-                .ok_or_else(|| {
-                    NetError::Quic("no connection bound for datagram send".to_owned())
-                })?
+                .ok_or_else(|| NetError::Quic("no connection bound for datagram send".to_owned()))?
                 .clone()
         };
         conn.send_datagram(Bytes::from(bytes))
@@ -125,7 +126,10 @@ impl DatagramSession {
                 clippy::expect_used,
                 reason = "Mutex poisoning indicates a panic in another holder; bind cannot recover."
             )]
-            let mut guard = self.conn.lock().expect("DatagramSession conn mutex poisoned");
+            let mut guard = self
+                .conn
+                .lock()
+                .expect("DatagramSession conn mutex poisoned");
             if let Some(old) = guard.replace(conn.clone()) {
                 // `quinn::Connection::close` is non-blocking; safe to call
                 // under the std mutex.
@@ -141,7 +145,14 @@ impl DatagramSession {
         let drop_full = self.drop_full;
 
         self.tasks.spawn(async move {
-            recv_loop(conn_clone, tx, drop_full, parent_cancel, bind_cancel_inner.clone()).await;
+            recv_loop(
+                conn_clone,
+                tx,
+                drop_full,
+                parent_cancel,
+                bind_cancel_inner.clone(),
+            )
+            .await;
             bind_cancel_inner.cancel();
         });
         Ok(bind_cancel)
@@ -163,7 +174,10 @@ impl DatagramSession {
             clippy::expect_used,
             reason = "Mutex poisoning indicates a panic in another holder; stop cannot recover."
         )]
-        let mut guard = self.conn.lock().expect("DatagramSession conn mutex poisoned");
+        let mut guard = self
+            .conn
+            .lock()
+            .expect("DatagramSession conn mutex poisoned");
         if let Some(conn) = guard.take() {
             conn.close(0u32.into(), b"session stopped");
         }

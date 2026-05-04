@@ -63,7 +63,9 @@ async fn tcp_port_relay_starts_and_shuts_down_against_live_quic_backhaul() {
     });
 
     // 3. Client-side: connect.
-    let connecting = client.connect(server_addr, "tcp-relay-test.invalid").unwrap();
+    let connecting = client
+        .connect(server_addr, "tcp-relay-test.invalid")
+        .unwrap();
     let client_conn = tokio::time::timeout(Duration::from_secs(5), connecting)
         .await
         .expect("client connect within 5s")
