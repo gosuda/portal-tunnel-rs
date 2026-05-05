@@ -41,7 +41,13 @@
 //!   [`config::RelayServerConfig`] and [`config::RuntimeConfig`]
 //!   also landed: both reject unknown JSON keys, with
 //!   [`config::RuntimeConfig`] additionally defaulting omitted
-//!   fields.
+//!   fields. The opt-in file-watcher
+//!   ([`reload::file_watch::watch_runtime_config`], behind
+//!   `cfg(feature = "config_file_watch")`) also landed: a
+//!   `notify`-backed task converts filesystem-write events into
+//!   [`reload::ReloadHandle::reload`] calls. The HTTP reload
+//!   endpoint (`POST /v1/admin/config/reload`) and figment-driven
+//!   loader remain B8 territory.
 //! - **Batches 8 + 10 fully pending**: hot-reload consumer wiring +
 //!   keyless I/O wiring; Admin View + R15 Status TUI.
 //!
@@ -81,5 +87,7 @@ pub mod tui;
 
 pub use config::{RelayServerConfig, RuntimeConfig};
 pub use error::{RelayError, RelayResult};
+#[cfg(feature = "config_file_watch")]
+pub use reload::file_watch::{DEFAULT_DEBOUNCE, FileWatchError, watch_runtime_config};
 pub use reload::{ReloadError, ReloadHandle};
 pub use server::{JANITOR_INTERVAL, LifecyclePhase, Server, ServerStatus};

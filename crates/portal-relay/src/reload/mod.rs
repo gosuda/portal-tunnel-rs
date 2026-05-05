@@ -24,6 +24,9 @@
 //! follow-ups land, the handle is a working primitive without
 //! consumers.
 
+#[cfg(feature = "config_file_watch")]
+pub mod file_watch;
+
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;

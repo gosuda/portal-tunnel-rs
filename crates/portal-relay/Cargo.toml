@@ -88,6 +88,18 @@ repository.workspace = true
 #   `apply_peers` async unnecessarily).
 # - rand_core (workspace pin v0.6) — `OsRng` for the `with_random_key`
 #   construction-site path (unit tests + the U7 first-run init).
+#
+# Phase 5 U13 follow-up (file-watcher behind `config_file_watch`) adds
+# the OPT-IN deps `notify` + `notify-debouncer-full`. Both are
+# `optional = true` and gated on the `config_file_watch` feature so
+# the default-features build does NOT pull either crate; the dep
+# matrix stays narrow in v0.1 per the U13 plan.
+[features]
+default = []
+# Enables `reload::file_watch::watch_runtime_config` and pulls the
+# `notify` + `notify-debouncer-full` filesystem-event backend.
+config_file_watch = ["dep:notify", "dep:notify-debouncer-full"]
+
 [dependencies]
 arc-swap = { workspace = true }
 axum = { workspace = true }
@@ -97,6 +109,8 @@ governor = { workspace = true }
 http = { workspace = true }
 hyper-util = { workspace = true }
 jiff = { workspace = true }
+notify = { workspace = true, optional = true }
+notify-debouncer-full = { workspace = true, optional = true }
 papaya = { workspace = true }
 parking_lot = { workspace = true }
 pkcs1 = { workspace = true }

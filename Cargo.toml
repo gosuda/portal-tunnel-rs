@@ -187,6 +187,18 @@ google-cloud-dns-v1 = "1.3"
 google-cloud-auth = "1"
 google-cloud-gax = "1"
 
+# Filesystem notification (Phase 5 U13 follow-up — `portal-relay`'s
+# opt-in `config_file_watch` feature). `notify` is the cross-platform
+# event-source primitive (inotify on Linux, FSEvents on macOS,
+# ReadDirectoryChangesW on Windows); `notify-debouncer-full` batches
+# the platform-noisy event stream into a single quiescent burst per
+# operator-write so the watcher reads the JSON only after the writer
+# has finished. Default-features build does NOT pull either crate;
+# they're declared at workspace level so the per-member optional dep
+# can inherit the canonical pin.
+notify = "8"
+notify-debouncer-full = "0.6"
+
 # Overlay (Phase 6b)
 smoltcp = { version = "0.13", default-features = false }
 brotli = "8"
