@@ -299,6 +299,48 @@ impl Server {
         }
     }
 
+    /// Hand the assembled admin [`axum::Router`] off for listener
+    /// mounting. Canonical orchestrator-to-router bridge: future
+    /// HTTPS listener wiring (admin trust-boundary) calls through
+    /// this single entry point rather than reaching for
+    /// [`Self::admin_state`] + [`crate::api::build_admin_router`]
+    /// independently at every mount site.
+    ///
+    /// # Lifecycle
+    ///
+    /// Callable at any time. [`Self::admin_state`] is a cheap
+    /// reader (cloning `LeaseRegistry`, `Arc<PolicyRuntime>`, and
+    /// the optional `Arc<ReloadHandle>`); [`crate::api::build_admin_router`]
+    /// is `axum::Router::new().route(...).with_state(...)` shape —
+    /// no I/O, no state-dependent allocation. Calling before
+    /// [`Self::start`] or after [`Self::shutdown`] is fine.
+    ///
+    /// # Endpoint contract
+    ///
+    /// The returned router responds to all three current admin
+    /// endpoints regardless of whether [`Self::with_reload_handle`]
+    /// was invoked:
+    ///
+    /// - `POST /v1/admin/config/reload` — surfaces 503
+    ///   `FeatureUnavailable` when no reload handle is attached.
+    /// - `GET  /v1/admin/config/current` — surfaces 503
+    ///   `FeatureUnavailable` when no reload handle is attached.
+    /// - `GET  /v1/admin/health` — stateless liveness; always 200.
+    ///
+    /// `Server::new()` (no `with_reload_handle`) therefore yields a
+    /// router that still serves the stateless endpoint while the
+    /// stateful endpoints surface a documented 503.
+    #[must_use]
+    #[expect(
+        clippy::double_must_use,
+        reason = "wrapper-fn boundary contract: `axum::Router` is `#[must_use]` \
+                  but the orchestrator-to-router bridge re-affirms it here, \
+                  matching the discipline on `crate::api::build_admin_router`"
+    )]
+    pub fn admin_router(&self) -> axum::Router {
+        crate::api::build_admin_router(self.admin_state())
+    }
+
     /// Spawn the janitor task. Only valid from the
     /// [`LifecyclePhase::Stopped`] state.
     ///
@@ -841,6 +883,31 @@ mod tests {
         let server = Server::new();
         assert!(server.reload_handle().is_none());
         assert!(server.admin_state().reload.is_none());
+    }
+
+    #[tokio::test]
+    async fn admin_router_returns_router_when_handle_attached() {
+        // Pin the API surface: `admin_router()` returns
+        // `axum::Router` when a reload handle is attached. Runtime
+        // dispatch behavior is covered by the chain integration test
+        // (`tests/server_admin_router_chain.rs`); this unit test pins
+        // the type-level contract.
+        let handle = Arc::new(ReloadHandle::new(
+            baseline_bootstrap(),
+            crate::config::RuntimeConfig::default(),
+        ));
+        let server = Server::new().with_reload_handle(handle);
+        let _: axum::Router = server.admin_router();
+    }
+
+    #[tokio::test]
+    async fn admin_router_returns_router_when_no_handle() {
+        // `admin_router()` works regardless of `with_reload_handle`
+        // attachment: `Server::new()` (reload = None) still yields a
+        // valid router. Runtime 503 behavior on the stateful
+        // endpoints is covered by the chain integration test.
+        let server = Server::new();
+        let _: axum::Router = server.admin_router();
     }
 
     #[tokio::test]

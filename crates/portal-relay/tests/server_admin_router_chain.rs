@@ -2,14 +2,17 @@
 //! chain end-to-end:
 //!
 //! `Server::with_components` → `Server::with_reload_handle` →
-//! `Server::admin_state()` → `build_admin_router` → handler.
+//! `Server::admin_router()` → handler.
 //!
 //! The single-endpoint test files (`admin_reload_endpoint.rs`,
 //! `admin_get_current_config_endpoint.rs`) exercise each handler
 //! against a hand-rolled `AdminState`. This file exercises the
-//! orchestrator-built `AdminState` so a future refactor that
-//! breaks the `Server` → `AdminState` bridge cannot pass with the
-//! per-endpoint tests still green.
+//! orchestrator-assembled router via `Server::admin_router()` so a
+//! future refactor that breaks the `Server` → router bridge cannot
+//! pass with the per-endpoint tests still green. Calling
+//! `admin_router()` (rather than `build_admin_router(admin_state())`)
+//! also exercises the canonical orchestrator-to-router bridge
+//! through real handler dispatch.
 
 #![expect(
     clippy::expect_used,
@@ -20,7 +23,6 @@ use std::sync::Arc;
 
 use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, StatusCode, header};
-use portal_relay::api::build_admin_router;
 use portal_relay::{ReloadHandle, RuntimeConfig, Server};
 use tower::ServiceExt as _;
 
@@ -44,7 +46,7 @@ async fn admin_router_built_from_server_handles_reload_post() {
     let (server, handle) = server_with_handle();
     assert_eq!(handle.current().bps_per_identity, 0);
 
-    let router = build_admin_router(server.admin_state());
+    let router = server.admin_router();
     let request = Request::builder()
         .method(Method::POST)
         .uri("/v1/admin/config/reload")
@@ -71,7 +73,7 @@ async fn admin_router_built_from_server_handles_current_get() {
         })
         .expect("reload swap");
 
-    let router = build_admin_router(server.admin_state());
+    let router = server.admin_router();
     let request = Request::builder()
         .method(Method::GET)
         .uri("/v1/admin/config/current")
@@ -101,7 +103,7 @@ async fn admin_router_built_from_default_server_returns_503_for_reload() {
     // that silently injects a default handle into Server::new() cannot
     // pass the chain tests.
     let server = Server::new();
-    let router = build_admin_router(server.admin_state());
+    let router = server.admin_router();
     let request = Request::builder()
         .method(Method::POST)
         .uri("/v1/admin/config/reload")
