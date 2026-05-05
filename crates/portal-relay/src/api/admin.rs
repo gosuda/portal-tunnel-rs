@@ -146,3 +146,52 @@ pub async fn health_handler() -> ApiResult<HealthBody> {
         version: env!("CARGO_PKG_VERSION"),
     }))
 }
+
+/// Wire body for `GET /v1/admin/policy/snapshot`.
+///
+/// Carries the effective policy state derived from the attached
+/// [`crate::policy::PolicyRuntime`]: the configured per-identity
+/// BPS cap (`None` if open / no cap) and the operator-managed IP
+/// ban-list size.
+///
+/// Marked `#[non_exhaustive]` so future fields (rate-limit hit
+/// counts, dynamic-ban count, reputation-engine snapshot
+/// counters) can land without breaking the wire shape.
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct PolicySnapshotBody {
+    /// Configured per-identity bytes-per-second cap from the
+    /// reload-snapshot. `None` means no cap is configured (the
+    /// runtime value is `0`, the documented sentinel for "open"),
+    /// or no [`crate::reload::ReloadHandle`] is attached.
+    pub bps_cap_per_identity: Option<u64>,
+    /// Number of operator-managed IP bans in the most recent
+    /// reload snapshot. Counts ONLY
+    /// [`crate::config::RuntimeConfig::ip_ban_list`]; dynamic
+    /// in-memory bans set via
+    /// [`crate::policy::ip_filter::IpFilter::ban`] are NOT
+    /// included (they have a separate observability path).
+    pub ip_ban_count: usize,
+}
+
+/// `GET /v1/admin/policy/snapshot` — derived-policy observability.
+///
+/// Reads from the [`crate::policy::PolicyRuntime`] held by
+/// [`AdminState`] (which itself reads from the optionally-attached
+/// reload snapshot). Returns 200 OK with sentinel values
+/// (`bps_cap_per_identity: None`, `ip_ban_count: 0`) when no
+/// reload handle is attached — same surface contract as a brand-
+/// new dev relay. Trust boundary inherits from the module rustdoc.
+///
+/// # Errors
+///
+/// Infallible. Signature returns [`ApiResult`] for envelope
+/// uniformity with the rest of the admin surface.
+pub async fn policy_snapshot_handler(
+    State(state): State<AdminState>,
+) -> ApiResult<PolicySnapshotBody> {
+    Ok(ok(PolicySnapshotBody {
+        bps_cap_per_identity: state.policy.bps_cap_per_identity(),
+        ip_ban_count: state.policy.ip_ban_count(),
+    }))
+}
