@@ -1,8 +1,12 @@
 # Workspace cargo config — task aliases + sparse registry.
 #
-# cargo-vet supply-chain audit setup (supply-chain/audits.toml +
-# supply-chain/config.toml) is deferred to Phase 5 per scope-guardian #2:
-# the supply chain at Phase 0 bootstrap has zero crates of our own to gate.
+# cargo-vet supply-chain audit harness landed in Phase 5 Batch 1
+# (commit 90e9fb7); audits + config live under `supply-chain/`. The
+# `cargo vet check` gate runs as warn-only inside `cargo xtask ci`
+# during Phase 5 per the cargo-vet incremental-adoption posture and
+# becomes a hard CI gate in Phase 7 release work. See
+# CONTRIBUTING.md §`Certifying dependencies` for the per-PR
+# `cargo vet certify` workflow.
 
 [registries.crates-io]
 protocol = "sparse"
