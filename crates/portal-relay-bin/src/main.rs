@@ -41,13 +41,13 @@
 
 // Phase 7 U8.11 install-script render API — public surface that
 // the admin router's forthcoming `/__install.sh` and
-// `/__install.ps1` handlers consume. The admin router carries four
-// route handlers today (config/reload, config/current, health,
-// policy/snapshot — see `portal_relay::api::admin`) but the
-// installer routes are not yet plumbed in. The installer module
-// ships separately so the rendering logic + Go-parity tests are
-// reviewable in isolation; the route wire-up is one-line per route
-// once `/__install.{sh,ps1}` lands as a follow-up.
+// `/__install.ps1` handlers consume. The admin router carries five
+// route handlers today (see `portal_relay::api::admin` for the
+// per-endpoint contracts) but the installer routes are not yet
+// plumbed in. The installer module ships separately so the
+// rendering logic + Go-parity tests are reviewable in isolation;
+// the route wire-up is one-line per route once
+// `/__install.{sh,ps1}` lands as a follow-up.
 #[expect(
     dead_code,
     reason = "installer route handlers are not yet wired into the \
