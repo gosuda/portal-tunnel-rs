@@ -61,6 +61,7 @@ pub struct ReloadAcceptedBody {
 /// - [`ApiErrorCode::Internal`] (500) — the underlying reload
 ///   returned an error. Unreachable in practice given the Hoare
 ///   invariant above; the path exists for completeness.
+#[tracing::instrument(name = "admin.reload", skip_all)]
 pub async fn reload_handler(
     State(state): State<AdminState>,
     body: Result<Json<RuntimeConfig>, JsonRejection>,
@@ -101,6 +102,7 @@ pub async fn reload_handler(
 ///
 /// - [`ApiErrorCode::FeatureUnavailable`] (503) — `AdminState.reload`
 ///   is `None` (operator built without an attached reload handle).
+#[tracing::instrument(name = "admin.config_current", skip_all)]
 pub async fn get_current_config_handler(
     State(state): State<AdminState>,
 ) -> ApiResult<RuntimeConfig> {
@@ -141,6 +143,7 @@ pub struct HealthBody {
 ///
 /// Infallible. Signature returns [`ApiResult`] for envelope
 /// uniformity with the rest of the admin surface.
+#[tracing::instrument(name = "admin.health")]
 pub async fn health_handler() -> ApiResult<HealthBody> {
     Ok(ok(HealthBody {
         version: env!("CARGO_PKG_VERSION"),
@@ -187,6 +190,7 @@ pub struct PolicySnapshotBody {
 ///
 /// Infallible. Signature returns [`ApiResult`] for envelope
 /// uniformity with the rest of the admin surface.
+#[tracing::instrument(name = "admin.policy_snapshot", skip_all)]
 pub async fn policy_snapshot_handler(
     State(state): State<AdminState>,
 ) -> ApiResult<PolicySnapshotBody> {
