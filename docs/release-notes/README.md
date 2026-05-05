@@ -18,14 +18,15 @@ Pre-v1.0 (current state — manual): release tags are created manually
 by the maintainer who runs the release. That maintainer manually
 copies / edits each template into the GitHub release body via the
 GitHub UI or `gh release create` flow. The `cargo release` post-tag
-hook is configured but unreachable until the v1.0 ADR flips
-`publish = false`, `push = false`, `tag = false` in `release.toml`.
+hook is configured but unreachable while `release.toml` carries
+`publish = false`, `push = false`, `tag = false` (committed at
+`c44fa73`).
 
-v1.0+ (future — automated): when the v1.0 ADR flips the cargo-release
-disable flags to `true`, the post-tag hook becomes reachable and is
-wired to inject the templates into the GitHub release body
-automatically (plus the git-cliff-generated changelog section for the
-tag's commit range).
+v1.0+ (future — automated): a v1.0 ADR will flip those three flags
+from `false` to `true`. When that lands, the post-tag hook becomes
+reachable and is wired to inject the templates into the GitHub
+release body automatically (plus the git-cliff-generated changelog
+section for the tag's commit range).
 
 The full release-engineering flow (cross-compile matrix, ldd smoke
 contract, install-script SHA256 verification, Docker image push) is
@@ -41,8 +42,9 @@ documented in [`docs/release-engineering.md`](../release-engineering.md).
 - **Trigger criteria are required for every v0.2-deferred item.**
   Each "deferred to v0.2" row names the explicit promotion trigger
   (date / evidence threshold / ship-event) per the Decision Stability
-  clause in PLAN.md. A deferral without a trigger is a CI / review
-  failure.
+  clause in PLAN.md. Enforcement is reviewer-discipline only — there
+  is no dedicated CI gate; reviewers reject a deferral without a
+  trigger by citing the PLAN.md clause directly.
 - **Cross-references are absolute paths from this directory** (e.g.,
   `../threat-model.md`, `../../PLAN.md`) so the rendered GitHub
   release body links back to the canonical source-of-truth docs.
