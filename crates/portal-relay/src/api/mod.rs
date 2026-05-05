@@ -1,10 +1,11 @@
 //! HTTPS API surfaces — admin / sdk / discovery axum routers.
 //!
-//! Phase 5 B6 lands the envelope shape, the typed `ApiError` enum,
-//! and per-surface state types (`AdminState`, `SdkState`,
-//! `DiscoveryState`). Three empty router constructors are exported
-//! so the eventual server orchestrator (Phase 5 B9) can mount them
-//! before the actual handlers land in subsequent batches.
+//! Phase 5 lands the envelope shape, the typed `ApiError` enum, and
+//! per-surface state types (`AdminState`, `SdkState`,
+//! `DiscoveryState`) plus three empty router constructors so the
+//! server orchestrator can mount them. The actual handlers register
+//! in follow-up commits. See this crate's `lib.rs` for current
+//! Phase 5 status.
 
 pub mod envelope;
 pub mod state;
@@ -14,8 +15,8 @@ pub use envelope::{
 };
 pub use state::{AdminState, DiscoveryState, SdkState};
 
-/// Build the SDK trust-boundary router. Phase 5 B6 returns an empty
-/// router; Phase 5 B7 registers handlers under `/v1/sdk/*`.
+/// Build the SDK trust-boundary router. Returns an empty router
+/// today; handlers register under `/v1/sdk/*` in a follow-up commit.
 #[must_use]
 #[expect(
     clippy::double_must_use,
@@ -26,9 +27,9 @@ pub fn build_sdk_router(state: SdkState) -> axum::Router {
     axum::Router::new().with_state(state)
 }
 
-/// Build the admin trust-boundary router. Phase 5 B6 returns an
-/// empty router; Phase 5 B8 registers handlers under `/v1/admin/*`
-/// + `/metrics`.
+/// Build the admin trust-boundary router. Returns an empty router
+/// today; handlers register under `/v1/admin/*` + `/metrics` in a
+/// follow-up commit.
 #[must_use]
 #[expect(
     clippy::double_must_use,
@@ -39,8 +40,9 @@ pub fn build_admin_router(state: AdminState) -> axum::Router {
     axum::Router::new().with_state(state)
 }
 
-/// Build the discovery trust-boundary router. Phase 5 B6 returns an
-/// empty router; Phase 5 B8 registers handlers under `/v1/discovery`.
+/// Build the discovery trust-boundary router. Returns an empty
+/// router today; handlers register under `/v1/discovery` in a
+/// follow-up commit.
 #[must_use]
 #[expect(
     clippy::double_must_use,
