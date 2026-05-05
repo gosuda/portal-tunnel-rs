@@ -415,8 +415,8 @@ async fn drain_task(
 
 /// Janitor loop body: every [`JANITOR_INTERVAL`] tick, sweep the
 /// registry for expired leases. The `cleanup_expired(now)` return
-/// value is currently unused; Phase 5 B7 (R10 reputation) wires it
-/// to a fan-out audit channel for `lease.expire` events.
+/// value is currently unused; a follow-up wires it to a fan-out
+/// audit channel for `lease.expire` events.
 async fn janitor_loop(leases: LeaseRegistry, cancel: CancellationToken) {
     let mut ticker = tokio::time::interval(JANITOR_INTERVAL);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);

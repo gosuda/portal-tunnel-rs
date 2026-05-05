@@ -171,7 +171,7 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
     // 1. Build the ACME config + manager (local-mode only — see
     //    `reject_acme_flags`). The directory URL + contact email
     //    fields exist on `AcmeConfig` for forward-compat with the
-    //    Phase 4 B3-B5 wiring; we plug in safe placeholders.
+    //    eventual ACME wiring; we plug in safe placeholders.
     let key_dir = KeyDir::new(args.state_dir.join("tls"));
     let directory_url = DirectoryUrl::new(DirectoryUrl::LE_STAGING);
     let contact_email = CompactString::from("operator@example.invalid");
