@@ -514,7 +514,7 @@ impl ReputationEngine {
     /// signal would feed a negative weight).
     ///
     /// `signal_kind` is captured in the tracing span emitted by this
-    /// function (see [`tracing::instrument`] attribute below). The
+    /// function (see [`macro@tracing::instrument`] attribute below). The
     /// per-signal-kind WEIGHT policy (different default weights for
     /// honeypot vs rate-limit vs blocked-request) remains a follow-up;
     /// today the caller passes the weight verbatim.

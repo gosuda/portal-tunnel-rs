@@ -111,7 +111,10 @@ pub const MAX_TRACKED_SUBJECTS: usize = 4096;
 
 /// A keyless signing key registered against a stable `key_id`.
 ///
-/// Stored value type for [`KeylessPolicy::known_keys`].  Carries:
+/// Stored value type for the `known_keys` map inside
+/// [`KeylessPolicy`] (the field is `pub(crate)`-internal; the public
+/// surface is the constructor + [`KeylessPolicy::register_key`] /
+/// [`KeylessPolicy::known_key`] methods).  Carries:
 ///
 /// - `algorithm`: the rustls `SignatureAlgorithm` advertised by the
 ///   loaded key (RSA / ECDSA / …).  Cached so the scheme-match

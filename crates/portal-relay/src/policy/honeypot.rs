@@ -5,7 +5,7 @@
 //! signatures.  When a request path matches a configured honeypot
 //! pattern, the listener pipeline calls
 //! [`crate::policy::ReputationEngine::record_signal`] with
-//! [`SignalKind::HoneypotHit`] and the per-signal weight from
+//! [`crate::policy::SignalKind::HoneypotHit`] and the per-signal weight from
 //! ADR-0007 (default 25.0).  Four honeypot hits in a 24 h decay window
 //! cross [`crate::policy::REPUTATION_BLOCK_THRESHOLD`] and any
 //! subsequent request from that identity returns

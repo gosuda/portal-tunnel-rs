@@ -52,10 +52,11 @@ pub enum OverlayError {
     /// before the peer enters the routing table.
     ///
     /// Phase 6b/B U6 — emitted by
-    /// [`crate::overlay::wg_device::DefguardAdapter::apply_peers`] when
-    /// the supplied [`crate::overlay::wg_device::PeerConfig`] fails
-    /// pre-flight validation. The routing table is unchanged on this
-    /// error (atomic-swap discipline — no partial peer-set updates).
+    /// [`crate::overlay::wg_device::WgDevice::apply_peers`] (the trait
+    /// method that `DefguardAdapter` implements) when the supplied
+    /// [`crate::overlay::wg_device::PeerConfig`] fails pre-flight
+    /// validation. The routing table is unchanged on this error
+    /// (atomic-swap discipline — no partial peer-set updates).
     #[error("peer config: {0}")]
     PeerConfig(String),
 

@@ -51,9 +51,9 @@
 //!
 //! ## Zeroization
 //!
-//! The DER body inside [`KeyMaterial`] is wrapped in
-//! [`zeroize::Zeroizing<Vec<u8>>`] so the secret bytes are wiped when
-//! the [`secrecy::SecretBox`] drops. [`KeyMaterial`]'s own
+//! The DER body inside `KeyMaterial` (the `pub(crate)` enum below) is
+//! wrapped in [`zeroize::Zeroizing<Vec<u8>>`] so the secret bytes are
+//! wiped when the [`secrecy::SecretBox`] drops. `KeyMaterial`'s own
 //! [`zeroize::Zeroize`] impl forwards to the inner `Zeroizing` field —
 //! `SecretBox<T>` requires `T: Zeroize`.
 //!

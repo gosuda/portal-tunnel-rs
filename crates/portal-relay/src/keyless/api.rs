@@ -150,7 +150,8 @@ pub struct SubjectExtension(pub CompactString);
 /// Construct the keyless mTLS sign router.
 ///
 /// Routes:
-/// - `POST` [`KEYLESS_SIGN_PATH`] → [`sign_handler`].
+/// - `POST` [`KEYLESS_SIGN_PATH`] → `sign_handler` (private; see
+///   `keyless::api`'s sole `POST` handler).
 ///
 /// The router carries [`KeylessApiState`] as its state; the caller
 /// owns the lifecycle of the [`KeylessPolicy`] and the [`Bridge`].
