@@ -36,7 +36,9 @@
 //!   SIGHUP / admin-api reload run-loop **trigger** that calls
 //!   `swap_config` on a config-file change remains B8 territory. The
 //!   workspace-level [`reload::ReloadHandle`] type-level scaffolding
-//!   (Phase 5 U13) landed; consumer wiring remains B8 territory.
+//!   (Phase 5 U13) landed. [`policy::PolicyRuntime`] is the first
+//!   consumer wired through the snapshot. Remaining consumer
+//!   wiring stays B8 territory.
 //!   `serde::Serialize` + `serde::Deserialize` derives on
 //!   [`config::RelayServerConfig`] and [`config::RuntimeConfig`]
 //!   also landed: both reject unknown JSON keys, with
