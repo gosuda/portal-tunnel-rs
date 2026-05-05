@@ -151,7 +151,7 @@ Constant name in code: `MITM_PROBE_LABEL`. Version `v2` tracks protocol generati
 
 ## `ReputationDelta` (R10 v0.2 reservation)
 
-Wire type includes `identity_pubkey`, `score_delta`, `decay_window`, `reason_code: u16`, `signed_by_relay_pubkey`. **v0.1:** type + codec + limit exist; **no emission** on the wire — CI grep gate forbids v0.1 callers in `portal-relay`, `portal-net`, `portal-sdk`.
+Wire type includes `identity_pubkey: [u8; 32]`, `score_delta: i32`, `decay_window_secs: u64`, `reason_code: ReasonCode` (a `u16` newtype, opaque until Phase 5 assigns variants), `signed_by_relay_pubkey: [u8; 32]`. **v0.1:** type + codec + limit exist; **no emission** on the wire — the CI grep gate (`.github/workflows/ci.yml`, `wire-protocol-gates` job, "v0.1 crates must not construct ReputationDelta on the wire" step) forbids `ReputationDelta::new` and `ReputationDelta { ` in `portal-relay`, `portal-net`, `portal-sdk`, `portal-cli`, `portal-relay-bin`, and `portal-demo`.
 
 ---
 
