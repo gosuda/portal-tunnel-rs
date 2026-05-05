@@ -76,10 +76,14 @@ clause in `AGENTS.md`.
 
 ## Phase posture
 
-The roadmap (`port_go_to_rust_greenfield_383a2dc9.plan.md` in the local
-plans directory) sequences work into 8 phases. Phase 0 (this commit set)
-ships the workspace foundation. Phases 1-7 each spawn a downstream `/ce-plan`
-run before code lands — see `docs/plans/` for in-flight phase plans.
+The roadmap [`PLAN.md`](PLAN.md) sequences work into 8 phases (0-7).
+Phases 1-7 each have a downstream phase plan in
+[`docs/plans/`](docs/plans/) (`...-001-feat-portal-wire-plan.md` through
+`...-008-feat-binaries-and-e2e-plan.md`), spawned ahead of code via
+`/ce-plan` runs. Phase 0 has no standalone plan — its scope is the
+workspace bootstrap that the eight phase plans consume; Phase 0 state
+lives in `PLAN.md` under "Current implementation status" alongside
+per-phase landed/partial/pending state.
 
 ## Certifying dependencies (`cargo-vet`)
 

@@ -26,12 +26,12 @@ Out of scope:
 
 ## Threat model
 
-A full threat model lands in `docs/threat-model.md` (Phase 1 deliverable per
-SEC-006). It enumerates adversary capabilities, multi-hop privacy claims,
-the eight R10 anti-abuse threat classes (a-h), and the SEC-001..005
-evaluation context.
+The full threat model lives at [`docs/threat-model.md`](docs/threat-model.md)
+(Phase 1 deliverable per SEC-006, landed). It enumerates adversary
+capabilities, multi-hop privacy claims, the eight R10 anti-abuse threat
+classes (a-h), and the SEC-001..005 evaluation context.
 
-Until that lands, the working assumptions:
+In summary, the working assumptions are:
 
 - **Adversary classes**: passive on-path observer, active MITM proxy, hostile
   relay operator, hostile registry operator, hostile tenant.
@@ -61,8 +61,10 @@ Until that lands, the working assumptions:
   with the workspace MIT license.
 - Advisory database checked on every CI run (`cargo deny check advisories`,
   `version = 2`); RUSTSEC vulnerabilities deny by default; yanked deny.
-- `cargo vet` supply-chain audit setup deferred to Phase 5 per the roadmap;
-  the supply chain at Phase 0 bootstrap has zero crates of our own to gate.
+- `cargo vet` supply-chain audit harness landed in Phase 5 Batch 1 under
+  [`supply-chain/`](supply-chain/); see
+  [`CONTRIBUTING.md`](CONTRIBUTING.md) §`Certifying dependencies` for the
+  per-PR `cargo vet certify` workflow and gate timeline.
 
 ## Coordinated disclosure
 
