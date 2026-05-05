@@ -650,6 +650,10 @@ mod tests {
         let mut handles = Vec::with_capacity(100);
         for i in 0..100u32 {
             let bridge = bridge.clone();
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "test code per R9: 100 concurrent submitters joined via Vec<JoinHandle> at end of test"
+            )]
             handles.push(tokio::spawn(async move {
                 let msg = format!("message-{i}").into_bytes();
                 let result = bridge
@@ -736,6 +740,10 @@ mod tests {
         let mut handles = Vec::new();
         for _ in 0..32u32 {
             let bridge = bridge.clone();
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "test code per R9: 32 concurrent submitters joined via Vec<JoinHandle> at end of test"
+            )]
             handles.push(tokio::spawn(async move {
                 bridge
                     .sign(SignatureScheme::RSA_PSS_SHA256, vec![0xAB; 16])

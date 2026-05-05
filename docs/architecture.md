@@ -66,22 +66,27 @@ plan).
 
 Every spawned task lives inside a `tokio::task::JoinSet` or carries a
 `tokio_util::sync::CancellationToken`. Free `tokio::spawn` is permitted only
-at the very top of `main`. Library code that calls `tokio::spawn` directly
-violates R9.
+at the very top of `main` (binary crate runtime entry) or at sites that
+satisfy the OR clause via a stored `JoinHandle` plus a `CancellationToken`
+that the owning struct's shutdown awaits.
 
-**Mechanical CI enforcement of this invariant is currently deferred.** The
-committed Phase 5/6b plans assume a workspace-wide clippy
-`disallowed_methods` rule on `tokio::spawn` exists (Phase 5 plan
-§Concurrency, Phase 6b plan §U2 verification), but [`../clippy.toml`](../clippy.toml)
-does not yet carry the rule and current library code at
-`crates/portal-acme/src/manager.rs`, `crates/portal-net/src/allocator.rs`,
-and `crates/portal-relay/src/server.rs` does call free `tokio::spawn`.
-Closing this gap requires (a) adding the rule, (b) refactoring those call
-sites to take a `&mut JoinSet` from the caller (or applying
-`#[expect(clippy::disallowed_methods, reason = "...")]` at audited sites),
-and (c) verifying the workspace lints pass clean. Tracked as a follow-on
-landing alongside Phase 5 Batch 8 hot-reload (which already touches
-`server.rs` task-spawning).
+**Mechanical CI enforcement** lives in [`../clippy.toml`](../clippy.toml) as a
+`disallowed_methods` rule on `tokio::spawn`. Sites that legitimately need
+free `tokio::spawn` apply `#[expect(clippy::disallowed_methods, reason = "...")]`
+at the call site naming the architectural justification. Approved
+justifications:
+
+- `R9: top-of-main ... in binary crate runtime entry` — for spawns in
+  `portal-relay-bin` and `portal-demo` `main.rs`.
+- `R9: lifecycle-collapsing detached drain; owns the JoinSet and outlives all callers`
+  — for tasks intentionally outside the structured-concurrency hierarchy
+  (e.g., `Server::shutdown`'s drain task).
+- `R9 OR clause: stored JoinHandle + CancellationToken; <Owner> owns lifecycle surface`
+  — for managed structured spawns where the owning struct (not the caller's
+  `JoinSet`) holds the handle and drains it via shutdown
+  (e.g., `Manager::start` in `portal-acme`).
+- `test code per R9: <how the handle is joined>` — for `#[cfg(test)]` and
+  integration-test bodies.
 
 Each library crate documents its task-spawning contract — i.e., which entry
 points spawn tasks, which `JoinSet` / `CancellationToken` owns them, which

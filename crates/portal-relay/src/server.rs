@@ -302,6 +302,15 @@ impl Server {
                     // `RuntimeState` and the `Sender`; cancelling
                     // any caller's future does not affect it.
                     let inner = Arc::clone(&self.inner);
+                    // R9: lifecycle-collapsing detached drain. The task is
+                    // intentionally outside the structured-concurrency
+                    // hierarchy — it owns the `JoinSet` (inside `runtime`)
+                    // and must outlive any caller so cancellation cannot
+                    // strand the lifecycle in `Stopping`.
+                    #[expect(
+                        clippy::disallowed_methods,
+                        reason = "R9: lifecycle-collapsing detached drain; owns the JoinSet and outlives all callers"
+                    )]
                     tokio::spawn(async move {
                         drain_task(inner, runtime, tx).await;
                     });
@@ -513,6 +522,10 @@ mod tests {
         let mut handles = Vec::new();
         for _ in 0..8 {
             let s = server.clone();
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "test code per R9: 8 concurrent shutdown callers joined via Vec<JoinHandle> at end of test"
+            )]
             handles.push(tokio::spawn(async move {
                 s.shutdown().await;
                 // At the moment this future resolves, the server
@@ -542,6 +555,10 @@ mod tests {
         // Trigger: starts the shutdown.
         let trigger = {
             let s = server.clone();
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "test code per R9: trigger handle awaited at end of test"
+            )]
             tokio::spawn(async move { s.shutdown().await })
         };
 
@@ -561,6 +578,10 @@ mod tests {
         // if drain already completed).
         let waiter = {
             let s = server.clone();
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "test code per R9: waiter handle awaited at end of test"
+            )]
             tokio::spawn(async move {
                 s.shutdown().await;
                 s.status().await.phase

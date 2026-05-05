@@ -219,6 +219,13 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
 /// stream is non-fatal — we log and still await SIGINT so Ctrl+C
 /// continues to work.
 fn install_signal_handler(cancel: CancellationToken) {
+    // R9: top-of-`main` runtime entry point. Binary crate composes the task
+    // tree at the runtime root; this signal-handler spawn is the canonical
+    // "free `tokio::spawn` permitted only at top of main" exception.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "R9: top-of-main signal handler in binary crate runtime entry"
+    )]
     tokio::spawn(async move {
         wait_for_shutdown_signal().await;
         cancel.cancel();

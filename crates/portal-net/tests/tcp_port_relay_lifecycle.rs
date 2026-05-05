@@ -56,6 +56,10 @@ async fn tcp_port_relay_starts_and_shuts_down_against_live_quic_backhaul() {
     let client = Endpoint::client("[::]:0".parse().unwrap(), pinned).unwrap();
 
     // 2. Server-side: accept the QUIC connection in the background.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test code per R9: server-side accept handle awaited at end of test"
+    )]
     let server_handle = tokio::spawn(async move {
         let incoming = server.accept().await.unwrap().unwrap();
         let conn = incoming.await.expect("server connection completes");

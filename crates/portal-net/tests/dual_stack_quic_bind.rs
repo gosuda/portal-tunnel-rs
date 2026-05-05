@@ -42,6 +42,10 @@ async fn server_on_v6_wildcard_accepts_v4_client() {
         .connect(v4_addr, "v4-via-dual-stack.invalid")
         .expect("client.connect on v4 addr");
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test code per R9: server-accept handle awaited via timeout at end of test"
+    )]
     let server_accept = tokio::spawn(async move {
         let incoming = server.accept().await.unwrap().unwrap();
         let _conn = incoming.await.expect("server accept v4-mapped client");

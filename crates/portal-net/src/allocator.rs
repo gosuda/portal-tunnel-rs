@@ -239,6 +239,10 @@ mod tests {
         let mut handles = Vec::new();
         for i in 0..100 {
             let allocator = Arc::clone(&allocator);
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "test code per R9: deterministic concurrency probe — 100 spawns join via Vec<JoinHandle> at end of test"
+            )]
             handles.push(tokio::spawn(async move {
                 allocator.allocate(&format!("client_{i}")).await.unwrap()
             }));

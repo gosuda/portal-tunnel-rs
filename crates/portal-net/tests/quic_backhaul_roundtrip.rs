@@ -43,6 +43,10 @@ async fn quic_backhaul_round_trip_tcp_proxy_raw() {
     let client = Endpoint::client("[::]:0".parse().unwrap(), pinned).unwrap();
 
     // Drive server-side accept in the background.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test code per R9: server-side accept handle awaited at end of test"
+    )]
     let server_handle = tokio::spawn(async move {
         let incoming = server
             .accept()
@@ -75,6 +79,10 @@ async fn quic_backhaul_round_trip_tcp_proxy_raw() {
     let (tx, mut rx) = mpsc::channel(1);
     let cancel = CancellationToken::new();
     let acceptor = SdkAcceptor::new(conn.clone(), tx, cancel.clone());
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test code per R9: SdkAcceptor handle joined via cancel + await at end of test"
+    )]
     let acc_handle = tokio::spawn(async move { acceptor.run(None).await });
 
     let stream = tokio::time::timeout(Duration::from_secs(5), rx.recv())

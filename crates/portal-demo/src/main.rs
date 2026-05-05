@@ -78,6 +78,13 @@ async fn serve(args: Args) -> eyre::Result<()> {
             res = listener.accept() => match res {
                 Ok((stream, peer)) => {
                     let body_override = args.body.clone();
+                    // R9: top-of-main connection handler in binary crate
+                    // runtime entry. portal-demo is a sample binary whose
+                    // accept loop runs at runtime-root level.
+                    #[expect(
+                        clippy::disallowed_methods,
+                        reason = "R9: top-of-main connection handler in binary crate runtime entry"
+                    )]
                     tokio::spawn(async move {
                         if let Err(err) = handle(stream, peer, body_override).await {
                             tracing::warn!(?peer, ?err, "portal-demo connection error");

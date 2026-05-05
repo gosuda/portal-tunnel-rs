@@ -42,4 +42,23 @@ disallowed-methods = [
     # blind spots.
     { path = "axum::Router::route", reason = "library crates: use utoipa_axum::OpenApiRouter::route; binary crates: #[expect(clippy::disallowed_methods, reason = \"composes utoipa-registered routers\")] at the mount site (Phase 7 U8.8 — see docs/utoipa-coverage-policy.md)" },
     { path = "axum::Router::nest", reason = "library crates: use utoipa_axum::OpenApiRouter::nest; binary crates: #[expect(clippy::disallowed_methods, reason = \"composes utoipa-registered routers\")] at the mount site (Phase 7 U8.8 — see docs/utoipa-coverage-policy.md)" },
+
+    # R9 — structured-concurrency invariant.
+    #
+    # Free `tokio::spawn` is permitted only at the very top of `main` (the binary
+    # crate's runtime entry point). Library code must register every spawned
+    # task in a caller-owned `tokio::task::JoinSet` OR (when the task is
+    # explicitly designed to outlive any caller) carry a
+    # `tokio_util::sync::CancellationToken` plus a stored `JoinHandle` that the
+    # owning struct's shutdown method awaits. Sites that legitimately need
+    # `tokio::spawn` apply `#[expect(clippy::disallowed_methods, reason = "...")]`
+    # at the call site naming the architectural justification — typically one
+    # of "lifecycle-collapsing detached drain" or "structured spawn satisfies
+    # R9 OR clause via stored JoinHandle + CancellationToken". Test code
+    # (`#[cfg(test)]`, integration tests under `tests/`) may use `tokio::spawn`
+    # freely with `#[expect(...)]` and the reason "test".
+    #
+    # Origin: ADR-0002 / Engineering Defaults R9 / docs/architecture.md
+    # §Structured concurrency invariant.
+    { path = "tokio::spawn", reason = "R9: spawn into a caller-owned JoinSet, OR carry a CancellationToken + stored JoinHandle. Apply #[expect(clippy::disallowed_methods, reason = \"...\")] at audited sites (lifecycle-collapsing detached drain, structured spawn with R9 OR-clause, or test code) — see docs/architecture.md §R9" },
 ]

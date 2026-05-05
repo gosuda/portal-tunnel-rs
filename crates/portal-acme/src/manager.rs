@@ -207,6 +207,15 @@ impl Manager {
         let mode = self.mode;
         let key_dir = self.cfg.key_dir.clone();
         let cancel_loop = cancel.clone();
+        // R9: structured spawn satisfies the OR clause — the maintenance task
+        // is bound to a stored `JoinHandle` (drained by `Manager::shutdown`)
+        // AND carries a `CancellationToken`. The Manager owns the lifecycle
+        // surface; callers do not pass in a `JoinSet`. See clippy.toml R9
+        // entry and docs/architecture.md §Structured concurrency invariant.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "R9 OR clause: stored JoinHandle + CancellationToken; Manager owns lifecycle surface"
+        )]
         let handle = tokio::spawn(async move {
             maintenance_loop(mode, key_dir, cancel_loop).await;
         });

@@ -257,6 +257,10 @@ async fn concurrent_record_signal_calls_accumulate() {
     let mut handles = Vec::with_capacity(task_count);
     for _ in 0..task_count {
         let engine = Arc::clone(&engine);
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "test code per R9: 16 concurrent recorders joined via Vec<JoinHandle> at end of test"
+        )]
         handles.push(tokio::spawn(async move {
             for _ in 0..signals_per_task {
                 engine.record_signal(id, SignalKind::RateLimited, weight);
