@@ -3,8 +3,8 @@
 //! Drives `portal_relay_bin::init::run_init` directly (the binary's
 //! testable subcommand logic lives behind a thin library target so
 //! integration tests reach it without spawning a subprocess). Round-
-//! trips the scaffolded files through the iter-127 loader to pin the
-//! bootstrap-from-disk contract end-to-end.
+//! trips the scaffolded files through `RelayConfigBundle::from_files`
+//! to pin the bootstrap-from-disk contract end-to-end.
 
 #![expect(clippy::unwrap_used, reason = "test-only setup")]
 

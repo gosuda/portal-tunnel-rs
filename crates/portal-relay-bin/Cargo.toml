@@ -49,8 +49,8 @@ tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 compact_str = { workspace = true }
 
 # JSON serialization for the `init` subcommand scaffolds bootstrap.json
-# + runtime.json via the iter-124 serde derives on the portal-relay
-# config types.
+# + runtime.json via the serde derives on the portal-relay config types
+# (RelayServerConfig + RuntimeConfig).
 serde_json = { workspace = true }
 
 [dev-dependencies]

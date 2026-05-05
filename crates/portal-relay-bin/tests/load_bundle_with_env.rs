@@ -7,7 +7,7 @@
 //! 1. State-dir empty → `Ok(None)` (first-boot before `init`).
 //! 2. State-dir populated + `PORTAL_RELAY_*` env var set → bundle
 //!    loads with the env value layered onto the runtime half (the
-//!    iter-145 wiring activated end-to-end).
+//!    `from_files_with_env` wiring activated end-to-end).
 //! 3. State-dir populated + unknown `PORTAL_RELAY_*` env key set →
 //!    `Err(_)` (the figment `deny_unknown_fields` contract surfaces
 //!    through the binary's wrapper).
@@ -18,8 +18,8 @@
 //! signature is `FnOnce(&mut Jail) -> figment::Result<()>`. To drive
 //! the async [`load_bundle_if_present`] we build a current-thread
 //! tokio runtime inside the Jail closure and `.block_on(...)` the
-//! load. This is the same convention the iter-144 figment-integration
-//! tests use in `crates/portal-relay/src/config.rs`.
+//! load. This is the same convention the `from_files_with_env`
+//! figment-integration tests use in `crates/portal-relay/src/config.rs`.
 //!
 //! ## Env-var state guarantee
 //!
@@ -60,8 +60,9 @@ fn jail_runtime() -> tokio::runtime::Runtime {
         .unwrap_or_else(|err| panic!("failed to build jail-scoped tokio runtime: {err}"))
 }
 
-/// JSON shape of `bootstrap.json` matching the iter-123/124
-/// `RelayServerConfig` strict serde policy. The key paths are
+/// JSON shape of `bootstrap.json` matching `RelayServerConfig`'s
+/// strict serde policy (`deny_unknown_fields`, no `default`-fill).
+/// The key paths are
 /// placeholders — the binary's load path does not validate that
 /// they exist on disk; that is `serve`'s job downstream.
 fn sample_bootstrap_json() -> &'static str {
@@ -107,8 +108,9 @@ fn load_bundle_returns_none_when_state_dir_empty() {
 
 #[test]
 fn load_bundle_applies_env_overlay_via_jail() {
-    // Pins the iter-145 wiring end-to-end: the binary's loader must
-    // honor `PORTAL_RELAY_*` env vars on the runtime half. We start
+    // Pins the env-overlay wiring end-to-end: the binary's loader
+    // must honor `PORTAL_RELAY_*` env vars on the runtime half via
+    // `RelayConfigBundle::from_files_with_env`. We start
     // the file at `bps_per_identity=0` and set the env to 4096; the
     // observable assertion on `bundle.runtime.bps_per_identity ==
     // 4096` is only true if the env layer is plumbed through.
