@@ -9,9 +9,9 @@ the wire (see [ADR-0001](docs/adr/0001-greenfield-wire.md)).
 > landed/partial/pending state and per-commit gate state (U16 wire-drift
 > marker, U17 `PROPTEST_CASES=4096` proptest suites, plus the workspace
 > CI matrix) live in [`PLAN.md`](PLAN.md) under "Current implementation
-> status"; CI runs the same gates on every PR. v0.1 ships when Phases
-> 1-5 + 6a + 7-minus-overlay land; v0.2 backlog is enumerated in the
-> roadmap plan.
+> status"; CI runs the same gates on every PR. v0.1 ships when
+> Phase 0-7 land minus the Phase 6b/B overlay; v0.2 backlog is
+> enumerated in the roadmap plan.
 
 ## Quick links
 
