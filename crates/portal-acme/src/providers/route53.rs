@@ -4,12 +4,13 @@
 //! # Method semantics
 //!
 //! - [`Route53Provider::upsert`]: hosted-zone lookup → single-shot
-//!   `ChangeResourceRecordSets` with [`Action::Upsert`]. Route53's
-//!   UPSERT primitive is atomically create-or-replace, so no list-first
-//!   round trip is required (unlike Cloudflare). The trade-off is that
-//!   UPSERT replaces all values for the (name, type) tuple, which is
-//!   correct for singleton A records but **clobbers concurrent peer
-//!   TXTs** — see the multi-valued caveat below.
+//!   `ChangeResourceRecordSets` with `Action::Upsert` (the
+//!   `aws-sdk-route53` change-action enum). Route53's UPSERT
+//!   primitive is atomically create-or-replace, so no list-first
+//!   round trip is required (unlike Cloudflare). The trade-off is
+//!   that UPSERT replaces all values for the (name, type) tuple,
+//!   which is correct for singleton A records but **clobbers
+//!   concurrent peer TXTs** — see the multi-valued caveat below.
 //! - [`Route53Provider::delete`]: hosted-zone lookup → list existing
 //!   record sets via `ListResourceRecordSets` → if a matching record
 //!   exists, send `Action::Delete` with the **exact** resource record
@@ -38,18 +39,20 @@
 //!
 //! # Hosted-zone lookup (v0.1 simplification)
 //!
-//! [`Route53Provider::resolve_zone_id`] fetches **only the first page**
-//! of `ListHostedZones` (1-100 zones) and returns the zone whose
-//! `Name` equals `<parent_zone>.` (Route53 names are FQDNs with a
-//! trailing dot). Operators with ≥100 hosted zones whose target zone
-//! lives on page 2+ will see an `AcmeError::Config` "no Route53 zone
-//! for ..." error; pagination is the v0.2 trigger.
+//! The private `Route53Provider::resolve_zone_id` method fetches
+//! **only the first page** of `ListHostedZones` (1-100 zones) and
+//! returns the zone whose `Name` equals `<parent_zone>.` (Route53
+//! names are FQDNs with a trailing dot). Operators with ≥100 hosted
+//! zones whose target zone lives on page 2+ will see an
+//! `AcmeError::Config` "no Route53 zone for ..." error; pagination
+//! is the v0.2 trigger.
 //!
 //! # Parent-zone resolution
 //!
-//! [`parent_zone`] takes the **last two labels** of the FQDN, same
-//! posture as `cloudflare.rs`. PSL ccTLDs (`co.uk`, `com.au`, ...)
-//! resolve incorrectly to the suffix; deferred to v0.2.
+//! The private `parent_zone` helper takes the **last two labels**
+//! of the FQDN, same posture as `cloudflare.rs`. PSL ccTLDs
+//! (`co.uk`, `com.au`, ...) resolve incorrectly to the suffix;
+//! deferred to v0.2.
 //!
 //! # Wiremock / `SigV4`
 //!

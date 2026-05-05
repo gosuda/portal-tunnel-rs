@@ -41,13 +41,14 @@
 //!
 //! # Parent-zone resolution
 //!
-//! [`parent_zone`] takes the **last two labels** of the FQDN, same posture
-//! as `cloudflare.rs` and `route53.rs`. PSL ccTLDs (`co.uk`, `com.au`, ...)
-//! resolve incorrectly to the suffix; deferred to v0.2.
+//! The private `parent_zone` helper takes the **last two labels** of
+//! the FQDN, same posture as `cloudflare.rs` and `route53.rs`. PSL
+//! ccTLDs (`co.uk`, `com.au`, ...) resolve incorrectly to the
+//! suffix; deferred to v0.2.
 //!
 //! # Hosted-zone (managed-zone) lookup (v0.1 simplification)
 //!
-//! [`GcloudProvider::resolve_zone_name`] requests one page of managed zones
+//! The private `GcloudProvider::resolve_zone_name` method requests one page of managed zones
 //! filtered by `dnsName == "<parent>."` (Cloud DNS uses FQDN-with-trailing-
 //! dot for the `dns_name` field). Operators with multiple zones at the same
 //! `dns_name` (rare; usually a public + private split) get the first match.

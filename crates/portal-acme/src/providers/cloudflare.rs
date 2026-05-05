@@ -14,9 +14,9 @@
 //!
 //! # Zone resolution (v0.1 limitation)
 //!
-//! [`parent_zone`] takes the **last two labels** of the FQDN as the
-//! zone name (e.g. `_acme-challenge.foo.bar.example.com` →
-//! `example.com`). This is sufficient for the common
+//! The private `parent_zone` helper takes the **last two labels** of
+//! the FQDN as the zone name (e.g. `_acme-challenge.foo.bar.example.com`
+//! → `example.com`). This is sufficient for the common
 //! `<sub>.<apex>.<tld>` shape but **fails for Public-Suffix-List
 //! ccTLDs** like `co.uk`, `com.au`, `org.uk`, etc. — `foo.example.co.uk`
 //! would resolve to `co.uk`, which the operator does not own.
@@ -64,7 +64,7 @@ impl CloudflareProvider {
     }
 
     /// Construct a Cloudflare provider against an explicit
-    /// [`Environment`]. Tests pass [`Environment::Custom(uri)`] with a
+    /// [`Environment`]. Tests pass `Environment::Custom(uri)` with a
     /// wiremock URL; production uses [`Environment::Production`].
     ///
     /// # Errors
