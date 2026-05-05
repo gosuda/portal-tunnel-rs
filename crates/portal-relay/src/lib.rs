@@ -37,6 +37,11 @@
 //!   `swap_config` on a config-file change remains B8 territory. The
 //!   workspace-level [`reload::ReloadHandle`] type-level scaffolding
 //!   (Phase 5 U13) landed; consumer wiring remains B8 territory.
+//!   `serde::Serialize` + `serde::Deserialize` derives on
+//!   [`config::RelayServerConfig`] and [`config::RuntimeConfig`]
+//!   also landed: both reject unknown JSON keys, with
+//!   [`config::RuntimeConfig`] additionally defaulting omitted
+//!   fields.
 //! - **Batches 8 + 10 fully pending**: hot-reload consumer wiring +
 //!   keyless I/O wiring; Admin View + R15 Status TUI.
 //!
