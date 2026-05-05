@@ -135,6 +135,10 @@ pkcs1 = { workspace = true }
 rcgen = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+# Phase 5 U13 (`tests/arc_swap_reload.rs`): the JSON formatter is the
+# audit-event emission test's structural assertion path — substring
+# matching the text formatter's output is brittle to format toggles.
+tracing-subscriber = { workspace = true }
 
 [lints]
 workspace = true

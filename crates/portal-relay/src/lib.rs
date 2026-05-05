@@ -34,9 +34,11 @@
 //!   [`policy::reputation::ReputationEngine::swap_config`] (atomic
 //!   `(config, limiter)` pair behind [`arc_swap::ArcSwap`]); the
 //!   SIGHUP / admin-api reload run-loop **trigger** that calls
-//!   `swap_config` on a config-file change remains B8 territory.
-//! - **Batches 8 + 10 fully pending**: hot-reload + keyless I/O
-//!   wiring; Admin View + R15 Status TUI.
+//!   `swap_config` on a config-file change remains B8 territory. The
+//!   workspace-level [`reload::ReloadHandle`] type-level scaffolding
+//!   (Phase 5 U13) landed; consumer wiring remains B8 territory.
+//! - **Batches 8 + 10 fully pending**: hot-reload consumer wiring +
+//!   keyless I/O wiring; Admin View + R15 Status TUI.
 //!
 //! Module-level rustdocs name the per-module deferral state where one
 //! applies.
@@ -72,5 +74,7 @@ pub mod server;
 pub mod state;
 pub mod tui;
 
+pub use config::{RelayServerConfig, RuntimeConfig};
 pub use error::{RelayError, RelayResult};
+pub use reload::{ReloadError, ReloadHandle};
 pub use server::{JANITOR_INTERVAL, LifecyclePhase, Server, ServerStatus};
