@@ -1,5 +1,9 @@
-//! Workspace task runner — codegen, release, openapi-export, dep-audit,
-//! refresh-frontend-bundle, and wire-protocol drift gate (Phase 1 U16).
+//! Workspace task runner — landed subcommands: `wire-drift-check` (Phase 1
+//! U16 commit-bound marker gate), `ci` (mirrors every CI workflow gate
+//! locally for `cargo xtask ci`), `openapi-export` (Phase 7 U8.8 v0.2-
+//! backlog stub), `dep-audit` (Phase 7 U8.7 dep-spawning-audit validator).
+//! Future subcommands (not landed): `codegen`, `release`,
+//! `refresh-frontend-bundle`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -56,9 +60,13 @@ enum Commands {
     /// rustls-mandatory, utoipa-coverage). Source of truth:
     /// `.github/workflows/ci.yml`; `run_ci` mirrors it gate-by-gate.
     Ci,
-    /// Phase 7 U8.8 v0.2-backlog stub: serialize `ApiDoc::openapi()` to
-    /// `docs/openapi.yaml` (snapshot test). v0.1 coverage is enforced by
-    /// the clippy + ast-grep `utoipa-coverage-gate` already wired in `Ci`.
+    /// Phase 7 U8.8 v0.2-backlog stub. Prints the deferral note pointing
+    /// at the v0.1 mechanism — clippy `disallowed_methods` on bare
+    /// `axum::Router::route` plus the ast-grep `utoipa-coverage-gate`
+    /// step in `.github/workflows/ci.yml`, both already mirrored in
+    /// `Ci`. The v0.2 follow-up (serializing `ApiDoc::openapi()` to
+    /// `docs/openapi.yaml` for a snapshot test) lands when the
+    /// trigger criterion in `PLAN.md` §v0.2 Backlog fires.
     OpenapiExport,
     /// Validate `docs/dep-spawning-audit.md` carries every required dep contract section (Phase 7 U8.7).
     DepAudit,
