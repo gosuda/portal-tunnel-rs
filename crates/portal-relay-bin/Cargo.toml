@@ -31,5 +31,14 @@ tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 # Compact strings for config types
 compact_str = { workspace = true }
 
+# JSON serialization for the `init` subcommand scaffolds bootstrap.json
+# + runtime.json via the iter-124 serde derives on the portal-relay
+# config types.
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "fs"] }
+
 [lints]
 workspace = true

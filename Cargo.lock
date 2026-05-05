@@ -4395,6 +4395,8 @@ dependencies = [
  "eyre",
  "portal-acme",
  "portal-relay",
+ "serde_json",
+ "tempfile",
  "tokio",
  "tokio-util",
  "tracing",

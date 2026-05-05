@@ -60,6 +60,7 @@ use compact_str::CompactString;
 use eyre::{Context as _, eyre};
 use portal_acme::{AcmeConfig, DirectoryUrl, KeyDir, Manager as AcmeManager, ProviderSelector};
 use portal_relay::Server;
+use portal_relay_bin::init::{InitArgs, run_init};
 use tokio_util::sync::CancellationToken;
 
 /// Top-level CLI.
@@ -76,6 +77,11 @@ struct Cli {
 enum Command {
     /// Run the relay server until SIGINT/SIGTERM.
     Serve(ServeArgs),
+    /// Scaffold default `bootstrap.json` + `runtime.json` config files
+    /// in the supplied state directory. The files use placeholder key
+    /// paths that the operator must replace with real PEM-encoded key
+    /// files before running `serve`.
+    Init(InitArgs),
 }
 
 /// Args for `portal-relay serve`.
@@ -128,6 +134,7 @@ fn main() -> eyre::Result<()> {
                 reject_acme_flags(serve_matches)?;
                 serve(args).await
             }
+            Command::Init(args) => run_init(&args).await,
         }
     })
 }
