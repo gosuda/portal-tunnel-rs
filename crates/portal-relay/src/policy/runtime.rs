@@ -106,6 +106,33 @@ impl PolicyRuntime {
             .as_ref()
             .is_some_and(|handle| handle.current().ip_ban_list.contains(&ip))
     }
+
+    /// Returns the configured per-identity bytes-per-second cap, or
+    /// `None` if no cap is configured (open).
+    ///
+    /// Reads from the attached [`ReloadHandle`]'s most recent
+    /// snapshot. Returns `None` when:
+    /// - No reload handle is attached
+    ///   ([`Self::with_reload_handle`] was never called), OR
+    /// - The configured
+    ///   [`crate::config::RuntimeConfig::bps_per_identity`] value is
+    ///   `0` (the iter-123 sentinel for "open / no cap").
+    ///
+    /// Returns `Some(cap)` only when both conditions are met: a
+    /// reload handle is attached AND the configured value is
+    /// non-zero.
+    ///
+    /// The future BPS-manager surface (Phase 5 plan §"`bps_manager`
+    /// limits") will consume this getter to enforce the operator-
+    /// configured throttle. v0.1 ships only the read surface; the
+    /// throttle consumer lands in a separate slice.
+    #[must_use]
+    pub fn bps_cap_per_identity(&self) -> Option<u64> {
+        self.reload.as_ref().and_then(|handle| {
+            let cap = handle.current().bps_per_identity;
+            (cap != 0).then_some(cap)
+        })
+    }
 }
 
 #[cfg(test)]
@@ -214,5 +241,31 @@ mod tests {
 
         assert!(runtime.is_ip_banned("9.9.9.9".parse().unwrap()));
         assert!(runtime.is_ip_banned("10.0.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn bps_cap_per_identity_returns_none_with_no_reload_handle() {
+        let runtime = PolicyRuntime::new();
+        assert_eq!(runtime.bps_cap_per_identity(), None);
+    }
+
+    #[test]
+    fn bps_cap_per_identity_returns_none_when_configured_zero() {
+        let handle = sample_reload_handle(RuntimeConfig {
+            bps_per_identity: 0,
+            ..RuntimeConfig::default()
+        });
+        let runtime = PolicyRuntime::new().with_reload_handle(handle);
+        assert_eq!(runtime.bps_cap_per_identity(), None);
+    }
+
+    #[test]
+    fn bps_cap_per_identity_returns_some_when_configured_nonzero() {
+        let handle = sample_reload_handle(RuntimeConfig {
+            bps_per_identity: 1024,
+            ..RuntimeConfig::default()
+        });
+        let runtime = PolicyRuntime::new().with_reload_handle(handle);
+        assert_eq!(runtime.bps_cap_per_identity(), Some(1024));
     }
 }
