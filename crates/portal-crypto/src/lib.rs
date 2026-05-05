@@ -54,7 +54,7 @@ pub use api_https::{ApiHttpsKey, load_api_https_key};
 pub use ed25519::key::{RelayEd25519Key, load_relay_ed25519_key, verifying_key};
 pub use ed25519::sign::Ed25519Signer;
 pub use ed25519::verify::Ed25519Verifier;
-pub use ens::{AlloyEnsResolver, EnsError, EnsResolver};
+pub use ens::{AlloyEnsResolver, BoxedEnsResolver, EnsError, EnsResolver};
 pub use envelope::{sign_envelope, verify_envelope};
 pub use error::PortalCryptoError;
 pub use keyless::{

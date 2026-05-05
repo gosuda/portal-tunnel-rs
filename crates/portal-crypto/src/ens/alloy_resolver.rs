@@ -18,6 +18,7 @@
 //! ```
 
 use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use alloy::network::Ethereum;
@@ -70,10 +71,10 @@ pub enum EnsError {
 /// # Object safety
 ///
 /// This trait is **not object-safe** because `resolve` returns
-/// `impl Future`. Callers must hold the concrete type (or a type-erased
-/// wrapper such as `Arc<AlloyEnsResolver>`) directly. If dynamic dispatch
-/// is needed in Phase 5, introduce a `BoxedEnsResolver` newtype that
-/// wraps `Pin<Box<dyn Future<...> + Send>>`.
+/// `impl Future`. Callers must hold the concrete type, or wrap any
+/// `EnsResolver` impl in [`BoxedEnsResolver`] for dynamic dispatch
+/// (which routes through a crate-sealed inner trait that returns
+/// `Pin<Box<dyn Future<...> + Send>>`).
 pub trait EnsResolver: Send + Sync {
     /// Resolve an ENS name to an Ethereum address.
     ///
@@ -90,6 +91,84 @@ pub trait EnsResolver: Send + Sync {
         &'a self,
         name: &'a str,
     ) -> impl Future<Output = Result<EthAddress, EnsError>> + Send + 'a;
+}
+
+// ---------------------------------------------------------------------------
+// BoxedEnsResolver — dyn-dispatch adapter
+// ---------------------------------------------------------------------------
+
+/// Object-safe sibling of [`EnsResolver`] that returns a boxed future.
+///
+/// Sealed at the crate boundary: external crates implement [`EnsResolver`] and
+/// reach [`BoxedEnsResolver`] only through [`BoxedEnsResolver::new`] /
+/// [`BoxedEnsResolver::from_arc`], never by impl-ing this trait directly.
+/// The trait is declared `pub` because the enclosing `ens` module is
+/// `pub(crate)` in `lib.rs`, which already caps visibility at the crate
+/// root; an explicit inner `pub(crate)` would only fire
+/// `clippy::redundant_pub_crate`.  The blanket
+/// `impl<T: EnsResolver + ?Sized>` below routes every existing resolver
+/// through `Box::pin` so an `Arc<dyn ObjectSafeEnsResolver>` is usable
+/// wherever dynamic dispatch is required.
+pub trait ObjectSafeEnsResolver: Send + Sync {
+    fn resolve_boxed<'a>(
+        &'a self,
+        name: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<EthAddress, EnsError>> + Send + 'a>>;
+}
+
+impl<T: EnsResolver + ?Sized> ObjectSafeEnsResolver for T {
+    fn resolve_boxed<'a>(
+        &'a self,
+        name: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<EthAddress, EnsError>> + Send + 'a>> {
+        Box::pin(self.resolve(name))
+    }
+}
+
+/// Type-erased, dyn-dispatch-friendly wrapper around any [`EnsResolver`].
+///
+/// `BoxedEnsResolver` exists because [`EnsResolver::resolve`] returns
+/// `impl Future`, which makes the trait itself non-object-safe.  This
+/// newtype routes calls through a crate-sealed `ObjectSafeEnsResolver`
+/// inner adapter so callers that need to hold an `Arc<dyn ...>`-shaped
+/// resolver (for example, code paths that select one of several
+/// resolvers at runtime) can do so without re-shaping their surface
+/// around generics.
+///
+/// Cloning is cheap: it bumps the inner `Arc` refcount.  No consumer in
+/// the workspace currently holds a `BoxedEnsResolver`; this type is the
+/// dyn-dispatch adapter, available for future call sites that need it.
+#[derive(Clone)]
+pub struct BoxedEnsResolver(Arc<dyn ObjectSafeEnsResolver>);
+
+impl BoxedEnsResolver {
+    /// Wrap any [`EnsResolver`] impl for dynamic dispatch.
+    pub fn new<R: EnsResolver + 'static>(resolver: R) -> Self {
+        Self(Arc::new(resolver))
+    }
+
+    /// Wrap an already-`Arc`'d resolver without re-allocating.
+    pub fn from_arc<R: EnsResolver + 'static>(resolver: Arc<R>) -> Self {
+        Self(resolver)
+    }
+
+    /// Resolve an ENS name through dynamic dispatch.
+    ///
+    /// Returns the same `Pin<Box<dyn Future...>>` shape that
+    /// `tokio::spawn` and similar consumers expect.
+    #[must_use = "futures do nothing unless awaited"]
+    pub fn resolve<'a>(
+        &'a self,
+        name: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<EthAddress, EnsError>> + Send + 'a>> {
+        self.0.resolve_boxed(name)
+    }
+}
+
+impl core::fmt::Debug for BoxedEnsResolver {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("BoxedEnsResolver").finish_non_exhaustive()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -315,6 +394,74 @@ mod tests {
             matches!(err, EnsError::Rpc(_)),
             "expected Rpc error for bad URL, got {err:?}"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // BoxedEnsResolver — dyn-dispatch adapter
+    // -----------------------------------------------------------------------
+
+    /// Wrapping a working mock resolver in `BoxedEnsResolver::new` round-trips
+    /// the resolved address through the `Arc<dyn ObjectSafeEnsResolver>` indirection.
+    #[tokio::test]
+    async fn boxed_resolver_round_trips_resolves_to_address() {
+        let expected = parse_addr_hex("d8dA6BF26964aF9D7eEd9e03E53415D37aA96045");
+        let inner = MockEnsResolver::resolves_to(expected);
+        let resolver = BoxedEnsResolver::new(inner);
+
+        let got = resolver
+            .resolve("vitalik.eth")
+            .await
+            .expect("boxed resolver should resolve");
+        assert_eq!(
+            got, expected,
+            "BoxedEnsResolver must propagate the inner resolver's address"
+        );
+    }
+
+    /// Wrapping a not-found mock resolver propagates `EnsError::NameNotFound`
+    /// through the dyn-dispatch boundary unchanged.
+    #[tokio::test]
+    async fn boxed_resolver_round_trips_name_not_found() {
+        let inner = MockEnsResolver::fails_with_not_found("missing.eth");
+        let resolver = BoxedEnsResolver::new(inner);
+
+        let err = resolver
+            .resolve("missing.eth")
+            .await
+            .expect_err("boxed resolver should surface the not-found error");
+        match err {
+            EnsError::NameNotFound(name) => assert_eq!(name, "missing.eth"),
+            other => panic!("expected NameNotFound(\"missing.eth\"), got {other:?}"),
+        }
+    }
+
+    /// Cloning a `BoxedEnsResolver` produces a second handle that resolves
+    /// successfully and returns the same address as the original.
+    ///
+    /// This test deliberately does NOT claim to verify shared `Arc` identity:
+    /// proving that strictly would require either pointer-identity introspection
+    /// on the inner `Arc<dyn ...>` (which the spec disallows because of
+    /// `Arc::ptr_eq` ambiguity on `dyn`) or extra test-only API surface, which
+    /// would violate the smallest-diff guideline.  The weaker shape here is
+    /// exactly the fallback the spec sanctions: "just call `.resolve(...)` on
+    /// both clones and assert both return the expected value."
+    #[tokio::test]
+    async fn boxed_resolver_clone_returns_same_address_on_both_handles() {
+        let expected = parse_addr_hex("d8dA6BF26964aF9D7eEd9e03E53415D37aA96045");
+        let resolver = BoxedEnsResolver::new(MockEnsResolver::resolves_to(expected));
+        let clone = resolver.clone();
+
+        let got_orig = resolver
+            .resolve("vitalik.eth")
+            .await
+            .expect("original handle should resolve");
+        let got_clone = clone
+            .resolve("vitalik.eth")
+            .await
+            .expect("cloned handle should resolve");
+
+        assert_eq!(got_orig, expected);
+        assert_eq!(got_clone, expected);
     }
 
     // -----------------------------------------------------------------------

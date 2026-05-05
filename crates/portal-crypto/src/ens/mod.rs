@@ -20,4 +20,4 @@
 // `pub(crate)` redundant. Visibility is already capped at the crate root.
 pub mod alloy_resolver;
 
-pub use alloy_resolver::{AlloyEnsResolver, EnsError, EnsResolver};
+pub use alloy_resolver::{AlloyEnsResolver, BoxedEnsResolver, EnsError, EnsResolver};
