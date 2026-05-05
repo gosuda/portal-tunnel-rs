@@ -12,12 +12,15 @@
 //!
 //! Subsequent commits wire the binary against the existing
 //! `portal-relay` library surfaces — admin / SDK / discovery axum
-//! routers (Phase 5 B5 / B6, landed), the ECH-aware tenant TLS
-//! routing path (Phase 5 B9, landed), the QUIC backhaul `Endpoint`
-//! (Phase 3 B2, landed), the embedded frontend bundle (Phase 7 B1,
-//! landed), and the TUI subcommand (Phase 5 B10, pending). The
-//! library pieces exist; the binary still needs the composition
-//! glue.
+//! routers (Phase 5 B5 / B6, landed; admin router carries four
+//! handlers per `portal_relay::api::admin` and is reachable via
+//! [`portal_relay::Server::admin_router`]), the ECH-aware tenant
+//! TLS routing path (Phase 5 B9, landed), the QUIC backhaul
+//! `Endpoint` (Phase 3 B2, landed), the embedded frontend bundle
+//! (Phase 7 B1, landed), and the TUI subcommand (Phase 5 B10,
+//! pending). The library pieces exist; the binary still needs the
+//! HTTPS-listener mount that hands off TLS streams to the admin
+//! router (Phase 5 B8 follow-up).
 //!
 //! ## Local-only argument policy
 //!
@@ -38,17 +41,18 @@
 
 // Phase 7 U8.11 install-script render API — public surface that
 // the admin router's forthcoming `/__install.sh` and
-// `/__install.ps1` handlers consume. The admin router itself exists
-// today as a placeholder constructor in
-// `portal_relay::api::build_admin_router`; the actual route handlers
-// land with the Phase 5 B8 admin-router-handler wire-up. The
-// installer module ships now so the rendering logic + Go-parity
-// tests are reviewable in isolation; the handler wire-up is
-// one-line per route once the admin handlers are mounted.
+// `/__install.ps1` handlers consume. The admin router carries four
+// route handlers today (config/reload, config/current, health,
+// policy/snapshot — see `portal_relay::api::admin`) but the
+// installer routes are not yet plumbed in. The installer module
+// ships separately so the rendering logic + Go-parity tests are
+// reviewable in isolation; the route wire-up is one-line per route
+// once `/__install.{sh,ps1}` lands as a follow-up.
 #[expect(
     dead_code,
-    reason = "handler integration is the next U8.11 follow-up commit \
-              once the admin router carries route handlers"
+    reason = "installer route handlers are not yet wired into the \
+              admin router; the renderer ships ahead of the route \
+              wire-up so the Go-parity tests are reviewable in isolation"
 )]
 mod installer;
 
