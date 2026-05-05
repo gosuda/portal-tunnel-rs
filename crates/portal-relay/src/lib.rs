@@ -53,13 +53,17 @@
 //!   `RelayConfigBundle::from_files`, a v0.1 simple two-file
 //!   loader that reads both JSON files and produces a
 //!   [`reload::ReloadHandle`] via `into_handle()`. The HTTP admin
-//!   config surface (`POST /v1/admin/config/reload` +
-//!   `GET /v1/admin/config/current`) also landed; the
+//!   surface also landed (four endpoints — see [`api::admin`]
+//!   module rustdoc for the per-endpoint contracts); the
 //!   [`server::Server`] orchestrator surfaces an
-//!   [`api::AdminState`] via [`server::Server::admin_state`] for
-//!   router mounting. HTTPS-listener mounting, figment-driven
-//!   multi-source loader, env-var overrides, and combined
-//!   single-file format remain B8 territory.
+//!   [`api::AdminState`] via [`server::Server::admin_state`] and
+//!   the assembled router via [`server::Server::admin_router`].
+//!   The figment-driven env-overlay loader also landed via
+//!   [`config::RelayConfigBundle::from_files_with_env`] (operators
+//!   set `PORTAL_RELAY_*` env vars to override runtime fields;
+//!   bootstrap stays strict). HTTPS-listener mounting, full
+//!   multi-source figment chain (TOML + layered defaults), and
+//!   combined single-file format remain B8 territory.
 //! - **Batches 8 + 10 fully pending**: hot-reload consumer wiring +
 //!   keyless I/O wiring; Admin View + R15 Status TUI.
 //!
