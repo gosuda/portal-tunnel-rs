@@ -101,6 +101,14 @@ struct ServerInner {
     /// [`Server::with_components`] (e.g. tests). The
     /// [`crate::api::AdminState`] returned by [`Server::admin_state`]
     /// surfaces this directly to the admin router.
+    ///
+    /// `with_reload_handle` allocates a fresh
+    /// [`Mutex<Lifecycle>`](Lifecycle) rather than mutating in place
+    /// because the builder consumes `self` and returns a new
+    /// `Arc<ServerInner>`: a fresh `Lifecycle::Stopped` ensures
+    /// post-`start()` misuse cannot accidentally share lifecycle
+    /// state with the orphaned [`RuntimeState`] on the old
+    /// `Arc<ServerInner>`.
     reload_handle: Option<Arc<ReloadHandle>>,
     /// Lifecycle guard. The mutex is held for short critical
     /// sections only — never across `JoinSet::join_next` awaits
@@ -243,8 +251,8 @@ impl Server {
                 .lifecycle
                 .try_lock()
                 .is_ok_and(|guard| matches!(*guard, Lifecycle::Stopped)),
-            "Server::with_reload_handle called on a server that is \
-             not in Lifecycle::Stopped (must be called before start())",
+            "Server::with_reload_handle must be called before start(); \
+             try_lock failed (contention) or lifecycle is not Stopped",
         );
         Self {
             inner: Arc::new(ServerInner {
