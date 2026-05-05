@@ -11,6 +11,7 @@
 use std::sync::Arc;
 
 use crate::policy::PolicyRuntime;
+use crate::reload::ReloadHandle;
 use crate::state::LeaseRegistry;
 
 /// State carried by the SDK trust-boundary router. SDK handlers see
@@ -23,15 +24,25 @@ pub struct SdkState {
     pub policy: Arc<PolicyRuntime>,
 }
 
-/// State carried by the admin trust-boundary router. Admin handlers
-/// see the lease registry (read-only) and the policy runtime
-/// (read + write — admin can ban/unban IPs, set BPS, etc).
+/// State carried by the admin trust-boundary router.
+///
+/// Admin handlers see the lease registry (read-only), the policy
+/// runtime (read + write — admin can ban/unban IPs, set BPS, etc),
+/// and an optional [`ReloadHandle`] for
+/// `POST /v1/admin/config/reload`.
 #[derive(Clone)]
 pub struct AdminState {
     /// Lease registry (read-only from the admin surface).
     pub leases: LeaseRegistry,
     /// Policy runtime (read + write).
     pub policy: Arc<PolicyRuntime>,
+    /// Optional handle to the workspace's hot-reload primitive. When
+    /// `Some`, the `POST /v1/admin/config/reload` handler accepts new
+    /// [`crate::config::RuntimeConfig`] JSON and swaps via the handle.
+    /// When `None`, the handler returns
+    /// [`crate::api::envelope::ApiErrorCode::FeatureUnavailable`]
+    /// (503).
+    pub reload: Option<Arc<ReloadHandle>>,
 }
 
 /// State carried by the discovery trust-boundary router. Discovery
@@ -61,6 +72,7 @@ mod tests {
         let _admin = AdminState {
             leases: leases.clone(),
             policy,
+            reload: None,
         };
         let _disc = DiscoveryState { leases };
     }
