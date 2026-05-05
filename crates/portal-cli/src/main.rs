@@ -3,12 +3,14 @@
 //! Phase 7 B2 ships the CLI argument-parsing skeleton:
 //! - `portal expose --hostname X --target Y --relay R` parses cleanly.
 //! - `portal list` parses cleanly.
-//! - The actual expose-flow + lease-listener wires up in subsequent
-//!   batches once Phase 6a B2 (MITM probe + eclipse picker) lands.
+//! - The actual expose-flow + lease-listener composes the
+//!   [`portal_sdk`] surfaces (`ExposeSession` lifecycle, listener
+//!   loop, identity loader); see `portal_sdk`'s lib.rs §Phase 6a
+//!   implementation status for the per-unit deferrals.
 //!
-//! Until then, every subcommand prints the parsed args + a
-//! "deferred to subsequent batch" notice and exits 0 — sufficient
-//! for the harness to verify the CLI shape.
+//! Until those surfaces are composed end-to-end, every subcommand
+//! prints the parsed args + a deferral notice and exits 0 —
+//! sufficient for the harness to verify the CLI shape.
 
 #![forbid(unsafe_code)]
 
@@ -40,7 +42,7 @@ struct ExposeArgs {
     #[arg(long)]
     target: String,
     /// Relay descriptor URL or local file. Repeatable for multi-relay
-    /// (eclipse-resistant) selection — Phase 6a B2 wires the picker.
+    /// selection.
     #[arg(long = "relay")]
     relays: Vec<String>,
     /// Reject the connection if the MITM probe disagrees with the
@@ -84,7 +86,7 @@ fn run_expose(args: &ExposeArgs) {
         relays = ?args.relays,
         ban_mitm = args.ban_mitm,
         event_capacity = portal_sdk::DEFAULT_EVENT_CHANNEL_CAPACITY,
-        "portal expose parsed args; full flow lands in Phase 6a B2 + Phase 7 B3",
+        "portal expose parsed args; end-to-end flow not yet composed (deferred)",
     );
     println!(
         "portal expose: parsed --hostname={} --target={} --relays={:?} --ban-mitm={}",
@@ -94,11 +96,11 @@ fn run_expose(args: &ExposeArgs) {
         "event channel capacity: {}",
         portal_sdk::DEFAULT_EVENT_CHANNEL_CAPACITY
     );
-    println!("expose flow lands in Phase 6a B2 + Phase 7 B3");
+    println!("expose flow not yet composed end-to-end (deferred — see portal_sdk)");
 }
 
 fn run_list(args: &ListArgs) {
     tracing::info!(hostname = ?args.hostname, "portal list parsed args");
     println!("portal list: hostname filter = {:?}", args.hostname);
-    println!("list flow lands in Phase 7 B3");
+    println!("list flow not yet composed end-to-end (deferred)");
 }
