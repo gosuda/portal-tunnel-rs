@@ -248,7 +248,8 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
     // If either file is missing, fall back to the default
     // `PolicyRuntime` so the iter-119 baseline of `serve` working
     // without `init` first is preserved.
-    let policy = if let Some(bundle) = load_bundle_if_present(&args.state_dir).await? {
+    let bundle = load_bundle_if_present(&args.state_dir).await?;
+    let reload_handle: Option<Arc<portal_relay::ReloadHandle>> = bundle.map(|bundle| {
         let bundle_name = bundle.server.name.clone();
         let ip_ban_count = bundle.runtime.ip_ban_list.len();
         let bps_cap = bundle.runtime.bps_per_identity;
@@ -259,13 +260,52 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
             bps_cap_per_identity = bps_cap,
             "loaded U13 config bundle from state_dir; PolicyRuntime is reload-aware",
         );
-        PolicyRuntime::new().with_reload_handle(handle)
-    } else {
+        handle
+    });
+
+    if reload_handle.is_none() {
         tracing::info!(
             "no bootstrap.json/runtime.json found in state_dir; \
              using default PolicyRuntime (run `portal-relay init` to scaffold)",
         );
-        PolicyRuntime::new()
+    }
+
+    let policy = reload_handle.as_ref().map_or_else(PolicyRuntime::new, |handle| {
+        PolicyRuntime::new().with_reload_handle(Arc::clone(handle))
+    });
+
+    // 2.5. Spawn the optional config-file watcher.
+    //
+    // Hoare invariant: the watcher only fires when a bundle was
+    // loaded — there is no point watching a non-existent
+    // runtime.json. The JoinHandle is held for shutdown-time
+    // abort; aborting drops the inner debouncer, which signals the
+    // OS-level watcher to stop. Spawn-time errors log warn and
+    // continue without hot-reload (best-effort, per iter-126's
+    // resilience contract).
+    #[cfg(feature = "config_file_watch")]
+    let watcher_handle: Option<tokio::task::JoinHandle<()>> = match &reload_handle {
+        Some(handle) => {
+            let runtime_path = args.state_dir.join("runtime.json");
+            match portal_relay::watch_runtime_config(Arc::clone(handle), runtime_path.clone()) {
+                Ok(jh) => {
+                    tracing::info!(
+                        runtime_path = %runtime_path.display(),
+                        "spawned config_file_watch task; runtime.json edits trigger reload",
+                    );
+                    Some(jh)
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        ?err,
+                        runtime_path = %runtime_path.display(),
+                        "failed to spawn config_file_watch; continuing without hot-reload",
+                    );
+                    None
+                }
+            }
+        }
+        None => None,
     };
 
     let server = Server::with_components(LeaseRegistry::new(), policy);
@@ -280,6 +320,20 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
     tracing::info!("shutdown signal received");
 
     // 4. Drain.
+    //
+    // Abort the config-file watcher first AND await its
+    // JoinHandle: `abort()` only requests cancellation, so we must
+    // await the handle to guarantee the task actually drops its
+    // inner debouncer (which signals the OS-level watcher to stop)
+    // before the server drains. The await resolves with
+    // `Err(JoinError)` whose `is_cancelled()` is true; we discard
+    // it.
+    #[cfg(feature = "config_file_watch")]
+    if let Some(jh) = watcher_handle {
+        jh.abort();
+        let _ = jh.await;
+        tracing::info!("aborted config_file_watch task");
+    }
     server.shutdown().await;
     acme_mgr.shutdown().await;
     tracing::info!("portal-relay stopped");

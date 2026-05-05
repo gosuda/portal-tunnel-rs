@@ -11,6 +11,15 @@ repository.workspace = true
 name = "portal-relay"
 path = "src/main.rs"
 
+[features]
+default = []
+# Operator-opt-in filesystem watcher that converts
+# `runtime.json` writes into `ReloadHandle::reload(...)` calls. The
+# watcher itself lives in `portal-relay`; this feature propagates the
+# flag so the binary's `serve` body can spawn the watcher when the
+# operator has run `init` (or hand-written both config files).
+config_file_watch = ["portal-relay/config_file_watch"]
+
 [dependencies]
 # Cross-crate
 portal-acme = { workspace = true }
