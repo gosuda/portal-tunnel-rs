@@ -133,6 +133,23 @@ impl PolicyRuntime {
             (cap != 0).then_some(cap)
         })
     }
+
+    /// Count of operator-managed IP bans in the most recent reload
+    /// snapshot. Returns `0` when no [`ReloadHandle`] is attached.
+    ///
+    /// Counts ONLY the operator-managed list at
+    /// [`crate::config::RuntimeConfig::ip_ban_list`]; dynamic in-memory
+    /// bans set via [`IpFilter::ban`] are NOT included. The two
+    /// surfaces are intentionally distinct: dynamic bans are
+    /// abuse-response (rate-limit hits, MITM probe failures);
+    /// operator-managed bans are the `runtime.json`-curated complement.
+    /// Mirrors the [`Self::bps_cap_per_identity`] reader pattern.
+    #[must_use]
+    pub fn ip_ban_count(&self) -> usize {
+        self.reload
+            .as_ref()
+            .map_or(0, |handle| handle.current().ip_ban_list.len())
+    }
 }
 
 #[cfg(test)]
@@ -267,5 +284,33 @@ mod tests {
         });
         let runtime = PolicyRuntime::new().with_reload_handle(handle);
         assert_eq!(runtime.bps_cap_per_identity(), Some(1024));
+    }
+
+    #[test]
+    fn ip_ban_count_returns_zero_without_reload_handle() {
+        // Even with a populated in-memory IpFilter, ip_ban_count
+        // counts ONLY the operator-managed reload list — the
+        // documented contract distinguishing dynamic abuse-response
+        // bans from operator-curated ones.
+        let filter = IpFilter::new();
+        filter.ban("9.9.9.9".parse().unwrap());
+        filter.ban("9.9.9.10".parse().unwrap());
+        let runtime = PolicyRuntime::new().with_ip_filter(filter);
+        assert_eq!(runtime.ip_ban_count(), 0);
+    }
+
+    #[test]
+    fn ip_ban_count_returns_reload_list_length() {
+        let handle = sample_reload_handle(RuntimeConfig {
+            bps_per_identity: 0,
+            ip_ban_list: vec![
+                "10.0.0.1".parse().unwrap(),
+                "10.0.0.2".parse().unwrap(),
+                "fe80::1".parse().unwrap(),
+            ],
+            ..RuntimeConfig::default()
+        });
+        let runtime = PolicyRuntime::new().with_reload_handle(handle);
+        assert_eq!(runtime.ip_ban_count(), 3);
     }
 }
