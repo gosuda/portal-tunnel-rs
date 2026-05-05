@@ -270,9 +270,11 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
         );
     }
 
-    let policy = reload_handle.as_ref().map_or_else(PolicyRuntime::new, |handle| {
-        PolicyRuntime::new().with_reload_handle(Arc::clone(handle))
-    });
+    let policy = reload_handle
+        .as_ref()
+        .map_or_else(PolicyRuntime::new, |handle| {
+            PolicyRuntime::new().with_reload_handle(Arc::clone(handle))
+        });
 
     // 2.5. Spawn the optional config-file watcher.
     //
