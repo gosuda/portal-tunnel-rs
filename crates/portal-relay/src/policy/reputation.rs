@@ -94,6 +94,7 @@ use papaya::HashMap as PapayaMap;
 pub use crate::state::lease_registry::IdentityKey;
 
 use crate::error::RelayResult;
+use crate::policy::honeypot::HoneypotMatcher;
 use crate::state::persistence::{read_json, write_json_atomic};
 
 // ---------------------------------------------------------------------------
@@ -213,12 +214,17 @@ pub enum SignalKind {
     /// argument so callers can override per call site.
     RateLimited,
     /// The request hit a configured honeypot path
-    /// (`/.env`, `/wp-admin/*`, …). Reserved for the
-    /// `HoneypotMatcher` wiring follow-up.
+    /// (`/.env`, `/wp-admin/*`, …). The engine owns the matcher
+    /// (see [`ReputationEngine::record_honeypot_if_match`] +
+    /// [`ReputationEngine::with_config_and_honeypot_matcher`]) so
+    /// listener-pipeline call sites invoke a single one-liner per
+    /// request — no extra plumbing needed.
     ///
-    /// TODO(R10-followup): wire `Arc<HoneypotMatcher>` so the
-    /// listeners pipeline can call `record_signal(_, HoneypotHit, _)`
-    /// when an inbound request URI matches the configured glob set.
+    /// TODO(R10-followup): wire the per-request invocation from the
+    /// SDK + discovery API request handlers so `record_honeypot_if_match`
+    /// fires on every inbound request URI before downstream
+    /// dispatch (the engine API exists today; the call site does
+    /// not yet).
     HoneypotHit,
     /// A request was blocked by the engine itself (downstream
     /// handler observed [`ReputationDecision::Block`]) — the
@@ -523,6 +529,17 @@ struct Inner {
     /// limiter never quotes the old `governor_quota` under the
     /// new threshold doc.
     state: arc_swap::ArcSwap<EngineState>,
+    /// Compiled honeypot path matcher consulted by
+    /// [`ReputationEngine::record_honeypot_if_match`]. Held as
+    /// `Arc<HoneypotMatcher>` so listener-pipeline call sites can
+    /// invoke the engine without cloning the underlying pattern
+    /// vectors. v0.1 stores this on `Inner` (not on `EngineState`)
+    /// because matcher hot-reload is a U13 deliverable that pairs
+    /// `arc-swap<HoneypotMatcher>` with `arc-swap<ReputationConfig>`
+    /// inside the same swap unit; landing it here today keeps the
+    /// listener-pipeline integration unblockable while leaving the
+    /// hot-reload story for U13.
+    honeypot_matcher: Arc<HoneypotMatcher>,
 }
 
 impl core::fmt::Debug for ReputationEngine {
@@ -549,17 +566,40 @@ impl ReputationEngine {
         Self::with_config(ReputationConfig::default())
     }
 
-    /// Build an engine with a caller-supplied [`ReputationConfig`].
+    /// Build an engine with a caller-supplied [`ReputationConfig`]
+    /// and the workspace-default [`HoneypotMatcher`].
+    ///
     /// Used by the behavioral gate test to dial the decay constant
     /// to a 1-second half-life so the round-trip completes inside
-    /// a few seconds.
+    /// a few seconds. Operators who need a non-default honeypot
+    /// pattern set use [`Self::with_config_and_honeypot_matcher`].
     #[must_use]
     pub fn with_config(config: ReputationConfig) -> Self {
+        Self::with_config_and_honeypot_matcher(config, HoneypotMatcher::default())
+    }
+
+    /// Build an engine with caller-supplied [`ReputationConfig`]
+    /// AND [`HoneypotMatcher`]. Use this when the operator-tuned
+    /// honeypot pattern set differs from
+    /// [`HoneypotMatcher::with_defaults`] (the workspace default
+    /// of `/.env`, `/.git/*`, `/wp-admin/*` per Phase 5 plan U12).
+    ///
+    /// The matcher hot-reload story (`arc-swap<HoneypotMatcher>`
+    /// alongside `arc-swap<ReputationConfig>`) is a U13 deliverable;
+    /// this constructor seeds the matcher once at engine-build
+    /// time so the listener-pipeline integration is unblockable
+    /// today, with the swap surface added later.
+    #[must_use]
+    pub fn with_config_and_honeypot_matcher(
+        config: ReputationConfig,
+        honeypot_matcher: HoneypotMatcher,
+    ) -> Self {
         let state = Self::build_state(config);
         Self {
             inner: Arc::new(Inner {
                 scores: PapayaMap::new(),
                 state: arc_swap::ArcSwap::new(Arc::new(state)),
+                honeypot_matcher: Arc::new(honeypot_matcher),
             }),
         }
     }
@@ -770,6 +810,54 @@ impl ReputationEngine {
     pub fn record_signal_default(&self, identity: IdentityKey, signal_kind: SignalKind) {
         let weight = self.inner.state.load().config.weight_for(signal_kind);
         self.record_signal(identity, signal_kind, weight);
+    }
+
+    /// Check `path` against the configured [`HoneypotMatcher`]; if
+    /// it matches, record a [`SignalKind::HoneypotHit`] signal at the
+    /// configured weight (default `25.0` per ADR-0007) and return
+    /// `true`. Returns `false` (no signal recorded) on miss.
+    ///
+    /// This is the listener-pipeline call site enumerated in
+    /// honeypot.rs §"Out-of-scope (TODO follow-up)" — the engine
+    /// owns the matcher and the recording so SDK/discovery handlers
+    /// invoke it as a one-liner per request:
+    ///
+    /// ```text
+    /// engine.record_honeypot_if_match(identity, request.uri().path());
+    /// ```
+    ///
+    /// Caller responsibilities:
+    /// - **Strip query strings before calling.** The matcher is a
+    ///   pure path predicate (honeypot.rs §"Match semantics"); it
+    ///   does NOT split on `?`. A caller passing a query-bearing
+    ///   string will get a match if the prefix portion matches a
+    ///   configured glob (the `accept-on-the-side-of-blocking-an-
+    ///   attacker` posture is documented and pinned by
+    ///   `glob_matches_query_bearing_paths_against_default_set`).
+    /// - **Deduplicate within a request.** A request whose path
+    ///   matches multiple patterns produces one signal. The
+    ///   matcher is short-circuit on the exact-match check, so this
+    ///   is structurally guaranteed today; callers should still
+    ///   invoke this once per request to avoid scoring an N-segment
+    ///   path-rewrite chain N times.
+    #[must_use = "the boolean return signals whether a honeypot signal was recorded; \
+                  callers that ignore it lose the ability to short-circuit downstream \
+                  pipeline stages on a match"]
+    pub fn record_honeypot_if_match(&self, identity: IdentityKey, path: &str) -> bool {
+        if !self.inner.honeypot_matcher.matches(path) {
+            return false;
+        }
+        self.record_signal_default(identity, SignalKind::HoneypotHit);
+        true
+    }
+
+    /// Borrow the engine's [`HoneypotMatcher`] for read-only use
+    /// (e.g., the admin `/v1/admin/policy/snapshot` endpoint
+    /// reporting compiled pattern counts, or a test asserting
+    /// the configured pattern set).
+    #[must_use]
+    pub fn honeypot_matcher(&self) -> Arc<HoneypotMatcher> {
+        Arc::clone(&self.inner.honeypot_matcher)
     }
 
     /// Run the v0.1 R10 decision pipeline against the supplied
@@ -1436,6 +1524,85 @@ mod tests {
             "score {score} should be ~5.0 after record_signal_default \
              with configured weight 5.0",
         );
+    }
+
+    /// `record_honeypot_if_match` records a [`SignalKind::HoneypotHit`]
+    /// signal at the configured weight when the path matches the
+    /// engine's [`HoneypotMatcher`], and returns `true`. On miss it
+    /// records nothing and returns `false`.
+    ///
+    /// Pins the listener-pipeline contract: a single honeypot hit
+    /// produces a single signal at the ADR-0007 default weight
+    /// (`25.0`), and the score after one hit equals the weight.
+    #[test]
+    fn record_honeypot_if_match_records_hit_at_configured_weight() {
+        let engine = ReputationEngine::new();
+        let id = IdentityKey([0xa1u8; 32]);
+
+        // /.env is in the workspace-default pattern set; matches.
+        let matched = engine.record_honeypot_if_match(id, "/.env");
+        assert!(matched, "/.env must match the workspace-default set");
+
+        let score = engine.score(id);
+        assert!(
+            (score - REPUTATION_HONEYPOT_HIT_WEIGHT).abs() < 1e-6,
+            "after one hit, score {score} should equal the configured \
+             HoneypotHit weight ({REPUTATION_HONEYPOT_HIT_WEIGHT})",
+        );
+    }
+
+    /// `record_honeypot_if_match` returns `false` and records no
+    /// signal when the path does not match any configured honeypot
+    /// pattern.
+    #[test]
+    fn record_honeypot_if_match_skips_non_matching_path() {
+        let engine = ReputationEngine::new();
+        let id = IdentityKey([0xb2u8; 32]);
+
+        let matched = engine.record_honeypot_if_match(id, "/v1/sdk/register");
+        assert!(
+            !matched,
+            "/v1/sdk/register must not match the workspace-default set",
+        );
+
+        let score = engine.score(id);
+        assert!(
+            score == 0.0,
+            "score {score} should be 0.0 (no signal recorded on miss)",
+        );
+    }
+
+    /// `with_config_and_honeypot_matcher` honors a caller-supplied
+    /// matcher: a path NOT in the workspace defaults but in the
+    /// caller's set must match, and a workspace-default path NOT in
+    /// the caller's set must NOT match. Pins that the explicit
+    /// constructor replaces (rather than augments) the default
+    /// pattern set.
+    #[test]
+    fn with_config_and_honeypot_matcher_honors_caller_supplied_set() {
+        let cfg = ReputationConfig::default();
+        let matcher = HoneypotMatcher::from_patterns(["/admin-only-path"]);
+        let engine = ReputationEngine::with_config_and_honeypot_matcher(cfg, matcher);
+        let id = IdentityKey([0xc3u8; 32]);
+
+        // Caller-supplied pattern matches.
+        assert!(engine.record_honeypot_if_match(id, "/admin-only-path"));
+        // Workspace-default pattern does NOT match (replaced, not merged).
+        let id2 = IdentityKey([0xc4u8; 32]);
+        assert!(!engine.record_honeypot_if_match(id2, "/.env"));
+    }
+
+    /// `honeypot_matcher()` returns an [`Arc`] handle to the engine's
+    /// configured matcher; pattern counts must reflect the workspace
+    /// defaults (3 patterns: 1 exact `/.env`, 2 prefix `/.git/*`,
+    /// `/wp-admin/*`). Pins the read-only accessor surface used by
+    /// the admin policy-snapshot endpoint.
+    #[test]
+    fn honeypot_matcher_accessor_returns_workspace_defaults() {
+        let engine = ReputationEngine::new();
+        let matcher = engine.honeypot_matcher();
+        assert_eq!(matcher.exact_pattern_count(), 1, "/.env");
+        assert_eq!(matcher.prefix_pattern_count(), 2, "/.git/* + /wp-admin/*");
     }
 
     /// `persist_to_path` then `restore_from_path` round-trips the
