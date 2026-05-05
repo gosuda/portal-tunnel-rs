@@ -803,10 +803,11 @@ impl ReputationEngine {
     )]
     pub fn decide(&self, identity: IdentityKey, ip: IpAddr, lease: &LeaseId) -> ReputationDecision {
         let span = tracing::Span::current();
-        // One ArcSwap load amortises the limiter + config reads
-        // across the whole decision; a concurrent `swap_config`
-        // either lands before this load (we see the new pair) or
-        // after (we see the old pair) — never a mix.
+        // The limiter + threshold reads in this method body share
+        // one load; nested calls (`score_at`, `record_signal_default`)
+        // re-load the ArcSwap independently. Atomicity is per-load,
+        // not per-`decide` — a concurrent `swap_config` either lands
+        // fully before or fully after each load, never mid-load.
         let state = self.inner.state.load();
         let now = Timestamp::now();
         let score_before = self.score_at(identity, now);
@@ -1481,7 +1482,9 @@ mod tests {
             engine.decide(id, ip, &lease),
             ReputationDecision::Block(BlockReason::RateLimited),
         );
-        assert_eq!(engine.config().block_threshold, 999.0);
+        // `block_threshold` visibility through `config()` after swap
+        // is pinned by `swap_config_returns_new_config_via_getter`;
+        // not re-asserted here.
     }
 
     /// `swap_config` does not touch the per-identity score table.
