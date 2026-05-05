@@ -114,6 +114,36 @@ async fn admin_router_built_from_default_server_returns_200_for_health() {
 }
 
 #[tokio::test]
+async fn admin_router_built_from_default_server_returns_sentinels_for_policy_snapshot() {
+    // The derived-policy snapshot endpoint must succeed regardless of
+    // whether `with_reload_handle` was called — the contract is
+    // 200 + sentinel values (None / 0). Pins this through the
+    // orchestrator-assembled router so a future `Server::admin_state`
+    // change that breaks the policy field cannot pass with the
+    // per-handler test in `admin_policy_snapshot_endpoint.rs` still
+    // green (which exercises a hand-rolled `AdminState`).
+    let server = Server::new();
+    let router = server.admin_router();
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/v1/admin/policy/snapshot")
+        .body(Body::empty())
+        .expect("request build");
+    let response = router.oneshot(request).await.expect("oneshot service");
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body collect");
+    let body: serde_json::Value =
+        serde_json::from_slice(&bytes).expect("response is JSON envelope");
+    assert_eq!(
+        body,
+        serde_json::json!({"data": {"bps_cap_per_identity": null, "ip_ban_count": 0}}),
+        "default Server must surface sentinel policy snapshot through admin_router()",
+    );
+}
+
+#[tokio::test]
 async fn admin_router_built_from_default_server_returns_503_for_reload() {
     // Server::new() leaves reload as None — the orchestrator-level
     // contract for "bundle was not loaded". The admin router must then
