@@ -24,7 +24,7 @@ use crate::separator::Role;
 ///    Returns `PortalCryptoError::Envelope("purpose mismatch")` on failure.
 /// 4. **Signature** — reconstructs the canonical signing input via
 ///    [`portal_wire::envelope::Envelope::signing_input`] and calls
-///    [`Ed25519Verifier::verify_strict_signing_input`].
+///    the private `Ed25519Verifier::verify_strict_signing_input` method.
 ///    Returns `PortalCryptoError::Envelope(sig_error)` on failure.
 ///
 /// # Errors

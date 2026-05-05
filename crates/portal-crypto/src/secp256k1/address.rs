@@ -9,7 +9,7 @@
 //!    to the 64-byte input.
 //! 4. Take the trailing 20 bytes of the 32-byte digest as the raw address.
 //!
-//! [`EthAddress::fmt`] (via `Display`) produces the EIP-55 mixed-case
+//! [`EthAddress`]'s `Display` impl produces the EIP-55 mixed-case
 //! checksum form, e.g. `0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed`.
 
 use std::fmt;

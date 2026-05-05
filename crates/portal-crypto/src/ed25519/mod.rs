@@ -3,17 +3,17 @@
 //! This module owns the three concerns that together form the relay's
 //! ed25519 identity:
 //!
-//! - **[`key`]** — the [`RelayEd25519Key`] newtype and its sole constructor
-//!   [`load_relay_ed25519_key`]. Key material is held behind
+//! - **[`key`]** — the [`key::RelayEd25519Key`] newtype and its sole constructor
+//!   [`key::load_relay_ed25519_key`]. Key material is held behind
 //!   `secrecy::SecretBox<RelayEd25519Key>` so secrets are zeroized on drop.
 //!
-//! - **[`sign`]** — [`Ed25519Signer`], which exposes exactly one public sign
-//!   method: [`Ed25519Signer::sign_with_separator`]. The method prepends the
+//! - **[`sign`]** — [`sign::Ed25519Signer`], which exposes exactly one public sign
+//!   method: [`sign::Ed25519Signer::sign_with_separator`]. The method prepends the
 //!   SEC-007 domain separator (chosen at compile time via the [`Role`] typestate)
 //!   plus length prefixes before signing, making cross-protocol confusion
 //!   attacks structurally impossible.
 //!
-//! - **[`verify`]** — [`Ed25519Verifier`], the mirror of [`Ed25519Signer`].
+//! - **[`verify`]** — [`verify::Ed25519Verifier`], the mirror of [`sign::Ed25519Signer`].
 //!   Uses `verify_strict` (ed25519-dalek 2.x) to reject malleable signatures.
 //!
 //! ## Hash-input framing (SEC-007)
@@ -46,8 +46,8 @@ use crate::separator::Role;
 /// - `payload_len` is `u32` big-endian to accommodate envelope payloads up
 ///   to portal-wire's per-channel size budget.
 ///
-/// Both [`Ed25519Signer::sign_with_separator`] and
-/// [`Ed25519Verifier::verify_with_separator`] call this function, ensuring
+/// Both [`sign::Ed25519Signer::sign_with_separator`] and
+/// [`verify::Ed25519Verifier::verify_with_separator`] call this function, ensuring
 /// the framing is identical on both sides.
 ///
 /// # Errors

@@ -26,9 +26,10 @@ use crate::separator::Role;
 ///    caller-supplied `claims` + `payload`.
 /// 2. [`portal_wire::envelope::Envelope::signing_input`] is called with
 ///    `R::SEPARATOR.as_bytes()` to produce the canonical bytes.
-/// 3. [`Ed25519Signer::sign_raw_signing_input`] signs those bytes **directly**
-///    — without adding extra length-prefix framing — so the wire shape is
-///    single-sourced from `portal-wire` and the verifier can reconstruct it
+/// 3. The private `Ed25519Signer::sign_raw_signing_input` method signs those
+///    bytes **directly** — without adding extra length-prefix framing — so
+///    the wire shape is single-sourced from `portal-wire` and the verifier
+///    can reconstruct it
 ///    identically.
 ///
 /// # Errors

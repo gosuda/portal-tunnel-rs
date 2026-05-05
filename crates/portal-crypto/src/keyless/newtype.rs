@@ -37,7 +37,8 @@ use crate::error::PortalCryptoError;
 /// Opaque handle to a heap-allocated [`KeylessSigningKey`] trait object.
 ///
 /// Callers obtain instances either through [`load_keyless_signing_key`] (file
-/// path) or through [`handle_for_test`] (test doubles).  The inner
+/// path) or through `handle_for_test` (test-only, `#[cfg(test)]` —
+/// doesn't render in standard rustdoc).  The inner
 /// `Box<dyn KeylessSigningKey>` is sealed behind a [`SecretBox`] so that
 /// debug-printing does not accidentally leak key material.
 ///
