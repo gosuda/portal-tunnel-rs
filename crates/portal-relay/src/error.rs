@@ -45,6 +45,10 @@ pub enum RelayError {
     /// config validation, packet I/O). Phase 6b/B U6.
     #[error("overlay: {0}")]
     Overlay(#[from] crate::overlay::OverlayError),
+
+    /// Lease-access-token issue/verify failure. Phase 5 SDK-API S1.
+    #[error(transparent)]
+    LeaseToken(#[from] crate::state::lease_token::LeaseTokenError),
 }
 
 /// Crate-wide `Result<T, RelayError>`.

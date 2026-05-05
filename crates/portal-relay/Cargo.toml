@@ -103,8 +103,19 @@ config_file_watch = ["dep:notify", "dep:notify-debouncer-full"]
 [dependencies]
 arc-swap = { workspace = true }
 axum = { workspace = true }
+# `base64` (Phase 5 SDK-API S1) — `<base64url(payload)>.<base64url(sig)>`
+# framing for `state::lease_token` access tokens. Only the
+# `URL_SAFE_NO_PAD` engine constant is consumed.
+base64 = { workspace = true }
 compact_str = { workspace = true, features = ["serde"] }
 defguard_boringtun = { workspace = true }
+# `ed25519-dalek` (Phase 5 SDK-API S1) — `Signature::from_bytes` /
+# `Signature::to_bytes` for the lease-access-token verify path,
+# which converts the on-the-wire 64-byte signature blob into the
+# `Ed25519Verifier::verify_with_separator` call argument. Only the
+# `Signature` type surface is consumed; signing-key construction
+# stays inside `portal-crypto`.
+ed25519-dalek = { workspace = true }
 # Phase 5 U13 follow-up (env-var override for `RuntimeConfig` loading)
 # adds figment as a non-optional dep. The workspace pin enables the
 # `env`, `json`, and `toml` features; this crate consumes only the
@@ -152,6 +163,11 @@ zeroize = { workspace = true }
 
 [dev-dependencies]
 aws-lc-rs = { workspace = true }
+# Self-reference activates `insecure-test-constructors` so the
+# `state::lease_token` inline tests can reach
+# `portal_crypto::ed25519_from_seed_for_test` without leaking the gate
+# to production. Same pattern as `portal-net`'s dev-dep stanza.
+portal-crypto = { workspace = true, features = ["insecure-test-constructors"] }
 # Phase 5 U13 follow-up: the env-var override tests for
 # `RelayConfigBundle::from_files_with_env` use `figment::Jail` for
 # scoped env-var isolation. The `Jail` type is gated on figment's

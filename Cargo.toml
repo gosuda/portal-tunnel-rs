@@ -100,6 +100,10 @@ socket2 = "0.6"
 # 32-byte ed25519 SubjectPublicKeyInfo for raw-pubkey pinning.
 x509-cert = { version = "0.2", default-features = false, features = ["std"] }
 bytes = { version = "1", features = ["serde"] }
+# `base64` is consumed by `portal-relay::state::lease_token` for the
+# JWT-style `<base64url(payload)>.<base64url(sig)>` framing (S1). The
+# `URL_SAFE_NO_PAD` engine constant is the only API surface used.
+base64 = "0.22"
 postcard = { version = "1", features = ["alloc", "use-std"] }
 winnow = "1"
 bon = "3"

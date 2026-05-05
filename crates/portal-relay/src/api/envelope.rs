@@ -204,7 +204,8 @@ impl From<RelayError> for ApiError {
             | RelayError::Crypto(_)
             | RelayError::Wire(_)
             | RelayError::Keyless(_)
-            | RelayError::Overlay(_) => Self::internal(),
+            | RelayError::Overlay(_)
+            | RelayError::LeaseToken(_) => Self::internal(),
         }
     }
 }
