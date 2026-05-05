@@ -1,11 +1,11 @@
 //! Relay identity loader — R2 trust-boundary `SecretBox<KeyType>` newtypes.
 //!
-//! Phase 5 B2 lands the **type plumbing** for the relay identity bundle:
-//! `RelayIdentity`, `IdentityPaths`, and the `load_quic_only` helper
-//! that materializes the QUIC trust surface. The full bundle loader
-//! (`load_or_create`) lands in Phase 5 B3 alongside the API HTTPS load
-//! path; this batch's surface is the type-level skeleton and the
-//! single-key load that the existing B2 plumbing can exercise today.
+//! The current surface ships the **type plumbing** for the relay
+//! identity bundle: `RelayIdentity`, `IdentityPaths`, and the
+//! `load_quic_only` helper that materializes the QUIC trust surface.
+//! The full bundle loader (`load_or_create`) and the API HTTPS load
+//! path land in a follow-up commit; today's surface is the type-level
+//! skeleton plus the single-key QUIC load.
 //!
 //! ## Trust-boundary discipline (R2)
 //!
@@ -13,16 +13,15 @@
 //! type. The Rust type system rejects accidental cross-use at compile
 //! time. The workspace clippy `disallowed_methods` rule
 //! (`portal_crypto::load_all_keys`) prohibits any function returning
-//! more than one signing key from a single load call. Phase 5 B2
-//! ships only **two** of the five key surfaces — `ApiHttpsKey` and
-//! `QuicIdentityKey` — because those are the only key types that
-//! exist in the workspace today. The remaining three
-//! (`KeylessSigningKey`, `RelayProtocolKey`, `SiweKey`) land
-//! alongside their consuming modules in subsequent batches:
+//! more than one signing key from a single load call. The current
+//! `RelayIdentity` shape carries only **two** of the five anticipated
+//! key surfaces — `ApiHttpsKey` and `QuicIdentityKey`. The remaining
+//! three follow on as their consuming surfaces wire the keys onto
+//! this bundle:
 //!
-//! - `KeylessSigningKey`: Phase 6b/A (keyless mTLS endpoint).
-//! - `RelayProtocolKey` / `SiweKey`: Phase 5 later batches (discovery
-//!   announce + admin SIWE-bind paths).
+//! - `KeylessSigningKey` (consumed by the keyless mTLS endpoint).
+//! - `RelayProtocolKey` / `SiweKey` (consumed by the discovery
+//!   announce path and the admin SIWE-bind path).
 
 use std::io;
 use std::path::PathBuf;
@@ -34,9 +33,12 @@ use secrecy::SecretBox;
 
 use crate::error::RelayResult;
 
-/// Relay identity bundle. Phase 5 B2 lands the two-key shape;
-/// subsequent batches extend with `KeylessSigningKey` (Phase 6b/A) and
-/// `RelayProtocolKey` / `SiweKey` (later P5 batches).
+/// Relay identity bundle.
+///
+/// Currently carries the two-key shape (`api_https` + `quic`);
+/// follow-up commits extend it with `KeylessSigningKey`,
+/// `RelayProtocolKey`, and `SiweKey` as their consuming surfaces
+/// wire those keys onto the bundle.
 pub struct RelayIdentity {
     /// HTTPS API trust surface (admin / sdk / discovery routers).
     /// rustls `ServerConfig` for these surfaces is built from this key.
@@ -75,8 +77,10 @@ impl IdentityPaths {
         Self { dir }
     }
 
-    /// Path to the API HTTPS key file (`<dir>/api_https.der`). Phase
-    /// 5 B3 wires the load path; Phase 5 B2 only declares the layout.
+    /// Path to the API HTTPS key file (`<dir>/api_https.der`). The
+    /// path layout is current; the load path that materializes
+    /// `SecretBox<ApiHttpsKey>` from this file lands in a follow-up
+    /// commit.
     #[must_use]
     pub fn api_https(&self) -> PathBuf {
         self.dir.join("api_https.der")
@@ -97,9 +101,10 @@ impl IdentityPaths {
 
 /// Load the QUIC backhaul identity, generating + persisting if absent.
 ///
-/// This is the single-surface load path that Phase 5 B2 ships; the
-/// full `load_or_create` bundle loader lands in B3 alongside the API
-/// HTTPS load path.
+/// This is the single-surface load path the module ships today; the
+/// full `load_or_create` bundle loader (which materializes
+/// `SecretBox<ApiHttpsKey>` from disk and wires the future-extended
+/// key surfaces) lands in a follow-up commit.
 ///
 /// ## Race-safety
 ///
