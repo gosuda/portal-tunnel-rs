@@ -32,9 +32,8 @@
               └──────────────┘                └──────────────┘
 ```
 
-The full crate dependency graph + per-phase sequencing diagrams live in the
-roadmap plan (`port_go_to_rust_greenfield_383a2dc9.plan.md` §`High-Level
-Technical Design`).
+The full crate dependency graph + per-phase sequencing diagrams live in
+the roadmap ([`PLAN.md`](../PLAN.md) §High-Level Technical Design).
 
 ## Three trust boundaries (R2)
 
@@ -151,9 +150,14 @@ bounded. Implementors of the original `SignerExt` automatically satisfy
 that need Send (e.g., `tokio::spawn` boundaries) bound on the Send-variant.
 
 This is the **only** sanctioned migration shape for async-fn-in-trait that
-needs a Send bound. `async-trait` macro is banned (R9 / ADR-0002 / deny.toml).
-Reaching for `async-trait` after the first Send-related compile error is the
-expected anti-pattern; this section exists to head it off.
+needs a Send bound. `async-trait` is on the R9 / ADR-0002 Engineering-
+Default ban list as a direct dep; enforcement is review discipline plus the
+planned ast-grep CI gate ([`deny.toml`](../deny.toml) L104-114 documents
+why this is not expressible as a `bans.deny` array entry — async-trait
+appears transitively through alloy / axum / hyper / tokio so a full-tree
+deny would generate false positives, and `bans.deny` cannot scope to direct
+deps only). Reaching for `async-trait` after the first Send-related compile
+error is the expected anti-pattern; this section exists to head it off.
 
 ## Open architectural sections (Phase 1+ owners)
 
