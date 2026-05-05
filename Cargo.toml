@@ -19,6 +19,18 @@ rust-version = "1.95"
 license = "MIT"
 repository = "https://github.com/gosuda/portal-tunnel-rs"
 
+# `[workspace.dependencies]` is the architectural pin register per
+# ADR-0002 / Engineering Default R8 — one canonical version per
+# approved crate pick, so member crates inherit via
+# `<crate> = { workspace = true }` and version drift is caught at one
+# location. Pre-positioned pins (e.g., `utoipa`, `smoltcp`, `ratatui`,
+# `arc-swap`) document the approved choice for future-batch consumers
+# and have zero resolved-tree cost until a member references them.
+# Removing a pin requires an ADR-0002 amendment; cargo-machete only
+# catches per-member unused entries (not workspace-level pins) by
+# design — see `crates/portal-relay/Cargo.toml` for the per-member
+# discipline ("Adding deps here ahead of consumers would defeat the
+# cargo-machete gate").
 [workspace.dependencies]
 # Internal member crates
 portal-wire = { path = "crates/portal-wire", version = "0.1.0" }
