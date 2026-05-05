@@ -17,6 +17,10 @@ the wire (see [ADR-0001](docs/adr/0001-greenfield-wire.md)).
 
 - Architecture overview — [`docs/architecture.md`](docs/architecture.md)
 - Architecture decision records — [`docs/adr/README.md`](docs/adr/README.md)
+- Wire protocol spec (Phase 1, U16-gated) — [`docs/wire-protocol.md`](docs/wire-protocol.md)
+- Threat model (SEC-006) — [`docs/threat-model.md`](docs/threat-model.md)
+- Release engineering — [`docs/release-engineering.md`](docs/release-engineering.md)
+- Per-phase implementation plans — [`docs/plans/`](docs/plans/)
 - Constitution / agent operating rules — [`AGENTS.md`](AGENTS.md)
 - Contribution guide — [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Security policy — [`SECURITY.md`](SECURITY.md)
