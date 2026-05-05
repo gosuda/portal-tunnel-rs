@@ -19,7 +19,7 @@ section in the same commit.
 | `quinn` | Yes (per-connection driver) | No | drop the `Endpoint`; connection drivers exit on close | tasks not under our `JoinSet` |
 | `axum` + `hyper` | Yes (connection/service drivers; handler futures driven by them) | No | `axum::serve` cancellation OR `.with_graceful_shutdown(...)` PLUS an app-owned timeout/cancellation layer | connection-driving tasks not enclosed by our `JoinSet`; graceful shutdown alone does not bound handler runtime |
 | `instant-acme` | No | Yes (drop the future) | drop the order future | none — clean R9 composition |
-| `defguard_boringtun` | No (synchronous state machine) | Yes (drop the `Tunn`) | drop `Tunn`; consumer-driven `update_timers()` polling is in our task tree | none — fork's contract; verified at U6 land time |
+| `defguard_boringtun` | No (synchronous state machine) | Yes (drop the `Tunn`) | drop `Tunn`; consumer-driven `update_timers()` polling is in our task tree | none — fork's contract verified at Phase 6b/B Batch 2 land time |
 
 ### `quinn`
 
@@ -110,10 +110,12 @@ exit. Cancellation: cancel our wrapping tasks; the `Tunn` state machine
 itself has no async surface to cancel.
 
 **Implication for R9 honest-claim.** Clean composition. The fork's contract
-is verified at the U6 land-time when `crates/portal-relay/src/overlay/wg_device.rs`
-first imports the dep; if the verification surfaces a deviation from this
-preliminary contract, this section MUST be updated in the same commit and
-the audit re-validated.
+was verified at Phase 6b/B Batch 2 land time when
+[`crates/portal-relay/src/overlay/wg_device.rs`](../crates/portal-relay/src/overlay/wg_device.rs)
+imported the dep (`use defguard_boringtun::x25519;` plus the rate-limiter +
+session imports the adapter wraps). Any future deviation from this
+contract — whether surfaced by a fork upgrade or a downstream code change
+— MUST update this section in the same commit and re-validate the audit.
 
 ## R9 honest-claim
 
@@ -142,9 +144,12 @@ update to:
    would extend, not narrow, our R9 claim).
 
 CI gate (`xtask dep-audit`) fails if any required section header is missing
-from this file. The list of required sections is the union of:
-`## Per-dep contracts`, `### quinn`, `### axum + hyper`, `### instant-acme`,
-`### defguard_boringtun`, `## R9 honest-claim`.
+from this file. The list of required sections (verbatim, including the
+backticks the validator's `REQUIRED_HEADERS` constant in
+[`xtask/src/dep_audit.rs`](../xtask/src/dep_audit.rs) checks for):
+`## Per-dep contracts`, `` ### `quinn` ``, `` ### `axum` + `hyper` ``,
+`` ### `instant-acme` ``, `` ### `defguard_boringtun` ``,
+`## R9 honest-claim`.
 
 ## References
 
