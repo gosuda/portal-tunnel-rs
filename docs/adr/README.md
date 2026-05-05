@@ -11,6 +11,7 @@ non-trivial decision per phase. Status lifecycle: `proposed` → `accepted` →
 | [0003](0003-registry-fork-and-v2-1-8-migration.md) | Registry-fork strategy and v2.1.8 user-base migration posture | accepted |
 | [0004](0004-supported-clients-and-upgrade-encouragement.md) | Supported clients and upgrade-encouragement matrix (R13) | accepted |
 | [0005](0005-siwe-rs-stewardship.md) | siwe-rs stewardship and v0.2 fork-trigger criterion | accepted |
+| [0007](0007-r10-reputation-engine-defaults.md) | R10 v0.1 reputation engine defaults (decay, thresholds, governor quota, signal weights) | accepted |
 | [0014](0014-portal-relay-overlay-architecture.md) | Overlay architecture — sealed `WgDevice` + smoltcp + QUIC-on-smoltcp-UDP hop-mux | accepted |
 | [0015](0015-wireguard-userspace-fork-pick.md) | WireGuard userspace fork — defguard_boringtun primary, NepTUN secondary (pending license review) | accepted |
 | [0016](0016-keyless-async-bridge.md) | Keyless async bridge — bounded mpsc + spawn_blocking dispatch | accepted |
