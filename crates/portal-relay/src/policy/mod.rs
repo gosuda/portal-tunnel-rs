@@ -1,11 +1,18 @@
 //! Policy engine — base ACL/throttling + R10 v0.1 anti-abuse.
 //!
-//! Phase 5 B5 lands the minimum viable surface: `PolicyRuntime`
-//! aggregator + `IpFilter` + `ProxyTrust`. Phase 5 B7 (narrowed)
-//! lands the **core** R10 v0.1 per-relay reputation engine in
-//! [`reputation`]. Subsequent batches extend with `Approver`,
-//! `BpsManager`, ENS Sybil-gating bypass + honeypot matcher +
-//! persistence per plan U12 follow-ups.
+//! Phase 5 B3 lands the U6 base-policy port (narrowed): the
+//! [`runtime::PolicyRuntime`] aggregator together with
+//! [`ip_filter::IpFilter`] and [`proxy_trust::ProxyTrust`]. The
+//! Phase 5 plan's U6 unit also sketched `Approver` and
+//! `BpsManager`; both were deferred to a follow-up commit and are
+//! not yet in tree. Phase 5 B7 (narrowed) lands the **core** R10
+//! v0.1 per-relay reputation engine in [`reputation`] plus the
+//! [`honeypot`] path-matcher struct. The U12 R10-engine follow-ups
+//! are flagged inline by `TODO(R10-followup)` markers in
+//! `reputation.rs` (ENS Sybil-gating exemption, honeypot call-site
+//! wiring, `reputation.json` persistence, hot-swap support,
+//! per-signal-kind weight policy). See this crate's `lib.rs` for
+//! current Phase 5 status.
 
 pub mod honeypot;
 pub mod ip_filter;
