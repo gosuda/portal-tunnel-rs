@@ -1,10 +1,10 @@
 //! `portal-relay init` — scaffold default config files in a state dir.
 //!
-//! First production binary consumer of the U13 chain: builds a
-//! [`RelayServerConfig`] via [`RelayServerConfig::new`] (iter-123) and
-//! a [`RuntimeConfig::default`] (iter-123) and serializes both via the
-//! iter-124 serde derives into `bootstrap.json` + `runtime.json` under
-//! the operator-supplied state directory.
+//! First production binary consumer of the U13 config chain: builds a
+//! [`RelayServerConfig`] via [`RelayServerConfig::new`] and a
+//! [`RuntimeConfig::default`], then serializes both through the
+//! workspace serde derives into `bootstrap.json` + `runtime.json`
+//! under the operator-supplied state directory.
 //!
 //! ## Operator-safety invariant
 //!
@@ -16,8 +16,10 @@
 //! stray empty directory behind.
 //!
 //! Subsequent `portal-relay serve` invocations consume the files via
-//! iter-127's [`portal_relay::RelayConfigBundle::from_files`] — that
-//! integration is a separate later slice.
+//! [`portal_relay::RelayConfigBundle::from_files_with_env`] (env-overlay
+//! loader; operators set `PORTAL_RELAY_*` env vars to override
+//! runtime fields). The serve integration is wired through
+//! `crate::load::load_bundle_if_present`.
 
 use std::path::PathBuf;
 
