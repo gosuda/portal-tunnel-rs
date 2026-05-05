@@ -25,7 +25,7 @@
 //!   the three ACME modes (`AcmeCloudflare`, `AcmeRoute53`,
 //!   `AcmeGcloud`). Until that wrapper lands those dispatch arms
 //!   return [`error::AcmeError::Config`] with the message
-//!   `"<Mode> not implemented in Phase 4 B6 (waits on B3-B5 + ACME client)"`.
+//!   `"<Mode> not implemented; waits on the instant-acme client wrapper"`.
 //!
 //! Phase 5/`portal-relay` consumes [`Manager`] directly. Local-mode
 //! boot is unblocked as of B6 — the local-self-signed cert flow is

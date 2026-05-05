@@ -2,8 +2,12 @@
 //!
 //! Composes the chosen [`crate::provider::DnsProvider`] with the on-disk persistence
 //! layer ([`crate::persist`]) and the (forthcoming) `instant-acme`
-//! client. Phase 4 Batch 6 ships **only the local-self-signed path**;
-//! ACME issuance via DNS-01 lands in B3-B5.
+//! client. Phase 4 Batch 6 ships **only the local-self-signed path**
+//! end-to-end. The DNS providers landed in B3 (Cloudflare), B4
+//! (Route53), and B5 (Google Cloud DNS); the `instant-acme` client
+//! wrapper that wires those providers under
+//! [`Manager::ensure_certificate`] for the three ACME modes is still
+//! pending.
 //!
 //! Lifecycle (Go reference parity):
 //! - `Manager::new(cfg)` validates config + selects the provider.
@@ -24,8 +28,9 @@
 //! mode-specific plumbing.
 //!
 //! `PublicIpResolver` is intentionally **not** introduced in this
-//! batch — per R8 minimalism it is deferred until a real ACME flow
-//! (B3-B5) needs to publish A records before solving DNS-01.
+//! batch — per R8 minimalism it is deferred until the live ACME flow
+//! (the pending instant-acme client wrapper) needs to publish A
+//! records before solving DNS-01.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -42,18 +47,24 @@ use crate::providers::local::LocalProvider;
 
 /// Mode the manager is configured for.
 ///
-/// Selected at `Manager::new` time from the [`AcmeConfig`]. Phase 4 B6
-/// implements only the [`Mode::LocalSelfSigned`] path; the others
-/// return `AcmeError::Config` until B3-B5 land.
+/// Selected at `Manager::new` time from the [`AcmeConfig`]. The
+/// [`Mode::LocalSelfSigned`] path is fully wired end-to-end. The
+/// three ACME modes select between landed DNS providers, but the
+/// dispatch wrapper that drives the instant-acme client through the
+/// chosen provider is still pending — those arms return
+/// [`AcmeError::Config`] until that wrapper lands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     /// Local self-signed dev mode (no DNS, no CA contact).
     LocalSelfSigned,
-    /// ACME via Cloudflare DNS-01 (deferred to B3).
+    /// ACME via Cloudflare DNS-01 (provider landed in B3; awaits
+    /// instant-acme dispatch wrapper).
     AcmeCloudflare,
-    /// ACME via Route53 DNS-01 (deferred to B4).
+    /// ACME via Route53 DNS-01 (provider landed in B4; awaits
+    /// instant-acme dispatch wrapper).
     AcmeRoute53,
-    /// ACME via Google Cloud DNS-01 (deferred to B5).
+    /// ACME via Google Cloud DNS-01 (provider landed in B5; awaits
+    /// instant-acme dispatch wrapper).
     AcmeGcloud,
 }
 
@@ -140,7 +151,8 @@ impl Manager {
     /// [`LocalProvider`].
     ///
     /// ACME modes: not yet implemented; returns
-    /// [`AcmeError::Config`] until B3-B5 + an ACME client land.
+    /// [`AcmeError::Config`] until the instant-acme client wrapper
+    /// lands.
     ///
     /// # Errors
     /// Returns [`AcmeError::Cert`] / [`AcmeError::Io`] on cert
@@ -151,7 +163,7 @@ impl Manager {
             Mode::LocalSelfSigned => self.ensure_certificate_local().await,
             Mode::AcmeCloudflare | Mode::AcmeRoute53 | Mode::AcmeGcloud => {
                 Err(AcmeError::Config(format!(
-                    "{:?} not implemented in Phase 4 B6 (waits on B3-B5 + ACME client)",
+                    "{:?} not implemented; waits on the instant-acme client wrapper",
                     self.mode,
                 )))
             }
