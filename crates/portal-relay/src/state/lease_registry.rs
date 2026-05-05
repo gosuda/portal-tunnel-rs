@@ -500,19 +500,31 @@ impl LeaseRegistry {
     /// other observes `None` and returns
     /// [`RelayError::ChallengeNotFound`].
     ///
+    /// # Single-use applies to ALL outcomes
+    ///
+    /// The pending entry is removed from the table at the START of
+    /// this method, BEFORE the TTL check or the SIWE verify runs.
+    /// That means any non-`Ok` outcome — `ChallengeExpired`,
+    /// `ChallengeInvalidSignature`, etc. — ALSO consumes the slot.
+    /// SDK authors MUST NOT ship "retry-with-corrected-echo" or
+    /// "retry-after-clock-skew" loops keyed on the same
+    /// `challenge_id`; on any failure the caller MUST request a
+    /// fresh challenge via `issue_register_challenge`.
+    ///
     /// # Errors
     ///
     /// - [`RelayError::ChallengeNotFound`] when no pending entry
     ///   matches `req.challenge_id` (never issued, already consumed,
     ///   or already swept).
     /// - [`RelayError::ChallengeExpired`] when the matching entry's
-    ///   `expires_at <= now` at consume time. (The entry is also
-    ///   removed in this branch — there is no point keeping a
-    ///   stale entry around.)
+    ///   `expires_at <= now` at consume time. The entry is removed
+    ///   regardless (see "Single-use applies to ALL outcomes" above).
     /// - [`RelayError::ChallengeInvalidSignature`] when the SIWE
     ///   re-parse, the binding-statement parse, the EIP-191 verify,
     ///   the domain/nonce equality, or the
-    ///   echoed-`siwe_message_text` equality fails.
+    ///   echoed-`siwe_message_text` equality fails. The entry is
+    ///   removed regardless (see "Single-use applies to ALL outcomes"
+    ///   above).
     pub async fn consume_register_challenge(
         &self,
         req: &RegisterRequest,
@@ -921,10 +933,19 @@ mod tests {
     }
 
     /// `AC3b`: concurrent `consume_register_challenge` calls with the
-    /// same `challenge_id` — exactly one returns Ok, the other
-    /// returns `ChallengeNotFound`.
-    #[tokio::test]
+    /// same `challenge_id` — exactly one returns Ok, the rest return
+    /// `ChallengeNotFound`.
+    ///
+    /// Uses a multi-threaded runtime + `RACE_TASK_COUNT = 16` so the
+    /// scheduler interleaves the futures. A current-thread runtime
+    /// with 2 tasks would also pass this test against a buggy
+    /// grab-then-check-under-no-lock implementation; the wider race
+    /// surface here amplifies scheduler-edge bugs that the structural
+    /// `papaya::HashMap::remove` atomicity protects against.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn concurrent_consume_yields_exactly_one_winner() {
+        const RACE_TASK_COUNT: u32 = 16;
+
         let reg = LeaseRegistry::new();
         let now = fixed_now();
         let req = make_challenge_request([0x77u8; 32]);
@@ -936,10 +957,10 @@ mod tests {
         let signed = sign_challenge(&resp, "race.portal.test", Vec::new());
 
         // R9: spawn into a caller-owned `JoinSet` rather than
-        // bare `tokio::spawn` so the test cleanly joins both
+        // bare `tokio::spawn` so the test cleanly joins all
         // futures at scope exit.
         let mut set = tokio::task::JoinSet::new();
-        for _ in 0..2 {
+        for _ in 0..RACE_TASK_COUNT {
             let reg_clone = reg.clone();
             let signed_clone = signed.clone();
             set.spawn(async move {
@@ -958,7 +979,11 @@ mod tests {
             }
         }
         assert_eq!(oks, 1, "exactly one consume must win");
-        assert_eq!(nf, 1, "the other must observe ChallengeNotFound");
+        assert_eq!(
+            nf,
+            RACE_TASK_COUNT - 1,
+            "the rest must observe ChallengeNotFound",
+        );
     }
 
     /// `AC4` / `AC5` — the LOAD-BEARING test:
