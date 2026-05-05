@@ -18,10 +18,13 @@
 //! ## JSON shape (serde policy)
 //!
 //! Both structs derive `serde::Serialize` + `serde::Deserialize` so
-//! future B8 follow-ups (file-watcher behind `cfg(feature =
-//! "config_file_watch")`, the `POST /v1/admin/config/reload`
-//! endpoint, and the figment-driven loader) consume a stable JSON
-//! contract. Each struct picks a different policy on purpose:
+//! the workspace consumers — the file-watcher behind
+//! `cfg(feature = "config_file_watch")`, the
+//! `POST /v1/admin/config/reload` and `GET /v1/admin/config/current`
+//! handlers, the figment-driven
+//! [`RelayConfigBundle::from_files_with_env`] loader, and the
+//! operator-facing `portal-relay init` subcommand — share a stable
+//! JSON contract. Each struct picks a different policy on purpose:
 //!
 //! - [`RuntimeConfig`] composes `#[serde(default)]` with
 //!   `#[serde(deny_unknown_fields)]`. The `default` half is
