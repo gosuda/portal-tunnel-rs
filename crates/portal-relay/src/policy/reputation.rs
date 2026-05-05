@@ -67,6 +67,7 @@
 //!   per-signal-kind audit span on every [`ReputationEngine::
 //!   record_signal`] lands in a follow-up commit.
 
+use std::collections::HashMap as StdHashMap;
 use std::net::IpAddr;
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -134,6 +135,29 @@ pub const REPUTATION_QUOTA_SUSTAINED: u32 = 50;
 /// 2:1 burst:sustained ratio per `governor`'s recommended starting
 /// shape.
 pub const REPUTATION_QUOTA_BURST: u32 = 100;
+
+/// Default per-signal weight for [`SignalKind::RateLimited`].
+///
+/// Matches the previously hardcoded `1.0` literal at the engine's
+/// internal rate-limit callsite, so behavior is bit-identical under
+/// the default [`ReputationConfig`]. Per-kind tuning is an
+/// ADR-0007 decision; this constant is the v0.1 placeholder.
+pub const REPUTATION_RATE_LIMITED_WEIGHT: f64 = 1.0;
+
+/// Default per-signal weight for [`SignalKind::HoneypotHit`].
+///
+/// The honeypot wiring follow-up may amplify this once a tenant-
+/// noisiness baseline exists; today it matches `RateLimited` so the
+/// signal-shape decision is decoupled from the plumbing change.
+/// Per-kind tuning is an ADR-0007 decision.
+pub const REPUTATION_HONEYPOT_HIT_WEIGHT: f64 = 1.0;
+
+/// Default per-signal weight for [`SignalKind::BlockedRequest`].
+///
+/// Matches the previously hardcoded `1.0` literal at the engine's
+/// internal blocked-request callsite. Per-kind tuning is an
+/// ADR-0007 decision.
+pub const REPUTATION_BLOCKED_REQUEST_WEIGHT: f64 = 1.0;
 
 // ---------------------------------------------------------------------------
 // LeaseId — third leg of the keyed-limiter triple
@@ -343,17 +367,56 @@ pub struct ReputationConfig {
     /// Quota for the per-`(identity, ip, lease)` keyed rate
     /// limiter. Default: [`default_governor_quota`].
     pub governor_quota: Quota,
+    /// Per-signal-kind weight policy. Operator-overridable map
+    /// consulted by [`ReputationEngine::record_signal_default`] (and
+    /// by extension every engine-internal `record_signal` call site
+    /// inside [`ReputationEngine::decide`]) so the v0.1 hardcoded
+    /// `1.0` weight is now a config-driven knob without changing
+    /// observable behavior.
+    ///
+    /// Lookup falls back to `1.0` for any [`SignalKind`] not present
+    /// in the map (see [`ReputationConfig::weight_for`]); the
+    /// `Default` impl populates every variant currently defined so
+    /// the fallback only runs after a future `#[non_exhaustive]`
+    /// addition until that variant is wired into the default map.
+    pub signal_weights: StdHashMap<SignalKind, f64>,
 }
 
 impl Default for ReputationConfig {
     fn default() -> Self {
+        let mut signal_weights = StdHashMap::with_capacity(3);
+        signal_weights.insert(SignalKind::RateLimited, REPUTATION_RATE_LIMITED_WEIGHT);
+        signal_weights.insert(SignalKind::HoneypotHit, REPUTATION_HONEYPOT_HIT_WEIGHT);
+        signal_weights.insert(
+            SignalKind::BlockedRequest,
+            REPUTATION_BLOCKED_REQUEST_WEIGHT,
+        );
         Self {
             decay_constant: REPUTATION_DECAY_CONSTANT,
             block_threshold: REPUTATION_BLOCK_THRESHOLD,
             backpressure_threshold: REPUTATION_BACKPRESSURE_THRESHOLD,
             backpressure_yield: REPUTATION_BACKPRESSURE_YIELD,
             governor_quota: default_governor_quota(),
+            signal_weights,
         }
+    }
+}
+
+impl ReputationConfig {
+    /// Look up the configured per-signal weight for `kind`, falling
+    /// back to `1.0` when the kind is not present in
+    /// [`Self::signal_weights`].
+    ///
+    /// The fallback exists for two reasons: (a) a future
+    /// `#[non_exhaustive]` [`SignalKind`] variant lands before the
+    /// `Default` impl is updated to populate it, and (b) operators
+    /// may build a `ReputationConfig` by hand without seeding every
+    /// kind. `1.0` matches the previously hardcoded engine-internal
+    /// weight literal so the fallback path is bit-compatible with
+    /// pre-plumbing behavior.
+    #[must_use]
+    pub fn weight_for(&self, kind: SignalKind) -> f64 {
+        self.signal_weights.get(&kind).copied().unwrap_or(1.0)
     }
 }
 
@@ -516,13 +579,14 @@ impl ReputationEngine {
     /// `signal_kind` is captured in the tracing span emitted by this
     /// function (see [`macro@tracing::instrument`] attribute below). The
     /// per-signal-kind WEIGHT policy (different default weights for
-    /// honeypot vs rate-limit vs blocked-request) remains a follow-up;
-    /// today the caller passes the weight verbatim.
-    ///
-    /// TODO(R10-followup): per-signal-kind weight policy — caller
-    /// should pass `SignalKind` only, and the engine looks up the
-    /// configured weight for that kind from `ReputationConfig`. This
-    /// closes the last shape of plan U12's per-signal calibration.
+    /// honeypot vs rate-limit vs blocked-request) is now plumbed
+    /// through [`ReputationConfig::signal_weights`] +
+    /// [`ReputationConfig::weight_for`]; callers that want the
+    /// configured weight should prefer
+    /// [`Self::record_signal_default`] over passing a literal here.
+    /// This explicit-weight overload remains as the lower-level API
+    /// for callers (e.g., honeypot wiring) that need to amplify or
+    /// dampen a single observation independent of policy.
     #[tracing::instrument(
         level = "info",
         skip_all,
@@ -609,6 +673,23 @@ impl ReputationEngine {
         span.record("observed_score_after", observed);
     }
 
+    /// Record a signal using the per-kind weight configured in
+    /// [`ReputationConfig::signal_weights`].
+    ///
+    /// Equivalent to `self.record_signal(identity, signal_kind,
+    /// self.config().weight_for(signal_kind))`. Engine-internal
+    /// callsites in [`Self::decide`] use this so the previously
+    /// hardcoded `1.0` weight is now a config-driven knob; under
+    /// the [`ReputationConfig::default`] map every variant maps to
+    /// `1.0`, so behavior is bit-identical until an operator
+    /// overrides a weight or a future variant lands without a
+    /// default-map entry (in which case the [`ReputationConfig::
+    /// weight_for`] fallback to `1.0` keeps the path well-defined).
+    pub fn record_signal_default(&self, identity: IdentityKey, signal_kind: SignalKind) {
+        let weight = self.inner.config.weight_for(signal_kind);
+        self.record_signal(identity, signal_kind, weight);
+    }
+
     /// Run the v0.1 R10 decision pipeline against the supplied
     /// `(identity, ip, lease)` triple.
     ///
@@ -616,12 +697,14 @@ impl ReputationEngine {
     /// 1. (canonicalize IP — caller's responsibility per R12-canon;
     ///    the engine treats `ip` verbatim).
     /// 2. Check the keyed governor limiter; on miss, record
-    ///    [`SignalKind::RateLimited`] (weight 1.0) and return
+    ///    [`SignalKind::RateLimited`] via
+    ///    [`Self::record_signal_default`] and return
     ///    [`ReputationDecision::Block`] with
     ///    [`BlockReason::RateLimited`].
     /// 3. Load the projected score.
     /// 4. If `score >= block_threshold`, record
-    ///    [`SignalKind::BlockedRequest`] (weight 1.0) and return
+    ///    [`SignalKind::BlockedRequest`] via
+    ///    [`Self::record_signal_default`] and return
     ///    [`ReputationDecision::Block`] with
     ///    [`BlockReason::ReputationExceeded`].
     /// 5. If `score >= backpressure_threshold`, return
@@ -653,7 +736,7 @@ impl ReputationEngine {
         // Step 2: keyed governor limiter.
         let triple_key: TripleKey = (identity, ip, lease.clone());
         if self.inner.limiter.check_key(&triple_key).is_err() {
-            self.record_signal(identity, SignalKind::RateLimited, 1.0);
+            self.record_signal_default(identity, SignalKind::RateLimited);
             let score_after = self.score_at(identity, Timestamp::now());
             span.record("score_after", score_after);
             let decision = ReputationDecision::Block(BlockReason::RateLimited);
@@ -669,7 +752,7 @@ impl ReputationEngine {
         // out — "score >= block_threshold AND identity is not
         // ENS-named → Block").
         if score_before >= self.inner.config.block_threshold {
-            self.record_signal(identity, SignalKind::BlockedRequest, 1.0);
+            self.record_signal_default(identity, SignalKind::BlockedRequest);
             let score_after = self.score_at(identity, Timestamp::now());
             span.record("score_after", score_after);
             let decision = ReputationDecision::Block(BlockReason::ReputationExceeded);
@@ -989,5 +1072,64 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert!(result.contains_key(&pre_existing));
         assert!(result.contains_key(&from_disk));
+    }
+
+    /// Default `ReputationConfig::signal_weights` populates every
+    /// currently-defined `SignalKind` variant at the corresponding
+    /// `REPUTATION_*_WEIGHT` constant. Pinning each variant
+    /// individually (rather than iterating) keeps the test
+    /// `#[non_exhaustive]`-friendly: a future variant lands without
+    /// breaking this assertion, and the deferred-default lookup
+    /// path is covered separately by
+    /// `weight_for_falls_back_to_one_when_kind_absent`.
+    #[test]
+    fn default_signal_weights_populate_known_variants() {
+        let cfg = ReputationConfig::default();
+        assert_eq!(
+            cfg.weight_for(SignalKind::RateLimited),
+            REPUTATION_RATE_LIMITED_WEIGHT,
+        );
+        assert_eq!(
+            cfg.weight_for(SignalKind::HoneypotHit),
+            REPUTATION_HONEYPOT_HIT_WEIGHT,
+        );
+        assert_eq!(
+            cfg.weight_for(SignalKind::BlockedRequest),
+            REPUTATION_BLOCKED_REQUEST_WEIGHT,
+        );
+    }
+
+    /// `weight_for` returns `1.0` when the requested `SignalKind` is
+    /// absent from the map. Pins the documented fallback contract
+    /// so a future `#[non_exhaustive]` variant added before the
+    /// `Default` map is updated does not silently produce a
+    /// zero-weight signal.
+    #[test]
+    fn weight_for_falls_back_to_one_when_kind_absent() {
+        let mut cfg = ReputationConfig::default();
+        cfg.signal_weights.clear();
+        assert_eq!(cfg.weight_for(SignalKind::RateLimited), 1.0);
+        assert_eq!(cfg.weight_for(SignalKind::HoneypotHit), 1.0);
+        assert_eq!(cfg.weight_for(SignalKind::BlockedRequest), 1.0);
+    }
+
+    /// `record_signal_default` consults `weight_for` and produces
+    /// the same effect as `record_signal(_, kind, configured_weight)`.
+    /// Overrides one variant's weight to `5.0` and confirms the
+    /// post-record score reflects the configured value, not the
+    /// default `1.0`.
+    #[test]
+    fn record_signal_default_uses_configured_weight() {
+        let mut cfg = ReputationConfig::default();
+        cfg.signal_weights.insert(SignalKind::RateLimited, 5.0);
+        let engine = ReputationEngine::with_config(cfg);
+        let id = IdentityKey([0xddu8; 32]);
+        engine.record_signal_default(id, SignalKind::RateLimited);
+        let score = engine.score(id);
+        assert!(
+            (score - 5.0).abs() < 1e-6,
+            "score {score} should be ~5.0 after record_signal_default \
+             with configured weight 5.0",
+        );
     }
 }

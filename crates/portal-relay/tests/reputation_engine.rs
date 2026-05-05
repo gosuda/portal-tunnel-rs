@@ -79,6 +79,11 @@ fn build_test_engine() -> ReputationEngine {
         backpressure_threshold: 50.0,
         backpressure_yield: Duration::from_millis(50),
         governor_quota: default_governor_quota(),
+        // Scenario 5 (1000-request burst) depends on
+        // `SignalKind::RateLimited` weight = 1.0; using the
+        // workspace `Default` map keeps that single dependency
+        // pinned without spreading future fields into the fixture.
+        signal_weights: ReputationConfig::default().signal_weights,
     };
     ReputationEngine::with_config(config)
 }
