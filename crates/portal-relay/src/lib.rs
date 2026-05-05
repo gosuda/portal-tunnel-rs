@@ -8,13 +8,26 @@
 //! Phase 5 lands incrementally per
 //! `docs/plans/2026-05-04-005-feat-portal-relay-plan.md`. Per-batch
 //! state lives in `PLAN.md` "Current implementation status"; in
-//! summary, Batches 1-6 + 9 are landed (cargo-vet harness, listeners,
-//! identity loaders, persistence, papaya lease registry, envelope +
-//! SDK API endpoints, admin API + discovery, ECH router + server
-//! orchestrator) and Batches 7-8 + 10 remain pending (R10 ENS
-//! Sybil-gating bypass, hot-reload + keyless I/O wiring, Admin View +
-//! R15 Status TUI). Module-level rustdocs name the per-module deferral
-//! state where one applies.
+//! summary:
+//!
+//! - **Batches 1-6 + 9 landed end-to-end**: cargo-vet harness,
+//!   listeners, identity loaders, persistence, papaya lease registry,
+//!   envelope + SDK API endpoints, admin API + discovery, ECH router +
+//!   server orchestrator.
+//! - **Batch 7 partial-landed**: the R10 v0.1 reputation-engine core
+//!   ([`policy::reputation`] — governor-keyed rate limit on
+//!   `(identity, ip, lease)`, per-identity exponential-decay score,
+//!   signal infra) plus the [`policy::honeypot`] matcher are
+//!   committed; `TODO(R10-followup)` markers in `reputation.rs` carve
+//!   out the deferrals — ENS Sybil-gating exemption (waits on
+//!   `Arc<dyn EnsResolver>` from B6's API surface), honeypot
+//!   call-site wiring, `reputation.json` persistence, hot-swap
+//!   support, per-signal-kind weight policy.
+//! - **Batches 8 + 10 fully pending**: hot-reload + keyless I/O
+//!   wiring; Admin View + R15 Status TUI.
+//!
+//! Module-level rustdocs name the per-module deferral state where one
+//! applies.
 //!
 //! ## Trust boundaries (R2)
 //!
