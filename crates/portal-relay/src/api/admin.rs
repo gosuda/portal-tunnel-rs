@@ -86,3 +86,29 @@ pub async fn reload_handler(
 
     Ok(ok(ReloadAcceptedBody { accepted: true }))
 }
+
+/// `GET /v1/admin/config/current` — return the live [`RuntimeConfig`]
+/// snapshot from the attached [`crate::reload::ReloadHandle`].
+///
+/// Reads `handle.current()` (cheap `Arc<RuntimeConfig>` load via
+/// `arc_swap`); the clone copies a small struct, kept inside the
+/// handler so the wire shape is owned [`RuntimeConfig`] rather than
+/// `Arc<RuntimeConfig>` for serde simplicity. [`RuntimeConfig`] is
+/// `#[non_exhaustive]`, so returning it directly via the envelope is
+/// forward-compat — no wrapper body type needed.
+///
+/// # Errors
+///
+/// - [`ApiErrorCode::FeatureUnavailable`] (503) — `AdminState.reload`
+///   is `None` (operator built without an attached reload handle).
+pub async fn get_current_config_handler(
+    State(state): State<AdminState>,
+) -> ApiResult<RuntimeConfig> {
+    let handle = state.reload.as_ref().ok_or_else(|| {
+        ApiError::new(
+            ApiErrorCode::FeatureUnavailable,
+            "reload handle not attached; bootstrap.json + runtime.json not loaded",
+        )
+    })?;
+    Ok(ok((*handle.current()).clone()))
+}

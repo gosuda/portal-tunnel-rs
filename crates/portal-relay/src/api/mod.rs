@@ -28,9 +28,11 @@ pub fn build_sdk_router(state: SdkState) -> axum::Router {
     axum::Router::new().with_state(state)
 }
 
-/// Build the admin trust-boundary router. Mounts
-/// `POST /v1/admin/config/reload` (iter-135). Additional `/v1/admin/*`
-/// + `/metrics` handlers register in follow-up commits.
+/// Build the admin trust-boundary router.
+///
+/// Mounts `POST /v1/admin/config/reload` (iter-135) and
+/// `GET /v1/admin/config/current` (iter-136). Additional
+/// `/v1/admin/*` + `/metrics` handlers register in follow-up commits.
 #[must_use]
 #[expect(
     clippy::double_must_use,
@@ -52,7 +54,7 @@ pub fn build_sdk_router(state: SdkState) -> axum::Router {
               reachable only via the admin trust-boundary listener."
 )]
 pub fn build_admin_router(state: AdminState) -> axum::Router {
-    use axum::routing::post;
+    use axum::routing::{get, post};
     // Bound-to-var rebind shape per `docs/utoipa-coverage-policy.md`
     // §Enforcement note 2: this is the documented escape from the
     // ast-grep belt-and-suspenders gate, which only matches the
@@ -63,6 +65,10 @@ pub fn build_admin_router(state: AdminState) -> axum::Router {
     // Phase 7 U8.8 carve-out justification.
     let r = axum::Router::new();
     let r = r.route("/v1/admin/config/reload", post(admin::reload_handler));
+    let r = r.route(
+        "/v1/admin/config/current",
+        get(admin::get_current_config_handler),
+    );
     r.with_state(state)
 }
 
