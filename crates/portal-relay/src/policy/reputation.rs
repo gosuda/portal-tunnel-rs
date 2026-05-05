@@ -1231,9 +1231,16 @@ pub async fn reputation_persist_loop(
             }
             _ = ticker.tick() => {
                 if let Err(err) = engine.persist_to_path(&path).await {
+                    // identity_count is the operator's primary signal of
+                    // how much state is at risk when persistence is
+                    // failing — without it, a quiet long-running outage
+                    // of the cadence loop is invisible from logs alone.
+                    // The snapshot allocation cost is acceptable on this
+                    // (already-rare) error path.
                     tracing::error!(
                         error = %err,
                         path = %path.display(),
+                        identity_count = engine.snapshot().len(),
                         "reputation snapshot persist failed; \
                          continuing cadence loop",
                     );
