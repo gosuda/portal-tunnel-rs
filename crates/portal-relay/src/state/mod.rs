@@ -2,10 +2,12 @@
 //!
 //! Phase 5 B2 lands `identity` (R2 newtype shape + QUIC-only load).
 //! Phase 5 B4 lands `lease_registry` (papaya-backed register / renew
-//! / unregister / lookup + `cleanup_expired`). Subsequent batches
-//! extend with the full identity bundle (B3), the policy- and
-//! lease-token-aware admission seam on top of `LeaseRegistry`
-//! (B5+), and TLS material handoff from portal-acme (B8).
+//! / unregister / lookup + `cleanup_expired`). Other Phase 5 batches
+//! further extend the state surface: B3 with the full identity
+//! bundle, B5+ with the policy- and lease-token-aware admission seam
+//! on top of `LeaseRegistry`, B8 with the TLS material handoff from
+//! portal-acme. See this crate's `lib.rs` for current Phase 5
+//! status.
 
 pub mod identity;
 pub mod lease_registry;
