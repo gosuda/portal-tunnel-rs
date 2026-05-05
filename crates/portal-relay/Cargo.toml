@@ -155,10 +155,23 @@ tokio = { workspace = true, features = [
     "time",
     "net",
 ] }
+# `siwe` (Phase 5 SDK-API S3) — `siwe::Message::from_str` parse path
+# inside `state::lease_registry::consume_register_challenge`, which
+# re-parses the pinned message text before calling
+# `portal_crypto::verify_binding(&Message, ...)`. Only the `Message`
+# parse + the trait `FromStr` surface is consumed; the EIP-191
+# verifier is reached through `portal_crypto`.
+siwe = { workspace = true }
 tokio-rustls = { workspace = true }
 tokio-util = { workspace = true }
 tower = { workspace = true }
 tracing = { workspace = true }
+# `uuid` (Phase 5 SDK-API S3) — UUIDv4 stringified `challenge_id` in
+# `state::lease_registry::issue_register_challenge`. Only `Uuid::new_v4()`
+# is consumed; no serde/borsh surface. Mirrors Go's
+# `auth.NewRegisterChallenge` which seeds challenge IDs from
+# `crypto/rand`.
+uuid = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]

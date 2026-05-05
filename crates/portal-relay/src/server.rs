@@ -980,10 +980,11 @@ async fn janitor_loop(leases: LeaseRegistry, cancel: CancellationToken) {
             }
             _ = ticker.tick() => {
                 let now = Timestamp::now();
-                let dropped = leases.cleanup_expired(now).await;
-                if !dropped.is_empty() {
+                let report = leases.cleanup_expired(now).await;
+                if !report.dropped_leases.is_empty() || report.dropped_challenges > 0 {
                     tracing::info!(
-                        dropped = dropped.len(),
+                        dropped_leases = report.dropped_leases.len(),
+                        dropped_challenges = report.dropped_challenges,
                         "lease janitor purged expired entries",
                     );
                 }

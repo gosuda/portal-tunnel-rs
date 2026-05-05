@@ -53,15 +53,63 @@
 //!   `tokio::time::interval`.
 //! - On-disk snapshot via `state::write_json_atomic` (B5+).
 
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use compact_str::CompactString;
-use jiff::Timestamp;
+use jiff::{SignedDuration, Timestamp};
 use papaya::HashMap;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
+use super::challenge::{
+    PendingChallenge, RegisterChallengeRequest, RegisterChallengeResponse, RegisterRequest,
+    VerifiedChallenge,
+};
 use crate::error::{RelayError, RelayResult};
+
+// ---------------------------------------------------------------------------
+// Pending-challenge constants (Phase 5 SDK-API S3)
+// ---------------------------------------------------------------------------
+
+/// Per-IP cap on outstanding pending register challenges. Mirrors
+/// Go's `defaultRegisterChallengeOutstandingPerIP`. Hardcoded for
+/// v0.1; hot-reloadable via `RuntimeConfig` is deferred to DEFER-8.
+pub const REGISTER_CHALLENGE_PER_IP_CAP: u32 = 32;
+
+/// Pending-challenge TTL. Mirrors Go's
+/// `defaultRegisterChallengeTTL = 2 * time.Minute`.
+const REGISTER_CHALLENGE_TTL: SignedDuration = SignedDuration::from_secs(120);
+
+/// EIP-155 chain ID the SIWE message is bound to. v0.1 single-chain
+/// (Ethereum mainnet); multi-chain support is a later concern.
+const REGISTER_CHALLENGE_CHAIN_ID: u64 = 1;
+
+/// Janitor sweep summary — what `cleanup_expired(now)` dropped.
+///
+/// Widens the previous `Vec<Arc<LeaseRecord>>` return so callers
+/// can record both lease-expiration and challenge-expiration metrics
+/// from a single janitor tick. The `dropped_challenges` counter is a
+/// `usize` (not a `Vec<PendingChallenge>`) because there is no
+/// downstream consumer of the dropped-challenge values themselves —
+/// only the count matters for the audit log and per-IP-counter
+/// arithmetic.
+///
+/// Lives in this module (not in `state::challenge`) because the
+/// cleanup transaction is owned by the registry and the report
+/// references `LeaseRecord` — placing it next to the records
+/// avoids an awkward back-edge from `challenge.rs` into the registry's
+/// value type.
+#[derive(Debug, Clone, Default)]
+pub struct CleanupReport {
+    /// Lease records dropped by the sweep — preserved as `Arc` so
+    /// downstream audit fan-out (e.g. `lease.expire` events) can
+    /// inspect identity / hostname without re-acquiring the
+    /// registry lock.
+    pub dropped_leases: Vec<Arc<LeaseRecord>>,
+    /// Number of pending challenges aged out by the sweep.
+    pub dropped_challenges: usize,
+}
 
 /// Identity-key newtype: the 32-byte raw ed25519 public-key encoding.
 ///
@@ -141,9 +189,24 @@ struct RegistryInner {
     by_identity: HashMap<IdentityKey, Arc<LeaseRecord>>,
     /// Reverse index: hostname → identity.
     by_hostname: HashMap<CompactString, IdentityKey>,
+    /// Pending-challenge table (S3): `challenge_id` → pending entry.
+    /// Cleared single-use on `consume_register_challenge` or by
+    /// the janitor when `expires_at <= now`.
+    by_challenge_id: HashMap<CompactString, PendingChallenge>,
+    /// Per-IP outstanding-challenge counter (S3). Increment at
+    /// `issue_register_challenge`, decrement at
+    /// `consume_register_challenge` AND at `cleanup_expired` so the
+    /// cap (`REGISTER_CHALLENGE_PER_IP_CAP`) cannot leak.
+    ///
+    /// **Concurrency contract:** all reads and writes happen under
+    /// `mutate`. The counter is a plain `u32` (not `AtomicU32`) so
+    /// there is no separately-mutable surface — cross-table
+    /// atomicity with `by_challenge_id` is structural, not advisory.
+    by_ip_pending_count: HashMap<IpAddr, u32>,
     /// Mutex serialising multi-step transactions (register /
-    /// unregister) so the two-table updates stay atomic. Lookups
-    /// don't take this lock.
+    /// unregister / `cleanup_expired` / issue+consume challenge) so
+    /// the cross-table updates stay atomic. Lookups don't take this
+    /// lock.
     mutate: Mutex<()>,
 }
 
@@ -161,6 +224,8 @@ impl LeaseRegistry {
             inner: Arc::new(RegistryInner {
                 by_identity: HashMap::new(),
                 by_hostname: HashMap::new(),
+                by_challenge_id: HashMap::new(),
+                by_ip_pending_count: HashMap::new(),
                 mutate: Mutex::new(()),
             }),
         }
@@ -252,15 +317,28 @@ impl LeaseRegistry {
         self.inner.by_identity.pin().get(&id).cloned()
     }
 
-    /// Drop every lease whose `expires_at <= now`. Returns the
-    /// dropped records so the caller can fan out audit events.
-    /// Janitor scheduling (5s tick) is the eventual server
-    /// orchestrator's job (Phase 5 B9).
-    pub async fn cleanup_expired(&self, now: Timestamp) -> Vec<Arc<LeaseRecord>> {
+    /// Drop every lease whose `expires_at <= now` AND every pending
+    /// register-challenge whose `expires_at <= now`. Returns a
+    /// [`CleanupReport`] summarising the sweep so the caller can fan
+    /// out audit events and metrics.
+    ///
+    /// The two sweeps run under the same `mutate` lock so an
+    /// expired-challenge drop atomically decrements its IP's
+    /// `by_ip_pending_count` — this is the structural reason the
+    /// per-IP cap cannot leak: there is no path that decrements a
+    /// challenge from the table without also touching the IP
+    /// counter, and there is no path that touches the IP counter
+    /// outside this lock.
+    ///
+    /// Janitor scheduling (5s tick) is the server orchestrator's
+    /// job (`Server::start`'s `JANITOR_INTERVAL` driver).
+    pub async fn cleanup_expired(&self, now: Timestamp) -> CleanupReport {
         let _guard = self.inner.mutate.lock().await;
+
+        // ---- Lease sweep ----
         let id_pin = self.inner.by_identity.pin();
         let host_pin = self.inner.by_hostname.pin();
-        let mut dropped: Vec<Arc<LeaseRecord>> = Vec::new();
+        let mut dropped_leases: Vec<Arc<LeaseRecord>> = Vec::new();
         let to_drop: Vec<IdentityKey> = id_pin
             .iter()
             .filter(|(_, rec)| rec.expires_at <= now)
@@ -269,10 +347,285 @@ impl LeaseRegistry {
         for id in to_drop {
             if let Some(rec) = id_pin.remove(&id) {
                 let _ = host_pin.remove_if(&rec.hostname, |_, &v| v == id);
-                dropped.push(rec.clone());
+                dropped_leases.push(rec.clone());
             }
         }
-        dropped
+
+        // ---- Challenge sweep ----
+        let chal_pin = self.inner.by_challenge_id.pin();
+        let ip_count_pin = self.inner.by_ip_pending_count.pin();
+        let expired_ids: Vec<(CompactString, IpAddr)> = chal_pin
+            .iter()
+            .filter(|(_, p)| p.expires_at <= now)
+            .map(|(cid, p)| (cid.clone(), p.client_ip))
+            .collect();
+        let mut dropped_challenges: usize = 0;
+        for (cid, ip) in expired_ids {
+            if chal_pin.remove(&cid).is_some() {
+                dropped_challenges = dropped_challenges.saturating_add(1);
+                // Decrement (saturating, just in case), removing the
+                // IP entry entirely once it hits zero so the table
+                // does not bloat with one record per ever-seen IP.
+                if let Some(&prev) = ip_count_pin.get(&ip) {
+                    let next = prev.saturating_sub(1);
+                    if next == 0 {
+                        let _ = ip_count_pin.remove(&ip);
+                    } else {
+                        ip_count_pin.insert(ip, next);
+                    }
+                }
+            }
+        }
+
+        CleanupReport {
+            dropped_leases,
+            dropped_challenges,
+        }
+    }
+
+    /// Issue a fresh pending register challenge.
+    ///
+    /// Mints a `UUIDv4` `challenge_id`, constructs a SIWE message via
+    /// [`portal_crypto::build_siwe_challenge`] (TTL = 2 min,
+    /// `chain_id` = 1 — Ethereum mainnet), and stores a
+    /// [`PendingChallenge`] keyed by `challenge_id`. Returns the
+    /// rendered SIWE text + expiry as a
+    /// [`RegisterChallengeResponse`].
+    ///
+    /// Per-IP cap is enforced under the same `mutate` lock that
+    /// serialises the cross-table updates, so cap-check + insert +
+    /// counter-bump are observed atomically by every other writer
+    /// (cap cannot be raced over the threshold).
+    ///
+    /// # Errors
+    ///
+    /// - [`RelayError::ChallengePendingCap`] when `client_ip`
+    ///   already holds [`REGISTER_CHALLENGE_PER_IP_CAP`] outstanding
+    ///   pending challenges.
+    /// - [`RelayError::ChallengeInvalidSignature`] (re-using the
+    ///   crypto-pass-through string slot) if the request's
+    ///   `ed25519_pk` is structurally invalid (not on-curve), or
+    ///   the SIWE builder rejects the configured `domain` / `uri`.
+    pub async fn issue_register_challenge(
+        &self,
+        req: &RegisterChallengeRequest,
+        domain: &str,
+        register_uri: &str,
+        client_ip: IpAddr,
+        now: Timestamp,
+    ) -> RelayResult<RegisterChallengeResponse> {
+        // Validate + decode + build the SIWE message OUTSIDE the
+        // mutex. None of these steps touch the registry tables, and
+        // they are the dominant cost of issue (ed25519 curve check
+        // + iri-string parse + UUIDv4 mint + EIP-4361 render). Doing
+        // them under the lock would serialise all lease/challenge
+        // writers behind one challenge issue.
+        let ed25519_pk = ed25519_dalek::VerifyingKey::from_bytes(&req.ed25519_pk)
+            .map_err(|e| RelayError::ChallengeInvalidSignature(format!("ed25519 pk: {e}")))?;
+        let eth_address = portal_crypto::EthAddress::new(req.eth_address);
+
+        // Mint a UUIDv4 challenge_id (16 bytes of CSPRNG entropy via
+        // the `getrandom` backend). Rendered via `Uuid::simple` as 32
+        // lowercase-hex chars (no hyphens) so the value satisfies the
+        // EIP-4361 §4.2 nonce charset rule (≥8 alphanumeric ASCII).
+        let raw_uuid = uuid::Uuid::new_v4();
+        let challenge_id = CompactString::from(raw_uuid.simple().to_string());
+
+        // Build the SIWE message via portal-crypto's canonical
+        // ed25519-binding template; renders to text via
+        // `siwe::Message::to_string`.
+        let builder = portal_crypto::ChallengeBuilder {
+            domain: CompactString::from(domain),
+            uri: CompactString::from(register_uri),
+            chain_id: REGISTER_CHALLENGE_CHAIN_ID,
+            ttl: REGISTER_CHALLENGE_TTL,
+        };
+        let challenge = portal_crypto::build_siwe_challenge(
+            &builder,
+            eth_address,
+            ed25519_pk,
+            challenge_id.as_str(),
+            challenge_id.as_str(),
+            now,
+        )
+        .map_err(|e| RelayError::ChallengeInvalidSignature(format!("siwe build: {e}")))?;
+        let siwe_message_text = challenge.message.to_string();
+        let expires_at = challenge.expires_at;
+
+        let pending = PendingChallenge {
+            challenge_id: challenge_id.clone(),
+            expected_eth_address: eth_address,
+            expected_ed25519_pk: ed25519_pk,
+            siwe_message_text: siwe_message_text.clone(),
+            register_request: req.clone(),
+            expires_at,
+            client_ip,
+        };
+
+        // Critical section: cap check + insert + counter bump.
+        // Everything inside this block is O(1) papaya operations;
+        // no I/O, no parsing, no crypto. Dropping `_guard` at the
+        // end of the block (before the `Ok(...)`) keeps the
+        // critical section minimal.
+        {
+            let _guard = self.inner.mutate.lock().await;
+            let ip_count_pin = self.inner.by_ip_pending_count.pin();
+            let current = ip_count_pin.get(&client_ip).copied().unwrap_or(0);
+            if current >= REGISTER_CHALLENGE_PER_IP_CAP {
+                return Err(RelayError::ChallengePendingCap);
+            }
+            let chal_pin = self.inner.by_challenge_id.pin();
+            chal_pin.insert(challenge_id.clone(), pending);
+            ip_count_pin.insert(client_ip, current.saturating_add(1));
+        }
+
+        Ok(RegisterChallengeResponse {
+            challenge_id,
+            siwe_message_text,
+            expires_at,
+        })
+    }
+
+    /// Consume a pending register challenge: verify the SIWE
+    /// signature + ed25519 binding under the relay's pending entry,
+    /// remove the entry single-use, and decrement the per-IP counter.
+    ///
+    /// The remove-then-verify ordering is deliberate: we remove the
+    /// entry FIRST (so the single-use property holds even if the
+    /// caller retries) then verify the signature against the
+    /// just-removed entry's pinned `siwe_message_text`. If the verify
+    /// fails the challenge is gone — the caller MUST request a fresh
+    /// challenge. Concurrent calls with the same `challenge_id`:
+    /// exactly one observes the `Some` from `chal_pin.remove`; the
+    /// other observes `None` and returns
+    /// [`RelayError::ChallengeNotFound`].
+    ///
+    /// # Errors
+    ///
+    /// - [`RelayError::ChallengeNotFound`] when no pending entry
+    ///   matches `req.challenge_id` (never issued, already consumed,
+    ///   or already swept).
+    /// - [`RelayError::ChallengeExpired`] when the matching entry's
+    ///   `expires_at <= now` at consume time. (The entry is also
+    ///   removed in this branch — there is no point keeping a
+    ///   stale entry around.)
+    /// - [`RelayError::ChallengeInvalidSignature`] when the SIWE
+    ///   re-parse, the binding-statement parse, the EIP-191 verify,
+    ///   the domain/nonce equality, or the
+    ///   echoed-`siwe_message_text` equality fails.
+    pub async fn consume_register_challenge(
+        &self,
+        req: &RegisterRequest,
+        now: Timestamp,
+    ) -> RelayResult<VerifiedChallenge> {
+        // Critical section: atomic single-use remove + counter
+        // decrement. Verification (SIWE parse + EIP-191 recovery +
+        // binding-statement parse) is the dominant cost of consume
+        // and runs on the OWNED `pending` value AFTER the lock is
+        // released — so a slow verifier (or a hostile client crafting
+        // a worst-case parse path) cannot stall lease/challenge
+        // writers. Once the entry is removed it is exclusively owned
+        // by this future; concurrent same-`challenge_id` callers
+        // observe `None` and return `ChallengeNotFound`.
+        let pending = {
+            let _guard = self.inner.mutate.lock().await;
+            let chal_pin = self.inner.by_challenge_id.pin();
+            let p = chal_pin
+                .remove(&req.challenge_id)
+                .ok_or(RelayError::ChallengeNotFound)?
+                .clone();
+            let ip_count_pin = self.inner.by_ip_pending_count.pin();
+            if let Some(&prev) = ip_count_pin.get(&p.client_ip) {
+                let next = prev.saturating_sub(1);
+                if next == 0 {
+                    let _ = ip_count_pin.remove(&p.client_ip);
+                } else {
+                    ip_count_pin.insert(p.client_ip, next);
+                }
+            }
+            p
+        };
+
+        // TTL gate (the janitor races against an under-the-wire
+        // consume; reject if we missed the sweep). The entry is
+        // already removed — there is no point retaining a stale
+        // entry, the caller MUST request a fresh challenge.
+        if pending.expires_at <= now {
+            return Err(RelayError::ChallengeExpired);
+        }
+
+        // Anti-tamper: the echoed message text MUST match the
+        // pinned text byte-for-byte. Without this, a malicious
+        // client could swap in a different SIWE message under the
+        // original signature (the EIP-191 verify recovers an
+        // address from whatever bytes are presented).
+        if req.siwe_message_text != pending.siwe_message_text {
+            return Err(RelayError::ChallengeInvalidSignature(
+                "echoed siwe_message_text does not match issued challenge".to_owned(),
+            ));
+        }
+
+        // Re-parse the SIWE message and run the canonical
+        // binding-verify path: domain + nonce + window + EIP-191
+        // signature + ed25519-binding statement extraction.
+        let parsed: ::siwe::Message = pending
+            .siwe_message_text
+            .parse()
+            .map_err(|e| RelayError::ChallengeInvalidSignature(format!("siwe parse: {e}")))?;
+
+        let attestation = portal_crypto::verify_binding(
+            &parsed,
+            &req.siwe_signature,
+            // domain + nonce mirror what `issue_register_challenge`
+            // pinned: nonce == challenge_id (UUIDv4 simple form).
+            parsed.domain.as_str(),
+            pending.challenge_id.as_str(),
+            pending.expected_ed25519_pk,
+            now,
+        )
+        .map_err(|e| RelayError::ChallengeInvalidSignature(format!("verify_binding: {e}")))?;
+
+        // Belt-and-braces: the SIWE-recovered EOA must match what
+        // the requester originally claimed. (Anti-rebind: a fresh
+        // signature under a *different* EOA over the same message
+        // would otherwise verify and silently rebind the protocol
+        // pubkey to a different EOA.)
+        if attestation.eth_address != pending.expected_eth_address {
+            return Err(RelayError::ChallengeInvalidSignature(
+                "siwe-recovered eth address does not match challenge issuer".to_owned(),
+            ));
+        }
+
+        Ok(VerifiedChallenge {
+            eth_address: attestation.eth_address,
+            ed25519_pk: attestation.ed25519_pubkey,
+            hostname: req.hostname.clone(),
+            metadata: req.metadata.clone(),
+            register_request: pending.register_request,
+            client_ip: pending.client_ip,
+        })
+    }
+
+    /// Snapshot the current pending-challenge count (for tests +
+    /// metrics).
+    #[must_use]
+    pub fn pending_challenge_count(&self) -> usize {
+        self.inner.by_challenge_id.pin().len()
+    }
+
+    /// Snapshot the per-IP outstanding-challenge count for `ip`,
+    /// returning 0 if the IP has no entry. Lock-free read against the
+    /// papaya table; the value may transiently differ from a
+    /// concurrently-running issue/consume but converges once the
+    /// `mutate` lock releases.
+    #[must_use]
+    pub fn pending_count_for_ip(&self, ip: IpAddr) -> u32 {
+        self.inner
+            .by_ip_pending_count
+            .pin()
+            .get(&ip)
+            .copied()
+            .unwrap_or(0)
     }
 
     /// Snapshot the current lease count (for tests + metrics).
@@ -425,16 +778,287 @@ mod tests {
             .await
             .unwrap();
 
-        let dropped = reg
+        let report = reg
             .cleanup_expired(
                 now.saturating_add(jiff::SignedDuration::from_secs(1))
                     .unwrap_or(Timestamp::MAX),
             )
             .await;
-        assert_eq!(dropped.len(), 1);
-        assert_eq!(dropped[0].identity, expired_id);
+        assert_eq!(report.dropped_leases.len(), 1);
+        assert_eq!(report.dropped_leases[0].identity, expired_id);
+        assert_eq!(report.dropped_challenges, 0);
         assert_eq!(reg.lease_count(), 1);
         assert!(reg.lookup_by_hostname("live.portal.test").is_some());
         assert!(reg.lookup_by_hostname("exp.portal.test").is_none());
+    }
+
+    // ---------------------------------------------------------------
+    // Phase 5 SDK-API S3 — pending register-challenge tests
+    // ---------------------------------------------------------------
+
+    use portal_crypto::{
+        evm_address_from_pubkey, secp256k1_from_bytes_for_test, sign_eip191_personal,
+        tenant_public_key,
+    };
+
+    /// Deterministic secp256k1 scalar — same constant the
+    /// `portal-crypto::siwe::challenge` tests use, so tooling that
+    /// inspects the matching EOA between crates lines up.
+    const TEST_SECP_SCALAR: [u8; 32] = [
+        0x4c, 0x08, 0x83, 0xa6, 0x91, 0x02, 0x93, 0x7d, 0x62, 0x31, 0x47, 0x1b, 0x5d, 0xbb, 0x62,
+        0x04, 0xfe, 0x51, 0x29, 0x61, 0x70, 0x82, 0x79, 0x2a, 0xe4, 0x68, 0xd0, 0x1a, 0x3f, 0x36,
+        0x23, 0x18,
+    ];
+
+    const TEST_DOMAIN: &str = "relay.portal.test";
+    const TEST_REGISTER_URI: &str = "https://relay.portal.test/v1/register";
+
+    fn make_challenge_request(ed25519_seed: [u8; 32]) -> RegisterChallengeRequest {
+        let secp_key = secp256k1_from_bytes_for_test(TEST_SECP_SCALAR);
+        let pk = tenant_public_key(&secp_key).unwrap();
+        let eth_addr = evm_address_from_pubkey(&pk);
+        let ed25519_signing = ed25519_dalek::SigningKey::from_bytes(&ed25519_seed);
+        RegisterChallengeRequest {
+            eth_address: *eth_addr.as_bytes(),
+            ed25519_pk: ed25519_signing.verifying_key().to_bytes(),
+            reported_ip: Some(ip_localhost()),
+        }
+    }
+
+    fn sign_challenge(
+        response: &RegisterChallengeResponse,
+        hostname: &str,
+        metadata: Vec<u8>,
+    ) -> RegisterRequest {
+        let secp_key = secp256k1_from_bytes_for_test(TEST_SECP_SCALAR);
+        let sig = sign_eip191_personal(response.siwe_message_text.as_bytes(), &secp_key).unwrap();
+        RegisterRequest {
+            challenge_id: response.challenge_id.clone(),
+            siwe_message_text: response.siwe_message_text.clone(),
+            siwe_signature: sig,
+            hostname: CompactString::from(hostname),
+            metadata,
+        }
+    }
+
+    /// `AC1`: `issue_register_challenge` returns a fresh UUID-derived
+    /// `challenge_id`, the SIWE message text, and a 2-min expiry.
+    #[tokio::test]
+    async fn issue_register_challenge_returns_fresh_id_and_two_minute_expiry() {
+        let reg = LeaseRegistry::new();
+        let now = fixed_now();
+        let req = make_challenge_request([0x11u8; 32]);
+
+        let resp = reg
+            .issue_register_challenge(&req, TEST_DOMAIN, TEST_REGISTER_URI, ip_localhost(), now)
+            .await
+            .unwrap();
+
+        assert_eq!(resp.challenge_id.len(), 32, "uuid simple form is 32 chars");
+        assert!(resp.siwe_message_text.contains(TEST_DOMAIN));
+        let expected_expiry = now
+            .checked_add(SignedDuration::from_secs(120))
+            .unwrap_or(Timestamp::MAX);
+        assert_eq!(resp.expires_at, expected_expiry);
+        assert_eq!(reg.pending_challenge_count(), 1);
+        assert_eq!(reg.pending_count_for_ip(ip_localhost()), 1);
+    }
+
+    /// `AC2`: 33rd outstanding pending challenge from one IP returns
+    /// `RelayError::ChallengePendingCap`.
+    #[tokio::test]
+    async fn issue_thirty_third_pending_challenge_rejects_with_cap() {
+        let reg = LeaseRegistry::new();
+        let now = fixed_now();
+        let ip = ip_localhost();
+
+        for i in 0..REGISTER_CHALLENGE_PER_IP_CAP {
+            // Each issue uses a distinct ed25519 seed to keep the
+            // bound pubkey unique (the seed is opaque to the cap
+            // logic, but distinct seeds make the test self-document).
+            let seed_byte = u8::try_from(i & 0xff).unwrap_or(0);
+            let req = make_challenge_request([seed_byte; 32]);
+            reg.issue_register_challenge(&req, TEST_DOMAIN, TEST_REGISTER_URI, ip, now)
+                .await
+                .unwrap();
+        }
+        assert_eq!(reg.pending_count_for_ip(ip), REGISTER_CHALLENGE_PER_IP_CAP,);
+
+        let req = make_challenge_request([0xffu8; 32]);
+        let result = reg
+            .issue_register_challenge(&req, TEST_DOMAIN, TEST_REGISTER_URI, ip, now)
+            .await;
+        assert!(matches!(result, Err(RelayError::ChallengePendingCap)));
+    }
+
+    /// `AC3a`: `consume_register_challenge` with valid SIWE returns
+    /// `Ok(VerifiedChallenge)` and removes the entry single-use.
+    #[tokio::test]
+    async fn consume_register_challenge_happy_path_removes_entry() {
+        let reg = LeaseRegistry::new();
+        let now = fixed_now();
+        let req = make_challenge_request([0x42u8; 32]);
+
+        let resp = reg
+            .issue_register_challenge(&req, TEST_DOMAIN, TEST_REGISTER_URI, ip_localhost(), now)
+            .await
+            .unwrap();
+
+        let signed = sign_challenge(&resp, "host.portal.test", b"meta".to_vec());
+        let verified = reg.consume_register_challenge(&signed, now).await.unwrap();
+
+        assert_eq!(verified.hostname.as_str(), "host.portal.test");
+        assert_eq!(verified.metadata, b"meta".to_vec());
+        assert_eq!(verified.client_ip, ip_localhost());
+        assert_eq!(verified.ed25519_pk.to_bytes(), req.ed25519_pk);
+        assert_eq!(verified.eth_address.as_bytes(), &req.eth_address);
+
+        // Single-use: a second consume with the same id MUST fail.
+        let second = reg.consume_register_challenge(&signed, now).await;
+        assert!(matches!(second, Err(RelayError::ChallengeNotFound)));
+        assert_eq!(reg.pending_challenge_count(), 0);
+        assert_eq!(reg.pending_count_for_ip(ip_localhost()), 0);
+    }
+
+    /// `AC3b`: concurrent `consume_register_challenge` calls with the
+    /// same `challenge_id` — exactly one returns Ok, the other
+    /// returns `ChallengeNotFound`.
+    #[tokio::test]
+    async fn concurrent_consume_yields_exactly_one_winner() {
+        let reg = LeaseRegistry::new();
+        let now = fixed_now();
+        let req = make_challenge_request([0x77u8; 32]);
+
+        let resp = reg
+            .issue_register_challenge(&req, TEST_DOMAIN, TEST_REGISTER_URI, ip_localhost(), now)
+            .await
+            .unwrap();
+        let signed = sign_challenge(&resp, "race.portal.test", Vec::new());
+
+        // R9: spawn into a caller-owned `JoinSet` rather than
+        // bare `tokio::spawn` so the test cleanly joins both
+        // futures at scope exit.
+        let mut set = tokio::task::JoinSet::new();
+        for _ in 0..2 {
+            let reg_clone = reg.clone();
+            let signed_clone = signed.clone();
+            set.spawn(async move {
+                reg_clone
+                    .consume_register_challenge(&signed_clone, now)
+                    .await
+            });
+        }
+        let mut oks = 0u32;
+        let mut nf = 0u32;
+        while let Some(joined) = set.join_next().await {
+            match joined.unwrap() {
+                Ok(_) => oks += 1,
+                Err(RelayError::ChallengeNotFound) => nf += 1,
+                other => panic!("unexpected result: {other:?}"),
+            }
+        }
+        assert_eq!(oks, 1, "exactly one consume must win");
+        assert_eq!(nf, 1, "the other must observe ChallengeNotFound");
+    }
+
+    /// `AC4` / `AC5` — the LOAD-BEARING test:
+    /// issue 32 challenges → 33rd rejects → advance `now` past
+    /// challenge TTL → `cleanup_expired(now)` → 33rd attempt
+    /// succeeds. Pins the per-IP cap counter against expiration
+    /// leaks.
+    #[tokio::test]
+    async fn cleanup_expired_decrements_per_ip_cap_counter() {
+        let reg = LeaseRegistry::new();
+        let now = fixed_now();
+        let ip = ip_localhost();
+
+        for i in 0..REGISTER_CHALLENGE_PER_IP_CAP {
+            let seed_byte = u8::try_from(i & 0xff).unwrap_or(0);
+            let req = make_challenge_request([seed_byte; 32]);
+            reg.issue_register_challenge(&req, TEST_DOMAIN, TEST_REGISTER_URI, ip, now)
+                .await
+                .unwrap();
+        }
+        assert_eq!(reg.pending_count_for_ip(ip), REGISTER_CHALLENGE_PER_IP_CAP,);
+
+        // 33rd issue rejects — cap holds.
+        let blocked_req = make_challenge_request([0xa1u8; 32]);
+        let blocked = reg
+            .issue_register_challenge(&blocked_req, TEST_DOMAIN, TEST_REGISTER_URI, ip, now)
+            .await;
+        assert!(matches!(blocked, Err(RelayError::ChallengePendingCap)));
+
+        // Advance past TTL (2 min + 1 s) and sweep.
+        let after_ttl = now
+            .checked_add(SignedDuration::from_secs(121))
+            .unwrap_or(Timestamp::MAX);
+        let report = reg.cleanup_expired(after_ttl).await;
+        assert_eq!(
+            report.dropped_challenges,
+            usize::try_from(REGISTER_CHALLENGE_PER_IP_CAP).unwrap_or(usize::MAX),
+        );
+        assert_eq!(report.dropped_leases.len(), 0);
+        assert_eq!(
+            reg.pending_count_for_ip(ip),
+            0,
+            "per-IP cap counter MUST be decremented to zero by the sweep",
+        );
+
+        // 33rd attempt now succeeds — cap counter freed.
+        reg.issue_register_challenge(&blocked_req, TEST_DOMAIN, TEST_REGISTER_URI, ip, after_ttl)
+            .await
+            .unwrap();
+        assert_eq!(reg.pending_count_for_ip(ip), 1);
+    }
+
+    /// `cleanup_expired` past TTL with no consume returns
+    /// `ChallengeNotFound` on a subsequent consume of the swept id.
+    #[tokio::test]
+    async fn consume_swept_challenge_returns_not_found() {
+        let reg = LeaseRegistry::new();
+        let now = fixed_now();
+        let req = make_challenge_request([0x09u8; 32]);
+
+        let resp = reg
+            .issue_register_challenge(&req, TEST_DOMAIN, TEST_REGISTER_URI, ip_localhost(), now)
+            .await
+            .unwrap();
+
+        let after_ttl = now
+            .checked_add(SignedDuration::from_secs(121))
+            .unwrap_or(Timestamp::MAX);
+        let report = reg.cleanup_expired(after_ttl).await;
+        assert_eq!(report.dropped_challenges, 1);
+
+        let signed = sign_challenge(&resp, "late.portal.test", Vec::new());
+        let result = reg.consume_register_challenge(&signed, after_ttl).await;
+        assert!(matches!(result, Err(RelayError::ChallengeNotFound)));
+    }
+
+    /// Tampered echo of `siwe_message_text` is rejected as
+    /// `ChallengeInvalidSignature` before any crypto path runs.
+    #[tokio::test]
+    async fn consume_rejects_tampered_message_text_echo() {
+        let reg = LeaseRegistry::new();
+        let now = fixed_now();
+        let req = make_challenge_request([0x05u8; 32]);
+
+        let resp = reg
+            .issue_register_challenge(&req, TEST_DOMAIN, TEST_REGISTER_URI, ip_localhost(), now)
+            .await
+            .unwrap();
+
+        let mut signed = sign_challenge(&resp, "tamper.portal.test", Vec::new());
+        signed.siwe_message_text.push_str("EXTRA");
+        let result = reg.consume_register_challenge(&signed, now).await;
+        assert!(matches!(
+            result,
+            Err(RelayError::ChallengeInvalidSignature(_))
+        ));
+        // Single-use still applies: a re-attempt with the correct
+        // text fails because the entry was already removed.
+        let correct = sign_challenge(&resp, "tamper.portal.test", Vec::new());
+        let retry = reg.consume_register_challenge(&correct, now).await;
+        assert!(matches!(retry, Err(RelayError::ChallengeNotFound)));
     }
 }

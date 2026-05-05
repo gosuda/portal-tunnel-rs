@@ -51,6 +51,32 @@ pub enum RelayError {
     /// Lease-access-token issue/verify failure. Phase 5 SDK-API S1.
     #[error(transparent)]
     LeaseToken(#[from] LeaseTokenError),
+
+    /// The client IP already has the per-IP cap (32) of outstanding
+    /// pending register challenges. Phase 5 SDK-API S3.
+    #[error("challenge: per-IP pending cap exceeded")]
+    ChallengePendingCap,
+
+    /// `consume_register_challenge` saw a `challenge_id` that does
+    /// not exist in the pending table — either it was never issued,
+    /// it was already consumed (single-use), or the janitor swept
+    /// it past TTL. Phase 5 SDK-API S3.
+    #[error("challenge: not found")]
+    ChallengeNotFound,
+
+    /// The pending challenge resolved by `challenge_id` has aged
+    /// past its `expires_at`. Surfaced when a `consume_register_challenge`
+    /// caller sneaks in between janitor ticks. Phase 5 SDK-API S3.
+    #[error("challenge: expired")]
+    ChallengeExpired,
+
+    /// SIWE / ed25519 binding verification failed in
+    /// `consume_register_challenge`. Wraps the `portal-crypto`
+    /// failure as a string per the surrounding `Crypto` arm pattern
+    /// (the typed pass-through lands later when `portal-crypto`
+    /// exposes a stable Binding/Siwe error split). Phase 5 SDK-API S3.
+    #[error("challenge: invalid signature: {0}")]
+    ChallengeInvalidSignature(String),
 }
 
 /// Crate-wide `Result<T, RelayError>`.

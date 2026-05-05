@@ -151,6 +151,12 @@ alloy-ens = { version = "2.0", features = ["provider"] }
 k256 = { version = "0.13", features = ["ecdsa"] }
 ed25519-dalek = { version = "2", features = ["pkcs8", "rand_core", "zeroize"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
+# `uuid` (Phase 5 SDK-API S3) — UUIDv4 challenge_id minting in
+# `portal-relay::state::lease_registry::issue_register_challenge`. Mirrors
+# Go's `crypto/rand`-seeded UUIDs in `auth.NewRegisterChallenge`. The `v4`
+# feature pulls the `getrandom` backend and the `Uuid::new_v4` constructor
+# (the only API surface consumed); no `serde`/`std-uuid` traffic.
+uuid = { version = "1", features = ["v4"] }
 # `trait_variant` workspace dep removed per ADR-0002 Amendment 2026-05-04
 # (async-fn-in-trait Send-bound shape: trait_variant → explicit
 # `impl Future + Send + 'a` RPIT). Zero member crates consumed it; the

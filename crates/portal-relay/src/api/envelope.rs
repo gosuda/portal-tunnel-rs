@@ -220,6 +220,26 @@ impl From<RelayError> for ApiError {
                 crate::state::LeaseTokenError::Encode(_)
                 | crate::state::LeaseTokenError::Signer(_) => Self::internal(),
             },
+            // Challenge errors (Phase 5 SDK-API S3) split client-side
+            // from relay-side at the same boundary as LeaseToken:
+            // - cap exhaustion → 429 RateLimited (per-IP throttle).
+            // - not-found → 400 InvalidRequest (the SDK posted an id
+            //   the relay does not recognise; re-issue is the fix).
+            // - expired → 401 Unauthorized (the credential was valid
+            //   but its time window closed; mirrors the LeaseToken
+            //   `Expired` mapping above).
+            // - invalid-signature → 401 Unauthorized; the
+            //   `ChallengeInvalidSignature` payload string stays off
+            //   the wire so internal verifier detail does not leak.
+            RelayError::ChallengePendingCap => {
+                Self::new(ApiErrorCode::RateLimited, "challenge pending cap exceeded")
+            }
+            RelayError::ChallengeNotFound => {
+                Self::new(ApiErrorCode::InvalidRequest, "challenge not found")
+            }
+            RelayError::ChallengeExpired | RelayError::ChallengeInvalidSignature(_) => {
+                Self::unauthorized()
+            }
         }
     }
 }
