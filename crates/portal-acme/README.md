@@ -1,9 +1,15 @@
 # portal-acme
 
 ACME (RFC 8555) issuance + DNS-01 providers for the portal-tunnel-rs
-relay. Stand-alone crate consumed by `portal-relay`'s
-`state/tls_material.rs` in Phase 5; Phase 4 produces only on-disk
+relay. Stand-alone crate. Phase 4 produces only on-disk
 `(fullchain.pem, privatekey.pem)` material — no in-process handoff.
+
+Current consumer is `portal-relay-bin` (the binary), which constructs
+[`Manager`] directly at boot. Library-side handoff into
+`portal-relay`'s state module is deferred to Phase 5 Batch 8
+(`portal-relay/src/state/mod.rs` carries a `TLS material handoff
+from portal-acme (B8)` deferral note); until B8 lands, the
+binary is the only consumer.
 
 ## Feature flags
 
