@@ -10,22 +10,29 @@
 //! 4. Waits for SIGINT/SIGTERM (or Ctrl+C on Windows) and
 //!    cancels + drains the server.
 //!
-//! Subsequent batches wire the actual axum admin/sdk/discovery
-//! listeners against the issued TLS material, the QUIC backhaul
-//! `Endpoint`, the embedded frontend bundle, and the TUI
-//! subcommand.
+//! Subsequent commits wire the binary against the existing
+//! `portal-relay` library surfaces — admin / SDK / discovery axum
+//! routers (Phase 5 B5 / B6, landed), the ECH-aware tenant TLS
+//! routing path (Phase 5 B9, landed), the QUIC backhaul `Endpoint`
+//! (Phase 3 B2, landed), the embedded frontend bundle (Phase 7 B1,
+//! landed), and the TUI subcommand (Phase 5 B10, pending). The
+//! library pieces exist; the binary still needs the composition
+//! glue.
 //!
 //! ## Local-only argument policy
 //!
 //! `Manager::new` currently dispatches via [`ProviderSelector::Local`]
-//! only — the Cloudflare / Route53 / Google Cloud arms are deferred
-//! to Phase 4 B3-B5. To avoid silently producing self-signed
-//! material when the operator clearly asked for real ACME issuance,
-//! `serve` rejects any of `--acme-directory-url` /
-//! `--contact-email` / `--domain` at parse time. Once provider
-//! selection is wired (Phase 4 B3-B5 + this binary's follow-up
-//! batch), the rejection is replaced by an explicit
-//! `--provider <local|cloudflare|route53|gcloud>` flag.
+//! only. The three ACME modes (`AcmeCloudflare`, `AcmeRoute53`,
+//! `AcmeGcloud`) — backed by the DNS providers landed in Phase 4
+//! B3 / B4 / B5 — return [`portal_acme::AcmeError::Config`] until the
+//! `instant-acme` client wrapper that drives those providers under
+//! [`portal_acme::Manager::ensure_certificate`] lands. To avoid
+//! silently producing self-signed material when the operator clearly
+//! asked for real ACME issuance, `serve` rejects any of
+//! `--acme-directory-url` / `--contact-email` / `--domain` at parse
+//! time. Once the instant-acme wrapper + per-provider selection is
+//! wired in this binary's follow-up batch, the rejection is replaced
+//! by an explicit `--provider <local|cloudflare|route53|gcloud>` flag.
 
 #![forbid(unsafe_code)]
 
