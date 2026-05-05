@@ -24,7 +24,7 @@ or `portal-types` crates (R7).
 | `portal-relay-bin` | `portal-relay` binary; embedded admin SPA + docs site | 7 |
 | `portal-cli` | `portal` binary (R5+C11: distinct binary name from crate name) | 7 |
 | `portal-demo` | `portal-demo` sample target binary | 7 |
-| `xtask` | workspace gates: `wire-drift-check` (Phase 1 U16) + `cargo xtask ci` alias mirroring CI gates; future codegen/release/openapi-export/dep-audit/refresh-frontend-bundle | 0+ |
+| `xtask` | workspace gates: `wire-drift-check` (Phase 1 U16) + `cargo xtask ci` alias mirroring CI gates + `openapi-export` (Phase 7 U8.8 v0.2-backlog stub per `docs/utoipa-coverage-policy.md`) + `dep-audit` (Phase 7 U8.7 validator per `docs/dep-spawning-audit.md`); future codegen/release/refresh-frontend-bundle | 0+ |
 
 ## Trust boundaries — key-material isolation (R2)
 
