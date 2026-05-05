@@ -34,8 +34,8 @@
 //! issuance flow this is fine because the relay only ever publishes
 //! one challenge token at a time. If multi-domain orders return to the
 //! roadmap, the upsert path needs to fetch + merge existing values
-//! before submitting the change. Tracked alongside U5 (PSL) as a v0.2
-//! concern; not blocking Phase 4.
+//! before submitting the change. Tracked as a v0.2 concern alongside
+//! Public Suffix List handling; not blocking Phase 4.
 //!
 //! # Hosted-zone lookup (v0.1 simplification)
 //!
