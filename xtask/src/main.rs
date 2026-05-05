@@ -192,6 +192,13 @@ fn run_ci(repo_root: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     // violation. `-i openssl` exits non-zero with empty stdout when the
     // package is absent — that is the success case we want.
     rustls_mandatory_gate(repo_root, &mut failures);
+    // utoipa-coverage-gate (Phase 7 U8.8): mirrors the CI job's
+    // ast-grep belt-and-suspenders. Clippy's `disallowed_methods`
+    // rule (workspace `clippy.toml`) is the primary R7 gate;
+    // ast-grep catches macro-expanded chained-builder shapes that
+    // do not surface to the lint pass. See
+    // `docs/utoipa-coverage-policy.md` for the full coverage split.
+    utoipa_coverage_gate(repo_root, &mut failures);
 
     if failures.is_empty() {
         println!("xtask ci: all gates passed.");
@@ -276,6 +283,90 @@ fn multi_key_return_gate(repo_root: &Path, failures: &mut Vec<&'static str>) {
                 failures.push(label);
             }
         }
+    }
+}
+
+/// Run the Phase 7 U8.8 utoipa-coverage ast-grep belt-and-suspenders.
+/// Mirrors the four `ast-grep run --pattern …` invocations in the
+/// `utoipa-coverage-gate` CI job (`.github/workflows/ci.yml`).
+///
+/// ast-grep exits 0 always (per its CLI contract); match output goes
+/// to stdout. Any non-empty stdout from any of the four patterns is a
+/// gate failure. Spawn errors (ast-grep not installed, etc.) are
+/// reported as gate failures rather than warnings so the local
+/// mirror does not silently pass when a tool is missing — matches
+/// the iteration-38 taplo / iteration-40 rustls-mandatory contract.
+///
+/// Bound-to-var rebinds (`let r = Router::new(); r.route(...)`) are
+/// the policy-documented escape from this gate; clippy's
+/// `disallowed_methods` is the primary gate that catches them by
+/// `DefId`. See `docs/utoipa-coverage-policy.md` §Enforcement note 2.
+fn utoipa_coverage_gate(repo_root: &Path, failures: &mut Vec<&'static str>) {
+    const PATTERNS: &[&str] = &[
+        "Router::new().route($$$ARGS)",
+        "Router::new().nest($$$ARGS)",
+        "axum::Router::new().route($$$ARGS)",
+        "axum::Router::new().nest($$$ARGS)",
+    ];
+    const SCAN_PATHS: &[&str] = &["crates/portal-relay/src", "crates/portal-sdk/src"];
+    // ast-grep exit codes (0.39 series, observed locally):
+    //   0  = matches found (output on stdout) OR pattern-parse warning
+    //        path with no matches.
+    //   1  = no matches OR run-level error (e.g., path not found —
+    //        emits `ERROR: <path>: ...` on stderr).
+    //   2+ = catastrophic failure.
+    // Because exit 1 covers BOTH "no match" (success) and "bad path"
+    // (failure), the discriminator is stderr: ast-grep emits an
+    // `ERROR:` line on stderr when the run itself failed, and is
+    // silent on stderr when the run was clean (pattern just did not
+    // match). The CI workflow's bash form collapses non-empty stdout
+    // to violation and silently passes on stderr-only failures
+    // (`matches="$(... )"` captures stdout only); the local mirror
+    // is stricter — stderr containing `ERROR:` is reported as a probe
+    // failure rather than collapsed into success.
+    const RUN_ERROR_MARKER: &str = "ERROR:";
+    let mut violation = false;
+    for pattern in PATTERNS {
+        let mut args: Vec<&str> = vec!["run", "--pattern", pattern, "--lang", "rust"];
+        args.extend_from_slice(SCAN_PATHS);
+        let output = Command::new("ast-grep")
+            .args(&args)
+            .current_dir(repo_root)
+            .output();
+        match output {
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let exit_code = out.status.code();
+                let benign_no_match =
+                    matches!(exit_code, Some(0 | 1)) && !stderr.contains(RUN_ERROR_MARKER);
+                if !benign_no_match && out.stdout.is_empty() {
+                    eprintln!(
+                        "xtask ci: utoipa-coverage-gate ast-grep error for pattern `{pattern}` \
+                         (exit {exit_code:?}):\nstderr: {stderr}"
+                    );
+                    violation = true;
+                } else if !out.stdout.is_empty() {
+                    eprintln!(
+                        "xtask ci: utoipa-coverage-gate matched `{pattern}`:\n{}",
+                        String::from_utf8_lossy(&out.stdout)
+                    );
+                    violation = true;
+                }
+                // benign no-match (clean stderr, exit 0/1, empty stdout) →
+                // implicit success: nothing to report.
+            }
+            Err(e) => {
+                eprintln!(
+                    "xtask ci: utoipa-coverage-gate failed to spawn ast-grep \
+                     (install: cargo install ast-grep --locked): {e}"
+                );
+                violation = true;
+                break;
+            }
+        }
+    }
+    if violation {
+        failures.push("utoipa-coverage-gate");
     }
 }
 
