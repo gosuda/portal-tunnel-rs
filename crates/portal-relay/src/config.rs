@@ -246,20 +246,7 @@ impl RelayConfigBundle {
         server_path: &Path,
         runtime_path: &Path,
     ) -> Result<Self, ConfigLoadError> {
-        let server_bytes =
-            tokio::fs::read(server_path)
-                .await
-                .map_err(|source| ConfigLoadError::Io {
-                    path: server_path.to_path_buf(),
-                    source,
-                })?;
-        let server: RelayServerConfig =
-            serde_json::from_slice(&server_bytes).map_err(|source| {
-                ConfigLoadError::Deserialize {
-                    path: server_path.to_path_buf(),
-                    source: Box::new(source),
-                }
-            })?;
+        let server = load_server_config(server_path).await?;
 
         let runtime_bytes =
             tokio::fs::read(runtime_path)
@@ -278,11 +265,98 @@ impl RelayConfigBundle {
         Ok(Self { server, runtime })
     }
 
+    /// Read both configs from disk asynchronously, with env-var
+    /// overrides layered onto the runtime half via figment.
+    ///
+    /// Bootstrap (`server_path`) is read strictly — env vars never
+    /// override the trust-boundary key paths. Runtime (`runtime_path`)
+    /// is loaded through a figment Provider chain:
+    /// `Json::file(runtime_path)` then `Env::prefixed(env_prefix)`,
+    /// so an operator setting e.g. `PORTAL_BPS_PER_IDENTITY=4096`
+    /// overrides the runtime.json value of `bps_per_identity`.
+    /// Field names are figment-conventional: env-var key (uppercase)
+    /// strips the prefix and lowercases.
+    ///
+    /// The runtime side still respects [`RuntimeConfig`]'s
+    /// `deny_unknown_fields` policy: an env var that does not match a
+    /// `RuntimeConfig` field surfaces as
+    /// [`ConfigLoadError::Figment`] rather than a silent no-op.
+    ///
+    /// # Errors
+    ///
+    /// - [`ConfigLoadError::Io`] if `server_path` cannot be read.
+    /// - [`ConfigLoadError::Deserialize`] if `server_path` fails the
+    ///   strict-bootstrap serde policy.
+    /// - [`ConfigLoadError::Figment`] if the figment Provider chain
+    ///   for the runtime half fails (file read error, JSON parse
+    ///   error, env-var type mismatch, unknown env-var key, etc).
+    ///
+    /// # Notes
+    ///
+    /// Process-global env-var state is read at call time. Tests using
+    /// `figment::Jail::expect_with(...)` get scoped isolation.
+    ///
+    /// The figment provider chain is synchronous — `Json::file` reads
+    /// `runtime_path` off the calling thread. The runtime config is a
+    /// small JSON document (`bps_per_identity` + an IP ban list), so the
+    /// blocking-I/O cost stays inside the latency budget for one-shot
+    /// startup config loads. We do NOT route through
+    /// [`tokio::task::spawn_blocking`] here: the synchronous read keeps
+    /// the error path single-variant ([`ConfigLoadError::Figment`])
+    /// without a join-error variant that does not exist in the
+    /// pure-JSON [`Self::from_files`] sibling. Operators who need
+    /// non-blocking semantics on a hot-reload cadence go through the
+    /// `config_file_watch` feature, not this entry point.
+    pub async fn from_files_with_env(
+        server_path: &Path,
+        runtime_path: &Path,
+        env_prefix: &str,
+    ) -> Result<Self, ConfigLoadError> {
+        use figment::{
+            Figment,
+            providers::{Env, Format, Json},
+        };
+
+        let server = load_server_config(server_path).await?;
+
+        let runtime = Figment::new()
+            .merge(Json::file(runtime_path))
+            .merge(Env::prefixed(env_prefix))
+            .extract::<RuntimeConfig>()
+            .map_err(|source| ConfigLoadError::Figment {
+                path: runtime_path.to_path_buf(),
+                source: Box::new(source),
+            })?;
+
+        Ok(Self { server, runtime })
+    }
+
     /// Consume the bundle and produce a [`crate::reload::ReloadHandle`].
     #[must_use]
     pub fn into_handle(self) -> crate::reload::ReloadHandle {
         crate::reload::ReloadHandle::new(self.server, self.runtime)
     }
+}
+
+/// Read the bootstrap config from disk and parse it under
+/// [`RelayServerConfig`]'s strict-no-defaults serde policy.
+///
+/// Shared between [`RelayConfigBundle::from_files`] and
+/// [`RelayConfigBundle::from_files_with_env`]: both load the bootstrap
+/// half identically (no env override on trust-boundary key paths),
+/// only the runtime half differs across the two entry points.
+async fn load_server_config(server_path: &Path) -> Result<RelayServerConfig, ConfigLoadError> {
+    let server_bytes =
+        tokio::fs::read(server_path)
+            .await
+            .map_err(|source| ConfigLoadError::Io {
+                path: server_path.to_path_buf(),
+                source,
+            })?;
+    serde_json::from_slice(&server_bytes).map_err(|source| ConfigLoadError::Deserialize {
+        path: server_path.to_path_buf(),
+        source: Box::new(source),
+    })
 }
 
 /// Errors that can surface during [`RelayConfigBundle::from_files`].
@@ -317,10 +391,32 @@ pub enum ConfigLoadError {
         #[source]
         source: Box<serde_json::Error>,
     },
+    /// Figment merge / extract error from
+    /// [`RelayConfigBundle::from_files_with_env`]. Wraps any failure in
+    /// env-overlay extraction (bad env-var value, type mismatch,
+    /// `deny_unknown_fields` trip) into a structured variant the
+    /// operator can attribute to the env-var path. The runtime
+    /// path the figment was overlaying is named so the error message
+    /// stays unambiguous. The `figment::Error` is boxed to keep the
+    /// enum payload small (matching the [`Self::Deserialize`]
+    /// `Box<serde_json::Error>` precedent).
+    #[error("config env-overlay error at {path:?}: {source}")]
+    Figment {
+        /// The runtime config path the env vars were overlaying.
+        path: PathBuf,
+        /// Underlying [`figment::Error`], boxed.
+        #[source]
+        source: Box<figment::Error>,
+    },
 }
 
 #[cfg(test)]
 #[expect(clippy::unwrap_used, reason = "test-only setup")]
+#[expect(
+    clippy::result_large_err,
+    reason = "figment::Jail::expect_with closure signature returns Result<_, figment::Error>; \
+              the 208-byte payload is figment's API surface, not ours to box"
+)]
 mod tests {
     use super::*;
 
@@ -626,5 +722,123 @@ mod tests {
 
         assert_eq!(*handle.bootstrap(), expected_server);
         assert_eq!(*handle.current(), expected_runtime);
+    }
+
+    // ----- from_files_with_env tests -----
+    //
+    // These tests use `figment::Jail::expect_with` for env-var
+    // isolation. Jail is the canonical figment-test harness: it
+    // changes CWD to a per-closure tempdir and scopes env-var
+    // mutations to the closure body, so parallel tests cannot
+    // observe each other's process-global env state. Each test
+    // picks a unique env prefix (`TEST_PORTAL_RELOAD_*`,
+    // `TEST_PORTAL_OVERRIDE_*`, `TEST_PORTAL_UNKNOWN_*`) so even
+    // if a runner ever stops giving us scoped isolation the
+    // namespaces stay disjoint.
+    //
+    // Jail closures are synchronous; we spin a current-thread tokio
+    // runtime inside the closure to drive the async `from_files*`
+    // entry points. `block_on` is the documented sync-bridge for
+    // tokio.
+
+    fn jail_runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap_or_else(|err| panic!("failed to build jail-scoped tokio runtime: {err}"))
+    }
+
+    #[test]
+    fn from_files_with_env_no_envvar_matches_from_files() {
+        figment::Jail::expect_with(|jail| {
+            jail.create_file("bootstrap.json", &sample_bootstrap_json())?;
+            jail.create_file("runtime.json", &sample_runtime_json())?;
+
+            // Inside Jail the CWD is the jail dir, so relative paths
+            // resolve to the just-written files. We pass them as
+            // `Path` to the loader.
+            let server_path = std::path::Path::new("bootstrap.json");
+            let runtime_path = std::path::Path::new("runtime.json");
+
+            let rt = jail_runtime();
+            let from_files_bundle = rt
+                .block_on(RelayConfigBundle::from_files(server_path, runtime_path))
+                .unwrap();
+            let from_env_bundle = rt
+                .block_on(RelayConfigBundle::from_files_with_env(
+                    server_path,
+                    runtime_path,
+                    "TEST_PORTAL_RELOAD_",
+                ))
+                .unwrap();
+
+            assert_eq!(from_files_bundle, from_env_bundle);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn from_files_with_env_overrides_runtime_field() {
+        figment::Jail::expect_with(|jail| {
+            jail.create_file("bootstrap.json", &sample_bootstrap_json())?;
+            // Start the on-disk value at 0 so the override is the
+            // observable change, not a coincidence.
+            jail.create_file(
+                "runtime.json",
+                r#"{"bps_per_identity": 0, "ip_ban_list": []}"#,
+            )?;
+
+            jail.set_env("TEST_PORTAL_OVERRIDE_BPS_PER_IDENTITY", 4096_u64);
+
+            let rt = jail_runtime();
+            let bundle = rt
+                .block_on(RelayConfigBundle::from_files_with_env(
+                    std::path::Path::new("bootstrap.json"),
+                    std::path::Path::new("runtime.json"),
+                    "TEST_PORTAL_OVERRIDE_",
+                ))
+                .unwrap();
+
+            assert_eq!(bundle.runtime.bps_per_identity, 4096);
+            // Bootstrap stays untouched by the env layer.
+            assert_eq!(bundle.server, sample_bootstrap());
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn from_files_with_env_rejects_unknown_envvar() {
+        figment::Jail::expect_with(|jail| {
+            jail.create_file("bootstrap.json", &sample_bootstrap_json())?;
+            jail.create_file("runtime.json", &sample_runtime_json())?;
+
+            // An env-var key that does not name a `RuntimeConfig`
+            // field. The figment Env provider turns this into a
+            // `runtime_config.unknown_field` value, which trips
+            // `deny_unknown_fields` at extract time.
+            jail.set_env("TEST_PORTAL_UNKNOWN_UNKNOWN_FIELD", "value");
+
+            let rt = jail_runtime();
+            let err = rt
+                .block_on(RelayConfigBundle::from_files_with_env(
+                    std::path::Path::new("bootstrap.json"),
+                    std::path::Path::new("runtime.json"),
+                    "TEST_PORTAL_UNKNOWN_",
+                ))
+                .unwrap_err();
+
+            match err {
+                ConfigLoadError::Figment { path, source } => {
+                    assert_eq!(path, std::path::Path::new("runtime.json"));
+                    assert!(
+                        source.to_string().contains("unknown")
+                            || source.to_string().contains("unknown_field"),
+                        "expected unknown-field error from env layer, got: {source}",
+                    );
+                }
+                other => panic!("expected ConfigLoadError::Figment, got: {other:?}"),
+            }
+            Ok(())
+        });
     }
 }

@@ -105,6 +105,14 @@ arc-swap = { workspace = true }
 axum = { workspace = true }
 compact_str = { workspace = true, features = ["serde"] }
 defguard_boringtun = { workspace = true }
+# Phase 5 U13 follow-up (env-var override for `RuntimeConfig` loading)
+# adds figment as a non-optional dep. The workspace pin enables the
+# `env`, `json`, and `toml` features; this crate consumes only the
+# `Json::file` and `Env::prefixed` provider chain via
+# `RelayConfigBundle::from_files_with_env`. Bootstrap stays strict —
+# `RelayServerConfig` continues to load through `serde_json` directly
+# since trust-boundary key paths must not be env-overridable.
+figment = { workspace = true }
 governor = { workspace = true }
 http = { workspace = true }
 hyper-util = { workspace = true }
@@ -144,6 +152,13 @@ zeroize = { workspace = true }
 
 [dev-dependencies]
 aws-lc-rs = { workspace = true }
+# Phase 5 U13 follow-up: the env-var override tests for
+# `RelayConfigBundle::from_files_with_env` use `figment::Jail` for
+# scoped env-var isolation. The `Jail` type is gated on figment's
+# `test` feature, which is dev-only; it must NOT appear in the
+# production figment dep above (operator deployments don't need a
+# tempdir-rebinding jail).
+figment = { workspace = true, features = ["test"] }
 http-body-util = { workspace = true }
 pkcs1 = { workspace = true }
 rcgen = { workspace = true }
