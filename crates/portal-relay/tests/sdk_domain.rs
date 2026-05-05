@@ -33,11 +33,17 @@ use tower::ServiceExt as _;
 /// that DOES read state will need a richer fixture; that lands with
 /// the consuming slice.
 fn default_sdk_state() -> SdkState {
+    let signing_key = Arc::new(portal_crypto::ed25519_from_seed_for_test([0x77u8; 32]));
+    let verifier = Arc::new(portal_crypto::Ed25519Verifier::new(
+        portal_crypto::verifying_key(&signing_key),
+    ));
     SdkState {
         leases: LeaseRegistry::new(),
         policy: Arc::new(PolicyRuntime::new()),
         engine: ReputationEngine::new(),
         ens_resolver: None,
+        lease_token_signing_key: signing_key,
+        lease_token_verifier: verifier,
     }
 }
 

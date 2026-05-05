@@ -138,11 +138,17 @@ mod tests {
         let leases = LeaseRegistry::new();
         let policy = Arc::new(PolicyRuntime::new());
         let engine = ReputationEngine::new();
+        let signing_key = Arc::new(portal_crypto::ed25519_from_seed_for_test([0x11u8; 32]));
+        let verifier = Arc::new(portal_crypto::Ed25519Verifier::new(
+            portal_crypto::verifying_key(&signing_key),
+        ));
         let _r = build_sdk_router(SdkState {
             leases,
             policy,
             engine,
             ens_resolver: None,
+            lease_token_signing_key: signing_key,
+            lease_token_verifier: verifier,
         });
     }
 

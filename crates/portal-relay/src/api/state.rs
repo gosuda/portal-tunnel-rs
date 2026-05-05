@@ -12,7 +12,8 @@
 
 use std::sync::Arc;
 
-use portal_crypto::BoxedEnsResolver;
+use portal_crypto::{BoxedEnsResolver, Ed25519Verifier, RelayEd25519Key};
+use secrecy::SecretBox;
 
 use crate::policy::{PolicyRuntime, ReputationEngine};
 use crate::reload::ReloadHandle;
@@ -64,6 +65,29 @@ pub struct SdkState {
     ///   the identity is not added to the engine's ENS-named cache,
     ///   so [`ReputationEngine::decide`] step 4 does not apply.
     pub ens_resolver: Option<BoxedEnsResolver>,
+    /// Shared lease-token signing-key handle.
+    ///
+    /// Handlers reach for a borrowed [`portal_crypto::Ed25519Signer`]
+    /// at call time (`Ed25519Signer::new(&state.lease_token_signing_key)`).
+    /// Held as `Arc<SecretBox<…>>` because [`portal_crypto::Ed25519Signer`]
+    /// is borrowed (lifetime `'k` over the key) and therefore cannot
+    /// itself be `Arc`-wrapped.
+    ///
+    /// # Invariant (verifier/signer pairing)
+    ///
+    /// [`Self::lease_token_verifier`] MUST be derived from this same
+    /// key (via [`portal_crypto::verifying_key`]). The pairing is
+    /// enforced by construction inside
+    /// [`crate::server::Server::sdk_state`] — direct callers (test
+    /// fixtures only) MUST mirror that derivation; a mismatched pair
+    /// silently breaks verification.
+    pub lease_token_signing_key: Arc<SecretBox<RelayEd25519Key>>,
+    /// Shared lease-token verifier. Owned (no lifetime),
+    /// `Arc`-cloned across handlers.
+    ///
+    /// MUST be derived from [`Self::lease_token_signing_key`]; see
+    /// that field's invariant note for the pairing contract.
+    pub lease_token_verifier: Arc<Ed25519Verifier>,
 }
 
 /// State carried by the admin trust-boundary router.
@@ -152,6 +176,22 @@ mod tests {
         }
     }
 
+    /// Build a paired `(Arc<SecretBox<RelayEd25519Key>>, Arc<Ed25519Verifier>)`
+    /// from a deterministic seed. Used by every fixture below to
+    /// satisfy the `SdkState` verifier/signer pairing invariant
+    /// without ad-hoc per-test duplication.
+    fn fixture_lease_token_keys(
+        seed: [u8; 32],
+    ) -> (
+        Arc<SecretBox<portal_crypto::RelayEd25519Key>>,
+        Arc<portal_crypto::Ed25519Verifier>,
+    ) {
+        let key = Arc::new(portal_crypto::ed25519_from_seed_for_test(seed));
+        let vk = portal_crypto::verifying_key(&key);
+        let verifier = Arc::new(portal_crypto::Ed25519Verifier::new(vk));
+        (key, verifier)
+    }
+
     #[test]
     fn states_are_cheaply_cloneable() {
         // Smoke test that the state types compile and clone without
@@ -159,11 +199,14 @@ mod tests {
         // contract that subsequent handlers rely on.
         let leases = LeaseRegistry::new();
         let policy = Arc::new(PolicyRuntime::new());
+        let (signing_key, verifier) = fixture_lease_token_keys([0xAAu8; 32]);
         let _sdk = SdkState {
             leases: leases.clone(),
             policy: Arc::clone(&policy),
             engine: ReputationEngine::new(),
             ens_resolver: None,
+            lease_token_signing_key: signing_key,
+            lease_token_verifier: verifier,
         };
         let _admin = AdminState {
             leases: leases.clone(),
@@ -192,11 +235,14 @@ mod tests {
         let policy = Arc::new(PolicyRuntime::new());
         let engine = ReputationEngine::new();
         let resolver = BoxedEnsResolver::new(StubEnsResolver);
+        let (signing_key, verifier) = fixture_lease_token_keys([0xBBu8; 32]);
         let state = SdkState {
             leases,
             policy,
             engine: engine.clone(),
             ens_resolver: Some(resolver),
+            lease_token_signing_key: signing_key,
+            lease_token_verifier: verifier,
         };
         let cloned = state.clone();
 

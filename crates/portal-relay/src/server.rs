@@ -69,7 +69,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use jiff::Timestamp;
-use portal_crypto::BoxedEnsResolver;
+use portal_crypto::{BoxedEnsResolver, Ed25519Verifier, RelayEd25519Key};
+use secrecy::SecretBox;
 use tokio::sync::{Mutex, watch};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -151,6 +152,18 @@ struct ServerInner {
     /// for demo / no-ENS-configured deployments. Surfaced into
     /// [`SdkState::ens_resolver`] verbatim.
     ens_resolver: Option<BoxedEnsResolver>,
+    /// Optional lease-token signing-key handle. `Some` after
+    /// [`Server::with_relay_protocol_key`]; `None` until the
+    /// builder is invoked. Surfaced through
+    /// [`SdkState::lease_token_signing_key`] when
+    /// [`Server::sdk_state`] is called.
+    relay_protocol_key: Option<Arc<SecretBox<RelayEd25519Key>>>,
+    /// Optional lease-token verifier handle. `Some` after
+    /// [`Server::with_relay_protocol_key`] (derived from the same
+    /// key in one shot to satisfy the
+    /// [`SdkState`] verifier/signer pairing invariant); `None`
+    /// otherwise. Surfaced through [`SdkState::lease_token_verifier`].
+    relay_protocol_verifier: Option<Arc<Ed25519Verifier>>,
     /// Lifecycle guard. The mutex is held for short critical
     /// sections only — never across `JoinSet::join_next` awaits
     /// or other long-lived operations.
@@ -261,6 +274,8 @@ impl Server {
                 reputation_persistence: None,
                 reputation_engine: None,
                 ens_resolver: None,
+                relay_protocol_key: None,
+                relay_protocol_verifier: None,
                 lifecycle: Mutex::new(Lifecycle::Stopped),
             }),
         }
@@ -306,6 +321,12 @@ impl Server {
                 reputation_persistence: self.inner.reputation_persistence.clone(),
                 reputation_engine: self.inner.reputation_engine.clone(),
                 ens_resolver: self.inner.ens_resolver.clone(),
+                relay_protocol_key: self.inner.relay_protocol_key.as_ref().map(Arc::clone),
+                relay_protocol_verifier: self
+                    .inner
+                    .relay_protocol_verifier
+                    .as_ref()
+                    .map(Arc::clone),
                 lifecycle: Mutex::new(Lifecycle::Stopped),
             }),
         }
@@ -352,6 +373,12 @@ impl Server {
                 reputation_persistence: Some((engine, path)),
                 reputation_engine: self.inner.reputation_engine.clone(),
                 ens_resolver: self.inner.ens_resolver.clone(),
+                relay_protocol_key: self.inner.relay_protocol_key.as_ref().map(Arc::clone),
+                relay_protocol_verifier: self
+                    .inner
+                    .relay_protocol_verifier
+                    .as_ref()
+                    .map(Arc::clone),
                 lifecycle: Mutex::new(Lifecycle::Stopped),
             }),
         }
@@ -407,6 +434,12 @@ impl Server {
                 reputation_persistence: self.inner.reputation_persistence.clone(),
                 reputation_engine: Some(engine),
                 ens_resolver: self.inner.ens_resolver.clone(),
+                relay_protocol_key: self.inner.relay_protocol_key.as_ref().map(Arc::clone),
+                relay_protocol_verifier: self
+                    .inner
+                    .relay_protocol_verifier
+                    .as_ref()
+                    .map(Arc::clone),
                 lifecycle: Mutex::new(Lifecycle::Stopped),
             }),
         }
@@ -447,6 +480,74 @@ impl Server {
                 reputation_persistence: self.inner.reputation_persistence.clone(),
                 reputation_engine: self.inner.reputation_engine.clone(),
                 ens_resolver: Some(resolver),
+                relay_protocol_key: self.inner.relay_protocol_key.as_ref().map(Arc::clone),
+                relay_protocol_verifier: self
+                    .inner
+                    .relay_protocol_verifier
+                    .as_ref()
+                    .map(Arc::clone),
+                lifecycle: Mutex::new(Lifecycle::Stopped),
+            }),
+        }
+    }
+
+    /// Bind a [`SecretBox<RelayEd25519Key>`] to this server's lease-
+    /// token signer/verifier surface. Materialises the verifier once
+    /// from [`portal_crypto::verifying_key`] and stores both the key
+    /// (as `Arc<SecretBox<…>>`) and the derived [`Ed25519Verifier`]
+    /// (as `Arc<Ed25519Verifier>`) on the server's internal state, so
+    /// every subsequent [`Self::sdk_state`] call surfaces the matched
+    /// pair through [`SdkState::lease_token_signing_key`] and
+    /// [`SdkState::lease_token_verifier`].
+    ///
+    /// The (future) `POST /v1/sdk/register` and `POST /v1/sdk/renew`
+    /// handlers consume [`SdkState::lease_token_signing_key`] to mint
+    /// lease-access tokens via [`crate::state::lease_token::issue`];
+    /// `POST /v1/sdk/connect` consumes
+    /// [`SdkState::lease_token_verifier`] to verify them.
+    ///
+    /// # Coupling discipline
+    ///
+    /// Operators who set [`Self::with_reputation_persistence`] (the
+    /// cadence loop's persisted-engine path) AND this builder are
+    /// responsible for passing **consistent** material across the
+    /// two surfaces. The (future) cadence loop's persisted engine
+    /// will sign tokens it issues during eviction-recovery using
+    /// the same material the SDK handler-consumed signer uses; the
+    /// Server's plumbing does NOT enforce this in v0.1. The bin
+    /// crate is the canonical site that threads one
+    /// [`SecretBox<RelayEd25519Key>`] through both call sites.
+    ///
+    /// # Hoare invariant
+    ///
+    /// Must be called before [`Self::start`]; same lifecycle
+    /// contract as [`Self::with_reload_handle`]. The verifier is
+    /// derived once at builder time (a single scalar multiplication
+    /// over the public-key portion of the signing key) and shared
+    /// across handlers via `Arc`-clone, avoiding per-call rederivation
+    /// inside the handler hot path.
+    #[must_use]
+    pub fn with_relay_protocol_key(self, key: SecretBox<RelayEd25519Key>) -> Self {
+        debug_assert!(
+            self.inner
+                .lifecycle
+                .try_lock()
+                .is_ok_and(|guard| matches!(*guard, Lifecycle::Stopped)),
+            "Server::with_relay_protocol_key must be called before start(); \
+             try_lock failed (contention) or lifecycle is not Stopped",
+        );
+        let key_arc = Arc::new(key);
+        let verifier = Arc::new(Ed25519Verifier::new(portal_crypto::verifying_key(&key_arc)));
+        Self {
+            inner: Arc::new(ServerInner {
+                leases: self.inner.leases.clone(),
+                policy: Arc::clone(&self.inner.policy),
+                reload_handle: self.inner.reload_handle.as_ref().map(Arc::clone),
+                reputation_persistence: self.inner.reputation_persistence.clone(),
+                reputation_engine: self.inner.reputation_engine.clone(),
+                ens_resolver: self.inner.ens_resolver.clone(),
+                relay_protocol_key: Some(key_arc),
+                relay_protocol_verifier: Some(verifier),
                 lifecycle: Mutex::new(Lifecycle::Stopped),
             }),
         }
@@ -507,43 +608,68 @@ impl Server {
     /// [`crate::api::build_sdk_router`]. Canonical bridge between
     /// server orchestration and the SDK axum router: the bin
     /// crate constructs the `Server`, attaches the reputation
-    /// engine (via [`Self::with_reputation_engine`]) and the
-    /// optional ENS resolver (via [`Self::with_ens_resolver`]),
+    /// engine (via [`Self::with_reputation_engine`]), the
+    /// relay-protocol key (via [`Self::with_relay_protocol_key`]),
+    /// and the optional ENS resolver (via [`Self::with_ens_resolver`]),
     /// and then asks the server for an `SdkState` to hand to the
     /// router builder.
     ///
     /// # Panics
     ///
-    /// Panics with a clear message when [`Self::with_reputation_engine`]
-    /// has not been called: the (future) `POST /v1/sdk/register`
-    /// handler treats engine access as a required dependency and
-    /// the bin crate is the contract holder for wiring it. The
-    /// admin-router path tolerates a missing reload handle (it
-    /// surfaces 503 `FeatureUnavailable` at the handler layer);
-    /// the SDK-router path does not have a corresponding fallback
-    /// because every SDK handler needs the engine. Callers that
-    /// do not want this panic should not call `sdk_state` —
-    /// `Server::admin_router` and the lease-janitor lifecycle
-    /// remain reachable without it.
+    /// Panics with a clear message when either
+    /// [`Self::with_reputation_engine`] or
+    /// [`Self::with_relay_protocol_key`] has not been called: the
+    /// (future) `POST /v1/sdk/register` handler treats engine access
+    /// as a required dependency, and every lease-issuing /
+    /// lease-verifying SDK handler treats the relay-protocol key
+    /// pair as one. The admin-router path tolerates a missing reload
+    /// handle (it surfaces 503 `FeatureUnavailable` at the handler
+    /// layer); the SDK-router path does not have a corresponding
+    /// fallback. Callers that do not want this panic should not
+    /// call `sdk_state` — `Server::admin_router` and the
+    /// lease-janitor lifecycle remain reachable without it.
     #[must_use]
     #[expect(
         clippy::expect_used,
         reason = "the panic carries the required-precondition contract documented on \
                   this method's `# Panics` section; callers that have not invoked \
-                  `with_reputation_engine` are operator-misuse and the eager panic \
-                  surfaces the misconfiguration at orchestrator-bridge time rather \
-                  than as a confusing handler-level NPE later"
+                  `with_reputation_engine` / `with_relay_protocol_key` are \
+                  operator-misuse and the eager panic surfaces the misconfiguration \
+                  at orchestrator-bridge time rather than as a confusing \
+                  handler-level NPE later"
     )]
     pub fn sdk_state(&self) -> SdkState {
         let engine = self.inner.reputation_engine.clone().expect(
             "Server::sdk_state requires Server::with_reputation_engine to be called first; \
              the future SDK /v1/sdk/register handler treats engine access as a required dependency",
         );
+        let lease_token_signing_key = self
+            .inner
+            .relay_protocol_key
+            .as_ref()
+            .map(Arc::clone)
+            .expect(
+                "Server::sdk_state requires Server::with_relay_protocol_key to be called first; \
+                 the future SDK /v1/sdk/register and /v1/sdk/connect handlers treat the \
+                 lease-token signer/verifier pair as a required dependency",
+            );
+        let lease_token_verifier = self
+            .inner
+            .relay_protocol_verifier
+            .as_ref()
+            .map(Arc::clone)
+            .expect(
+                "Server::sdk_state internal invariant: relay_protocol_verifier must be Some \
+                 whenever relay_protocol_key is Some — both are populated together in \
+                 Server::with_relay_protocol_key",
+            );
         SdkState {
             leases: self.leases(),
             policy: self.policy(),
             engine,
             ens_resolver: self.ens_resolver(),
+            lease_token_signing_key,
+            lease_token_verifier,
         }
     }
 
@@ -1216,6 +1342,12 @@ mod tests {
         assert_eq!(h2.lease_count(), 1);
     }
 
+    /// Test-fixture relay-protocol key. Deterministic seed; not used
+    /// outside the inline test harness.
+    fn fixture_relay_protocol_key() -> SecretBox<RelayEd25519Key> {
+        portal_crypto::ed25519_from_seed_for_test([0xEEu8; 32])
+    }
+
     #[tokio::test]
     async fn with_reputation_engine_lands_in_sdk_state() {
         // Behavioral identity check: the engine the builder
@@ -1225,7 +1357,9 @@ mod tests {
         // server made an internal copy somewhere along the way,
         // the read would not see the mark.
         let engine = ReputationEngine::new();
-        let server = Server::new().with_reputation_engine(engine.clone());
+        let server = Server::new()
+            .with_reputation_engine(engine.clone())
+            .with_relay_protocol_key(fixture_relay_protocol_key());
         let state = server.sdk_state();
 
         let id = crate::policy::IdentityKey([0xAB; 32]);
@@ -1305,7 +1439,9 @@ mod tests {
     async fn with_ens_resolver_lands_in_sdk_state_or_none_default() {
         // Default path: no resolver wired in, sdk_state surfaces None.
         let engine = ReputationEngine::new();
-        let server_default = Server::new().with_reputation_engine(engine.clone());
+        let server_default = Server::new()
+            .with_reputation_engine(engine.clone())
+            .with_relay_protocol_key(fixture_relay_protocol_key());
         let state_default = server_default.sdk_state();
         assert!(
             state_default.ens_resolver.is_none(),
@@ -1317,12 +1453,60 @@ mod tests {
         let resolver = BoxedEnsResolver::new(ServerStubEnsResolver);
         let server_wired = Server::new()
             .with_reputation_engine(engine)
-            .with_ens_resolver(resolver);
+            .with_ens_resolver(resolver)
+            .with_relay_protocol_key(fixture_relay_protocol_key());
         let state_wired = server_wired.sdk_state();
         assert!(
             state_wired.ens_resolver.is_some(),
             "with_ens_resolver(some) surfaces ens_resolver in SdkState",
         );
         assert!(server_wired.ens_resolver().is_some());
+    }
+
+    /// AC8 — the lease-token signer/verifier round-trips end-to-end
+    /// through `Server::with_relay_protocol_key` → `sdk_state()`. Mints
+    /// a token via the carried signer (constructed ad-hoc per the
+    /// borrowed-signer contract), verifies via the carried verifier,
+    /// and asserts the decoded claims match the issued identity. A
+    /// regression that breaks the signer/verifier pairing inside
+    /// `Server::sdk_state` (e.g. a verifier derived from a different
+    /// key, or a mid-flight zeroisation of the carried key bytes)
+    /// would either fail signature verification or surface a
+    /// post-decode claims mismatch.
+    #[tokio::test]
+    async fn with_relay_protocol_key_round_trips_through_sdk_state() {
+        use crate::state::IdentityKey;
+        use crate::state::lease_token;
+
+        let engine = ReputationEngine::new();
+        let server = Server::new()
+            .with_reputation_engine(engine)
+            .with_relay_protocol_key(fixture_relay_protocol_key());
+        let state = server.sdk_state();
+
+        // Mint via the borrowed-signer-over-Arc<SecretBox<…>> shape
+        // documented in `SdkState::lease_token_signing_key`.
+        let signer = portal_crypto::Ed25519Signer::new(&state.lease_token_signing_key);
+        let identity = IdentityKey([0x99u8; 32]);
+        let expires_at = jiff::Timestamp::now()
+            .saturating_add(jiff::SignedDuration::from_secs(60))
+            .unwrap_or(jiff::Timestamp::MAX);
+        let token = lease_token::issue(identity, expires_at, &signer)
+            .expect("issue under the carried signer must succeed");
+
+        let claims =
+            lease_token::verify(&token, &state.lease_token_verifier, jiff::Timestamp::now())
+                .expect(
+                    "verify under the carried verifier must succeed for a freshly-issued token",
+                );
+        assert_eq!(
+            claims.identity, identity.0,
+            "decoded identity must round-trip through issue/verify under the SdkState-carried pair",
+        );
+        assert_eq!(
+            claims.expires_at,
+            expires_at.as_second(),
+            "decoded expiry must round-trip through issue/verify under the SdkState-carried pair",
+        );
     }
 }

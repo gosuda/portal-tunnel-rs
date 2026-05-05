@@ -1,11 +1,12 @@
 //! Relay identity loader — R2 trust-boundary `SecretBox<KeyType>` newtypes.
 //!
 //! The current surface ships the **type plumbing** for the relay
-//! identity bundle: `RelayIdentity`, `IdentityPaths`, and the
-//! `load_quic_only` helper that materializes the QUIC trust surface.
-//! The full bundle loader (`load_or_create`) and the API HTTPS load
-//! path land in a follow-up commit; today's surface is the type-level
-//! skeleton plus the single-key QUIC load.
+//! identity bundle: `RelayIdentity`, `IdentityPaths`, the
+//! `load_quic_only` helper, and the relay-protocol-key load path
+//! (`load_relay_protocol_only`) consumed by [`crate::server::Server`]'s
+//! lease-token signer/verifier wiring. The full bundle loader
+//! (`load_or_create`) and the API HTTPS load path land in a follow-up
+//! commit.
 //!
 //! ## Trust-boundary discipline (R2)
 //!
@@ -14,20 +15,19 @@
 //! time. The workspace clippy `disallowed_methods` rule
 //! (`portal_crypto::load_all_keys`) prohibits any function returning
 //! more than one signing key from a single load call. The current
-//! `RelayIdentity` shape carries only **two** of the five anticipated
-//! key surfaces — `ApiHttpsKey` and `QuicIdentityKey`. The remaining
-//! three follow on as their consuming surfaces wire the keys onto
-//! this bundle:
+//! `RelayIdentity` shape carries **three** of the five anticipated
+//! key surfaces — `ApiHttpsKey`, `QuicIdentityKey`, and
+//! `RelayEd25519Key`. The remaining two follow on as their consuming
+//! surfaces wire the keys onto this bundle:
 //!
 //! - `KeylessSigningKey` (consumed by the keyless mTLS endpoint).
-//! - `RelayProtocolKey` / `SiweKey` (consumed by the discovery
-//!   announce path and the admin SIWE-bind path).
+//! - `SiweKey` (consumed by the admin SIWE-bind path).
 
 use std::io;
 use std::path::PathBuf;
 
 use compact_str::CompactString;
-use portal_crypto::ApiHttpsKey;
+use portal_crypto::{ApiHttpsKey, RelayEd25519Key};
 use portal_net::QuicIdentityKey;
 use secrecy::SecretBox;
 
@@ -35,9 +35,9 @@ use crate::error::RelayResult;
 
 /// Relay identity bundle.
 ///
-/// Currently carries the two-key shape (`api_https` + `quic`);
-/// follow-up commits extend it with `KeylessSigningKey`,
-/// `RelayProtocolKey`, and `SiweKey` as their consuming surfaces
+/// Currently carries the three-key shape (`api_https` + `quic` +
+/// `relay_protocol`); follow-up commits extend it with
+/// `KeylessSigningKey` and `SiweKey` as their consuming surfaces
 /// wire those keys onto the bundle.
 pub struct RelayIdentity {
     /// HTTPS API trust surface (admin / sdk / discovery routers).
@@ -45,6 +45,13 @@ pub struct RelayIdentity {
     pub api_https: SecretBox<ApiHttpsKey>,
     /// QUIC backhaul trust surface (portal-net `Endpoint::server`).
     pub quic: SecretBox<QuicIdentityKey>,
+    /// Relay protocol-identity key (Phase 5 SDK-API S2). Materialised
+    /// into a [`portal_crypto::Ed25519Signer`] (borrowed) at handler
+    /// call sites and a long-lived [`portal_crypto::Ed25519Verifier`]
+    /// at server start. Carried under [`SecretBox`] so accidental
+    /// debug-print or copy is rejected by the secrecy crate's
+    /// trust-boundary discipline.
+    pub relay_protocol: SecretBox<RelayEd25519Key>,
     /// Operator-friendly relay name (used in tracing + audit log).
     /// Read from disk alongside the keys; not a secret.
     pub name: CompactString,
@@ -55,6 +62,7 @@ impl core::fmt::Debug for RelayIdentity {
         f.debug_struct("RelayIdentity")
             .field("api_https", &"[REDACTED]")
             .field("quic", &"[REDACTED]")
+            .field("relay_protocol", &"[REDACTED]")
             .field("name", &self.name)
             .finish()
     }
@@ -63,6 +71,9 @@ impl core::fmt::Debug for RelayIdentity {
 /// Standard layout of the on-disk identity directory:
 /// - `<dir>/api_https.der` (PKCS#8 ed25519, mode 0o600)
 /// - `<dir>/quic.der` (PKCS#8 ed25519, mode 0o600)
+/// - `<dir>/relay_protocol.json` (single-field JSON, mode 0o600 —
+///   `{ "ed25519_secret_key": "<64 lowercase hex chars>" }` per
+///   [`portal_crypto::load_relay_ed25519_key`])
 /// - `<dir>/name.txt` (operator-friendly relay name)
 #[derive(Debug, Clone)]
 pub struct IdentityPaths {
@@ -90,6 +101,15 @@ impl IdentityPaths {
     #[must_use]
     pub fn quic(&self) -> PathBuf {
         self.dir.join("quic.der")
+    }
+
+    /// Path to the relay protocol-identity key file
+    /// (`<dir>/relay_protocol.json`). Loaded via
+    /// [`portal_crypto::load_relay_ed25519_key`] and consumed by
+    /// [`load_relay_protocol_only`].
+    #[must_use]
+    pub fn relay_protocol(&self) -> PathBuf {
+        self.dir.join("relay_protocol.json")
     }
 
     /// Path to the relay name file (`<dir>/name.txt`).
@@ -159,6 +179,44 @@ pub async fn load_quic_only(paths: &IdentityPaths) -> RelayResult<SecretBox<Quic
     }
 }
 
+/// Load the relay protocol-identity ed25519 key from disk.
+///
+/// The file at [`IdentityPaths::relay_protocol`] is consumed by
+/// [`portal_crypto::load_relay_ed25519_key`], which expects the
+/// single-field JSON shape:
+///
+/// ```json
+/// { "ed25519_secret_key": "<64 lowercase hex chars>" }
+/// ```
+///
+/// Unlike [`load_quic_only`] this path does **not** generate-on-absent
+/// today: `portal-crypto` exposes only the load surface for the relay
+/// ed25519 key and the corresponding generator + atomic save lands
+/// alongside the operator-tooling commit that owns initial-key
+/// provisioning. Operators bootstrap the file out-of-band; until that
+/// follow-up lands, `NotFound` surfaces as
+/// [`crate::error::RelayError::Crypto`].
+///
+/// # Errors
+///
+/// - [`crate::error::RelayError::Io`] on filesystem faults that occur
+///   while creating the parent directory.
+/// - [`crate::error::RelayError::Crypto`] on `NotFound`, malformed
+///   JSON, hex-decode failure, length mismatch, or any other
+///   [`portal_crypto::PortalCryptoError`] surfaced by the loader.
+pub async fn load_relay_protocol_only(
+    paths: &IdentityPaths,
+) -> RelayResult<SecretBox<RelayEd25519Key>> {
+    tokio::fs::create_dir_all(&paths.dir).await?;
+    let path = paths.relay_protocol();
+    // `portal_crypto::load_relay_ed25519_key` is a synchronous read of
+    // a small (≤200-byte) JSON file; calling it directly inside the
+    // async fn is fine — `spawn_blocking` would be over-engineering for
+    // a one-shot read on the start path.
+    portal_crypto::load_relay_ed25519_key(&path)
+        .map_err(|e| crate::error::RelayError::Crypto(e.to_string()))
+}
+
 #[cfg(test)]
 #[expect(clippy::unwrap_used, reason = "test-only setup")]
 mod tests {
@@ -185,7 +243,61 @@ mod tests {
         let paths = IdentityPaths::new(dir);
         assert!(paths.api_https().ends_with("api_https.der"));
         assert!(paths.quic().ends_with("quic.der"));
+        assert!(paths.relay_protocol().ends_with("relay_protocol.json"));
         assert!(paths.name().ends_with("name.txt"));
+    }
+
+    /// `load_relay_protocol_only` round-trips: write a JSON key file
+    /// that matches the `portal_crypto::load_relay_ed25519_key`
+    /// single-field shape, load through the helper, and verify the
+    /// derived `VerifyingKey` matches a direct `dalek` reconstruction
+    /// from the same seed. Proves the loader correctly threads through
+    /// portal-crypto without re-encoding or zeroising the bytes mid-flight.
+    #[tokio::test]
+    async fn load_relay_protocol_only_round_trips_from_disk() {
+        use std::fmt::Write as _;
+        use std::io::Write as _;
+
+        let dir = tempdir().unwrap();
+        let paths = IdentityPaths::new(dir.path().to_path_buf());
+        // Pre-create the parent dir so we can drop a JSON file in it.
+        std::fs::create_dir_all(&paths.dir).unwrap();
+
+        let seed: [u8; 32] = [0x55u8; 32];
+        let hex = seed.iter().fold(String::with_capacity(64), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        });
+        let json = format!(r#"{{"ed25519_secret_key": "{hex}"}}"#);
+        std::fs::File::create(paths.relay_protocol())
+            .unwrap()
+            .write_all(json.as_bytes())
+            .unwrap();
+
+        let loaded = load_relay_protocol_only(&paths).await.unwrap();
+        let vk_loaded = portal_crypto::verifying_key(&loaded);
+        let sk_ref = ed25519_dalek::SigningKey::from_bytes(&seed);
+        assert_eq!(
+            vk_loaded.to_bytes(),
+            sk_ref.verifying_key().to_bytes(),
+            "loaded relay-protocol key must derive the same verifying key as a direct dalek seed",
+        );
+    }
+
+    /// Missing-file surfaces as [`RelayError::Crypto`] (the
+    /// portal-crypto loader's `Io` arm flows through `to_string()`).
+    #[tokio::test]
+    async fn load_relay_protocol_only_missing_file_surfaces_crypto_error() {
+        use crate::error::RelayError;
+
+        let dir = tempdir().unwrap();
+        let paths = IdentityPaths::new(dir.path().to_path_buf());
+        // Don't create the file — the helper must surface a Crypto error.
+        let result = load_relay_protocol_only(&paths).await;
+        assert!(
+            matches!(result, Err(RelayError::Crypto(_))),
+            "missing relay_protocol.json must surface as RelayError::Crypto, got {result:?}",
+        );
     }
 
     /// A non-NotFound metadata error must surface as

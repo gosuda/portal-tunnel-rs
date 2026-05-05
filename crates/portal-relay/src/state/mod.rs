@@ -14,7 +14,7 @@ pub mod lease_registry;
 pub mod lease_token;
 pub mod persistence;
 
-pub use identity::{IdentityPaths, RelayIdentity, load_quic_only};
+pub use identity::{IdentityPaths, RelayIdentity, load_quic_only, load_relay_protocol_only};
 pub use lease_registry::{IdentityKey, LeaseRecord, LeaseRegistry};
 pub use lease_token::{LEASE_TOKEN_VERSION, LeaseTokenClaims, LeaseTokenError};
 pub use persistence::{STATE_FILE_MODE, read_json, write_json_atomic};
