@@ -33,8 +33,9 @@ pub enum KeylessError {
     ///
     /// Everything else (DSA, Ed25519, P-384, P-521, secp256k1, …) is
     /// refused at load time so we cannot accidentally hand a
-    /// non-allow-listed algorithm to the (forthcoming U2) rustls
-    /// `SigningKey` adapter.
+    /// non-allow-listed algorithm to the
+    /// [`super::signer::KeylessSignerAdapter`] (the rustls
+    /// `SigningKey` shim).
     #[error("unsupported algorithm: {0}")]
     UnsupportedAlgorithm(String),
 

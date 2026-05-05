@@ -25,8 +25,8 @@
 //!    or PKCS#8 `PrivateKeyInfo` whose inner `privateKey` octet
 //!    string is itself a valid PKCS#1 / SEC1 body).  Truncated or
 //!    malformed DER fails [`KeylessError::InvalidKey`] at load time
-//!    so the (forthcoming U2) `KeylessSignerAdapter` never sees
-//!    structurally-broken material.
+//!    so the [`KeylessSignerAdapter`](super::signer::KeylessSignerAdapter)
+//!    never sees structurally-broken material.
 //!
 //! Cryptographic key-length / strength policy (e.g. RSA ≥ 2048 bits,
 //! reject low-exponent keys, …) is **out of scope** for this loader —
@@ -102,12 +102,12 @@ const OID_NIST_P256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10
 ///
 /// `pub(crate)` (rather than `pub`) on the variants because the
 /// algorithm tag is an internal detail of the keyless module — callers
-/// should never branch on it; the sole consumer is the (forthcoming
-/// U2) `KeylessSignerAdapter` which selects the rustls `SigningKey`
-/// constructor based on this tag.
+/// should never branch on it; the sole consumer is the
+/// [`KeylessSignerAdapter`](super::signer::KeylessSignerAdapter) which
+/// selects the rustls `SigningKey` constructor based on this tag.
 ///
 /// `#[doc(hidden)]` keeps the type out of the rendered rustdoc surface
-/// even though it has to be `pub(crate)` for the U2 signer to pattern-
+/// even though it has to be `pub(crate)` for the signer to pattern-
 /// match it.
 #[doc(hidden)]
 #[non_exhaustive]
@@ -204,7 +204,8 @@ pub fn load_keyless_signing_key(pem: &[u8]) -> Result<KeylessSigningKey, Keyless
     //    AlgorithmIdentifier inspection.  Each branch additionally
     //    parses the inner DER body so a truncated / malformed key
     //    body surfaces `InvalidKey` here rather than deferring the
-    //    failure to the (forthcoming U2) signer-construction site.
+    //    failure to the signer-construction site
+    //    (`super::signer::KeylessSignerAdapter`).
     let material = match parsed {
         PrivateKeyDer::Pkcs1(rsa) => {
             // PKCS#1 `RSA PRIVATE KEY` is RSA by section label.
