@@ -52,10 +52,14 @@
 //!   disk path also landed via [`config::RelayConfigBundle`] +
 //!   `RelayConfigBundle::from_files`, a v0.1 simple two-file
 //!   loader that reads both JSON files and produces a
-//!   [`reload::ReloadHandle`] via `into_handle()`. The HTTP
-//!   reload endpoint (`POST /v1/admin/config/reload`),
-//!   figment-driven multi-source loader, env-var overrides, and
-//!   combined single-file format remain B8 territory.
+//!   [`reload::ReloadHandle`] via `into_handle()`. The HTTP admin
+//!   config surface (`POST /v1/admin/config/reload` +
+//!   `GET /v1/admin/config/current`) also landed; the
+//!   [`server::Server`] orchestrator surfaces an
+//!   [`api::AdminState`] via [`server::Server::admin_state`] for
+//!   router mounting. HTTPS-listener mounting, figment-driven
+//!   multi-source loader, env-var overrides, and combined
+//!   single-file format remain B8 territory.
 //! - **Batches 8 + 10 fully pending**: hot-reload consumer wiring +
 //!   keyless I/O wiring; Admin View + R15 Status TUI.
 //!

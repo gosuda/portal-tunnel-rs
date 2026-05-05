@@ -228,17 +228,17 @@ impl Server {
     ///
     /// # Hoare invariant
     ///
-    /// Must be called before [`Self::start`]. A new
-    /// [`ServerInner`] is constructed by cloning the existing
+    /// Must be called before [`Self::start`]. A new internal
+    /// `ServerInner` is constructed by cloning the existing
     /// `leases` (cheap [`LeaseRegistry`] clone) and `policy`
     /// (cheap `Arc` clone) and attaching the supplied handle; the
-    /// new `lifecycle` is fresh [`Lifecycle::Stopped`]. Calling
-    /// this after `start()` is operator misuse: the prior
-    /// `RuntimeState` (with its janitor task) is orphaned on the
-    /// old [`Arc<ServerInner>`] while the new one starts a
-    /// disconnected lifecycle. The bin crate's `serve` flow places
-    /// this call between `with_components` and `start`, where the
-    /// invariant holds by construction.
+    /// new lifecycle is fresh `Lifecycle::Stopped`. Calling this
+    /// after `start()` is operator misuse: the prior `RuntimeState`
+    /// (with its janitor task) is orphaned on the old
+    /// `Arc<ServerInner>` while the new one starts a disconnected
+    /// lifecycle. The bin crate's `serve` flow places this call
+    /// between `with_components` and `start`, where the invariant
+    /// holds by construction.
     ///
     /// In debug builds a `debug_assert!` on `lifecycle.try_lock()`
     /// surfaces the misuse: a non-`Stopped` phase under
