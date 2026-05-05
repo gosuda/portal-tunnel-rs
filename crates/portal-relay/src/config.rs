@@ -60,7 +60,7 @@
 //! }
 //! ```
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use compact_str::CompactString;
 
@@ -163,6 +163,160 @@ impl Default for RuntimeConfig {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// In-memory aggregate of the on-disk configuration files.
+///
+/// Combines the immutable [`RelayServerConfig`] (bootstrap; trust-
+/// boundary key paths) and the hot-reloadable [`RuntimeConfig`]
+/// (operator-tunable surface) into a single ergonomic carrier so
+/// the operator workflow has a single entry point from disk to a
+/// running [`crate::reload::ReloadHandle`].
+///
+/// This is the v0.1 simple two-file loader. A figment-driven
+/// multi-source loader (env-var overrides, layered defaults,
+/// combined single-file format) remains B8 territory.
+///
+/// # Operator workflow
+///
+/// ```rust,no_run
+/// # use portal_relay::RelayConfigBundle;
+/// # use std::path::PathBuf;
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let bundle = RelayConfigBundle::from_files(
+///     &PathBuf::from("./bootstrap.json"),
+///     &PathBuf::from("./runtime.json"),
+/// ).await?;
+/// let handle = bundle.into_handle();
+/// // Optionally:
+/// // let _watcher = portal_relay::watch_runtime_config(
+/// //     std::sync::Arc::new(handle.clone()),
+/// //     PathBuf::from("./runtime.json"),
+/// // )?;
+/// # Ok(()) }
+/// ```
+///
+/// # Two-file rationale
+///
+/// [`RelayServerConfig`] and [`RuntimeConfig`] carry different
+/// serde policies: the bootstrap is strict-no-defaults
+/// (`deny_unknown_fields`, no `default`), while the runtime is
+/// forward-compat (`default + deny_unknown_fields` per iter-124).
+/// Two files preserve both policies cleanly — combining them
+/// would require either a wrapping struct (whose strict-bootstrap
+/// policy would propagate to the runtime half and break forward-
+/// compat) or `#[serde(flatten)]` (which would lose strict-
+/// bootstrap on missing keys). Splitting the on-disk format
+/// avoids forcing a shared deserializer policy across two halves
+/// that intentionally diverge.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct RelayConfigBundle {
+    /// Bootstrap (immutable post-startup) half.
+    pub server: RelayServerConfig,
+    /// Hot-reloadable half.
+    pub runtime: RuntimeConfig,
+}
+
+impl RelayConfigBundle {
+    /// Construct a bundle from in-memory configs.
+    #[must_use]
+    pub const fn new(server: RelayServerConfig, runtime: RuntimeConfig) -> Self {
+        Self { server, runtime }
+    }
+
+    /// Read both configs from disk asynchronously.
+    ///
+    /// Reads `server_path` as JSON-deserialized [`RelayServerConfig`]
+    /// (strict; rejects unknown keys; rejects missing keys) and
+    /// `runtime_path` as JSON-deserialized [`RuntimeConfig`]
+    /// (`default`-fills missing keys; rejects unknown keys).
+    ///
+    /// # Errors
+    ///
+    /// - [`ConfigLoadError::Io`] if either file cannot be opened
+    ///   or read (file missing, permissions denied, ENOTDIR, etc).
+    ///   The error's `path` field names which file failed.
+    /// - [`ConfigLoadError::Deserialize`] if either file parses
+    ///   as JSON but does not match the expected serde policy
+    ///   (unknown key on either; missing required field on the
+    ///   bootstrap; malformed JSON). The error's `path` field
+    ///   names which file failed.
+    pub async fn from_files(
+        server_path: &Path,
+        runtime_path: &Path,
+    ) -> Result<Self, ConfigLoadError> {
+        let server_bytes =
+            tokio::fs::read(server_path)
+                .await
+                .map_err(|source| ConfigLoadError::Io {
+                    path: server_path.to_path_buf(),
+                    source,
+                })?;
+        let server: RelayServerConfig =
+            serde_json::from_slice(&server_bytes).map_err(|source| {
+                ConfigLoadError::Deserialize {
+                    path: server_path.to_path_buf(),
+                    source: Box::new(source),
+                }
+            })?;
+
+        let runtime_bytes =
+            tokio::fs::read(runtime_path)
+                .await
+                .map_err(|source| ConfigLoadError::Io {
+                    path: runtime_path.to_path_buf(),
+                    source,
+                })?;
+        let runtime: RuntimeConfig = serde_json::from_slice(&runtime_bytes).map_err(|source| {
+            ConfigLoadError::Deserialize {
+                path: runtime_path.to_path_buf(),
+                source: Box::new(source),
+            }
+        })?;
+
+        Ok(Self { server, runtime })
+    }
+
+    /// Consume the bundle and produce a [`crate::reload::ReloadHandle`].
+    #[must_use]
+    pub fn into_handle(self) -> crate::reload::ReloadHandle {
+        crate::reload::ReloadHandle::new(self.server, self.runtime)
+    }
+}
+
+/// Errors that can surface during [`RelayConfigBundle::from_files`].
+///
+/// Each variant carries the `path` that failed so the operator's
+/// log message is unambiguous when both files are listed in the
+/// same `from_files` call: callers can attribute the failure to
+/// the bootstrap path or the runtime path without re-checking
+/// disk state.
+#[non_exhaustive]
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigLoadError {
+    /// File-system error reading the named path (file missing,
+    /// permissions denied, ENOTDIR, etc).
+    #[error("config file I/O error at {path:?}: {source}")]
+    Io {
+        /// The path the loader was reading when the error fired.
+        path: PathBuf,
+        /// Underlying [`std::io::Error`] from the read attempt.
+        #[source]
+        source: std::io::Error,
+    },
+    /// JSON deserialization error against the expected serde
+    /// policy (unknown key, missing required field, malformed
+    /// JSON). The `serde_json::Error` is boxed to keep the enum
+    /// payload small.
+    #[error("config file deserialize error at {path:?}: {source}")]
+    Deserialize {
+        /// The path whose JSON contents failed to deserialize.
+        path: PathBuf,
+        /// Underlying [`serde_json::Error`], boxed.
+        #[source]
+        source: Box<serde_json::Error>,
+    },
 }
 
 #[cfg(test)]
@@ -273,5 +427,204 @@ mod tests {
             err.to_string().contains("missing field"),
             "expected missing-field error, got: {err}",
         );
+    }
+
+    fn sample_bootstrap_json() -> String {
+        r#"{
+            "name": "relay-edge-01",
+            "state_dir": "/var/lib/portal-relay",
+            "api_https_key_path": "/etc/portal-relay/api-https.key",
+            "keyless_signing_key_path": "/etc/portal-relay/keyless.key",
+            "quic_identity_key_path": "/etc/portal-relay/quic-id.key"
+        }"#
+        .to_owned()
+    }
+
+    fn sample_runtime_json() -> String {
+        r#"{"bps_per_identity": 4096, "ip_ban_list": ["10.0.0.1"]}"#.to_owned()
+    }
+
+    fn sample_runtime() -> RuntimeConfig {
+        RuntimeConfig {
+            bps_per_identity: 4096,
+            ip_ban_list: vec!["10.0.0.1".parse().unwrap()],
+        }
+    }
+
+    #[tokio::test]
+    async fn relay_config_bundle_loads_from_two_valid_json_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let server_path = dir.path().join("bootstrap.json");
+        let runtime_path = dir.path().join("runtime.json");
+        tokio::fs::write(&server_path, sample_bootstrap_json())
+            .await
+            .unwrap();
+        tokio::fs::write(&runtime_path, sample_runtime_json())
+            .await
+            .unwrap();
+
+        let bundle = RelayConfigBundle::from_files(&server_path, &runtime_path)
+            .await
+            .unwrap();
+
+        assert_eq!(bundle.server, sample_bootstrap());
+        assert_eq!(bundle.runtime, sample_runtime());
+    }
+
+    #[tokio::test]
+    async fn relay_config_bundle_io_error_for_missing_server_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let server_path = dir.path().join("does-not-exist.json");
+        let runtime_path = dir.path().join("runtime.json");
+        tokio::fs::write(&runtime_path, sample_runtime_json())
+            .await
+            .unwrap();
+
+        let err = RelayConfigBundle::from_files(&server_path, &runtime_path)
+            .await
+            .unwrap_err();
+
+        match err {
+            ConfigLoadError::Io { path, .. } => assert_eq!(path, server_path),
+            other => panic!("expected ConfigLoadError::Io for server, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn relay_config_bundle_io_error_for_missing_runtime_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let server_path = dir.path().join("bootstrap.json");
+        let runtime_path = dir.path().join("does-not-exist.json");
+        tokio::fs::write(&server_path, sample_bootstrap_json())
+            .await
+            .unwrap();
+
+        let err = RelayConfigBundle::from_files(&server_path, &runtime_path)
+            .await
+            .unwrap_err();
+
+        match err {
+            ConfigLoadError::Io { path, .. } => assert_eq!(path, runtime_path),
+            other => panic!("expected ConfigLoadError::Io for runtime, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn relay_config_bundle_deserialize_error_for_unknown_field_in_server() {
+        let dir = tempfile::tempdir().unwrap();
+        let server_path = dir.path().join("bootstrap.json");
+        let runtime_path = dir.path().join("runtime.json");
+        let bad_server = r#"{
+            "name": "relay-edge-01",
+            "state_dir": "/var/lib/portal-relay",
+            "api_https_key_path": "/etc/portal-relay/api-https.key",
+            "keyless_signing_key_path": "/etc/portal-relay/keyless.key",
+            "quic_identity_key_path": "/etc/portal-relay/quic-id.key",
+            "extra_field": "hello"
+        }"#;
+        tokio::fs::write(&server_path, bad_server).await.unwrap();
+        tokio::fs::write(&runtime_path, sample_runtime_json())
+            .await
+            .unwrap();
+
+        let err = RelayConfigBundle::from_files(&server_path, &runtime_path)
+            .await
+            .unwrap_err();
+
+        match err {
+            ConfigLoadError::Deserialize { path, source } => {
+                assert_eq!(path, server_path);
+                assert!(
+                    source.to_string().contains("unknown field"),
+                    "expected unknown-field error, got: {source}",
+                );
+            }
+            other => panic!("expected ConfigLoadError::Deserialize, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn relay_config_bundle_deserialize_error_for_unknown_field_in_runtime() {
+        let dir = tempfile::tempdir().unwrap();
+        let server_path = dir.path().join("bootstrap.json");
+        let runtime_path = dir.path().join("runtime.json");
+        tokio::fs::write(&server_path, sample_bootstrap_json())
+            .await
+            .unwrap();
+        tokio::fs::write(&runtime_path, r#"{"bps_per_idenity": 1024}"#)
+            .await
+            .unwrap();
+
+        let err = RelayConfigBundle::from_files(&server_path, &runtime_path)
+            .await
+            .unwrap_err();
+
+        match err {
+            ConfigLoadError::Deserialize { path, source } => {
+                assert_eq!(path, runtime_path);
+                assert!(
+                    source.to_string().contains("unknown field"),
+                    "expected unknown-field error, got: {source}",
+                );
+            }
+            other => panic!("expected ConfigLoadError::Deserialize, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn relay_config_bundle_deserialize_error_for_missing_field_in_server() {
+        let dir = tempfile::tempdir().unwrap();
+        let server_path = dir.path().join("bootstrap.json");
+        let runtime_path = dir.path().join("runtime.json");
+        tokio::fs::write(&server_path, r#"{"name": "test", "state_dir": "/tmp"}"#)
+            .await
+            .unwrap();
+        tokio::fs::write(&runtime_path, sample_runtime_json())
+            .await
+            .unwrap();
+
+        let err = RelayConfigBundle::from_files(&server_path, &runtime_path)
+            .await
+            .unwrap_err();
+
+        match err {
+            ConfigLoadError::Deserialize { path, source } => {
+                assert_eq!(path, server_path);
+                assert!(
+                    source.to_string().contains("missing field"),
+                    "expected missing-field error, got: {source}",
+                );
+            }
+            other => panic!("expected ConfigLoadError::Deserialize, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn relay_config_bundle_runtime_default_fills_empty_object() {
+        let dir = tempfile::tempdir().unwrap();
+        let server_path = dir.path().join("bootstrap.json");
+        let runtime_path = dir.path().join("runtime.json");
+        tokio::fs::write(&server_path, sample_bootstrap_json())
+            .await
+            .unwrap();
+        tokio::fs::write(&runtime_path, "{}").await.unwrap();
+
+        let bundle = RelayConfigBundle::from_files(&server_path, &runtime_path)
+            .await
+            .unwrap();
+
+        assert_eq!(bundle.runtime, RuntimeConfig::default());
+    }
+
+    #[tokio::test]
+    async fn relay_config_bundle_into_handle_constructs_reload_handle_with_bundle_state() {
+        let bundle = RelayConfigBundle::new(sample_bootstrap(), sample_runtime());
+        let expected_server = bundle.server.clone();
+        let expected_runtime = bundle.runtime.clone();
+
+        let handle = bundle.into_handle();
+
+        assert_eq!(*handle.bootstrap(), expected_server);
+        assert_eq!(*handle.current(), expected_runtime);
     }
 }

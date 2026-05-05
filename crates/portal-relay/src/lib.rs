@@ -45,9 +45,14 @@
 //!   ([`reload::file_watch::watch_runtime_config`], behind
 //!   `cfg(feature = "config_file_watch")`) also landed: a
 //!   `notify`-backed task converts filesystem-write events into
-//!   [`reload::ReloadHandle::reload`] calls. The HTTP reload
-//!   endpoint (`POST /v1/admin/config/reload`) and figment-driven
-//!   loader remain B8 territory.
+//!   [`reload::ReloadHandle::reload`] calls. The bootstrap-from-
+//!   disk path also landed via [`config::RelayConfigBundle`] +
+//!   `RelayConfigBundle::from_files`, a v0.1 simple two-file
+//!   loader that reads both JSON files and produces a
+//!   [`reload::ReloadHandle`] via `into_handle()`. The HTTP
+//!   reload endpoint (`POST /v1/admin/config/reload`),
+//!   figment-driven multi-source loader, env-var overrides, and
+//!   combined single-file format remain B8 territory.
 //! - **Batches 8 + 10 fully pending**: hot-reload consumer wiring +
 //!   keyless I/O wiring; Admin View + R15 Status TUI.
 //!
@@ -85,7 +90,7 @@ pub mod server;
 pub mod state;
 pub mod tui;
 
-pub use config::{RelayServerConfig, RuntimeConfig};
+pub use config::{ConfigLoadError, RelayConfigBundle, RelayServerConfig, RuntimeConfig};
 pub use error::{RelayError, RelayResult};
 #[cfg(feature = "config_file_watch")]
 pub use reload::file_watch::{DEFAULT_DEBOUNCE, FileWatchError, watch_runtime_config};
