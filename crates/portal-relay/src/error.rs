@@ -11,6 +11,8 @@
 
 use thiserror::Error;
 
+use crate::state::LeaseTokenError;
+
 /// Top-level error type.
 #[non_exhaustive]
 #[derive(Debug, Error)]
@@ -48,7 +50,7 @@ pub enum RelayError {
 
     /// Lease-access-token issue/verify failure. Phase 5 SDK-API S1.
     #[error(transparent)]
-    LeaseToken(#[from] crate::state::lease_token::LeaseTokenError),
+    LeaseToken(#[from] LeaseTokenError),
 }
 
 /// Crate-wide `Result<T, RelayError>`.

@@ -204,8 +204,22 @@ impl From<RelayError> for ApiError {
             | RelayError::Crypto(_)
             | RelayError::Wire(_)
             | RelayError::Keyless(_)
-            | RelayError::Overlay(_)
-            | RelayError::LeaseToken(_) => Self::internal(),
+            | RelayError::Overlay(_) => Self::internal(),
+            // Lease-access-token errors split client-side from
+            // relay-side: a malformed / expired / wrong-sig / wrong-
+            // version token is the caller's bad credential and should
+            // surface as 401, not 500. A postcard-encode or signer
+            // failure is a relay-side fault and stays on 500.
+            RelayError::LeaseToken(lease_err) => match lease_err {
+                crate::state::LeaseTokenError::Expired
+                | crate::state::LeaseTokenError::SignatureInvalid
+                | crate::state::LeaseTokenError::MalformedFraming
+                | crate::state::LeaseTokenError::MalformedClaims(_)
+                | crate::state::LeaseTokenError::MalformedSignature
+                | crate::state::LeaseTokenError::UnsupportedVersion(_) => Self::unauthorized(),
+                crate::state::LeaseTokenError::Encode(_)
+                | crate::state::LeaseTokenError::Signer(_) => Self::internal(),
+            },
         }
     }
 }
