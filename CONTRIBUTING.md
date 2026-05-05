@@ -20,7 +20,12 @@ non-negotiables; the why-we-chose-X rationale lives in `docs/adr/`.
 
 After cloning, run `prek install` once. This wires the `prek.toml` hooks into
 `.git/hooks/`. Pre-commit runs cargo fmt --check, clippy -D warnings, taplo
-fmt --check, and cargo machete; pre-push runs the full nextest suite.
+fmt --check, and cargo machete; pre-push runs `env PROPTEST_CASES=4096 cargo
+nextest run --workspace`. The `PROPTEST_CASES=4096` env var is the
+workspace-canonical Phase 1 U17 case count and is set the same way at the
+workflow scope of `.github/workflows/ci.yml`; omitting it locally would let
+a pre-push pass at the proptest default of 256 cases while CI runs against
+4096 — see the comment on the pre-push hook in `prek.toml`.
 
 `cargo xtask ci` (alias `cargo ci`) runs the same gate set CI runs.
 
