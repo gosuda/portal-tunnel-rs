@@ -1,6 +1,6 @@
 # Threat model — portal-tunnel-rs (greenfield)
 
-**Status:** draft SEC-006 companion.  
+**Status:** Phase 1 deliverable per SEC-006, landed (see [`SECURITY.md`](../SECURITY.md) §Threat model).  
 **Scope:** v0.1 single-relay deployment; v0.2 cross-relay items called out explicitly.
 
 ## Adversary capabilities
