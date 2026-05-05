@@ -9,7 +9,7 @@
 //!
 //! - **U5 (landed)** — ADR-0014 (overlay architecture) + ADR-0015
 //!   (fork pick) + workspace dep declaration.
-//! - **U6 (this commit)** — sealed [`wg_device::WgDevice`] trait +
+//! - **U6 (landed)** — sealed [`wg_device::WgDevice`] trait +
 //!   [`wg_device::DefguardAdapter`] + [`wg_device::PeerConfig`] +
 //!   [`error::OverlayError`].  The trait shape is wired but the
 //!   cleartext-IP packet I/O methods return
