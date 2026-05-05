@@ -50,7 +50,7 @@ pub struct ReloadAcceptedBody {
 
 /// `POST /v1/admin/config/reload` handler.
 ///
-/// Accepts a JSON [`RuntimeConfig`] body (per iter-124's
+/// Accepts a JSON [`RuntimeConfig`] body (per the
 /// `default + deny_unknown_fields` policy: missing fields default-
 /// fill, unknown fields reject). Calls
 /// [`crate::reload::ReloadHandle::reload`] with the new runtime AND

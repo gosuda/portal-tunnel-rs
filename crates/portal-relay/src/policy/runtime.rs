@@ -28,7 +28,8 @@ use crate::reload::ReloadHandle;
 /// [`Self::is_ip_banned`] alongside the in-memory [`IpFilter`].
 /// Construction without `with_reload_handle` leaves
 /// [`Self::is_ip_banned`] reading only the in-memory filter — preserves
-/// the iter-123 default-construction back-compat.
+/// the default-construction back-compat callers without a reload
+/// handle depend on.
 #[derive(Clone, Default)]
 pub struct PolicyRuntime {
     /// IP-keyed in-memory ban list (dynamic; mutated via

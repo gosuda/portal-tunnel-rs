@@ -201,7 +201,7 @@ impl Default for RuntimeConfig {
 /// [`RelayServerConfig`] and [`RuntimeConfig`] carry different
 /// serde policies: the bootstrap is strict-no-defaults
 /// (`deny_unknown_fields`, no `default`), while the runtime is
-/// forward-compat (`default + deny_unknown_fields` per iter-124).
+/// forward-compat (`default + deny_unknown_fields`).
 /// Two files preserve both policies cleanly — combining them
 /// would require either a wrapping struct (whose strict-bootstrap
 /// policy would propagate to the runtime half and break forward-

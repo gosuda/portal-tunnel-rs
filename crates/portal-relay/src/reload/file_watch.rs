@@ -3,7 +3,8 @@
 //! Behind `cfg(feature = "config_file_watch")`. The watcher
 //! observes a single JSON file at an operator-supplied path; on
 //! change events it deserializes the file content as
-//! [`RuntimeConfig`] (per the iter-124 serde contract) and calls
+//! [`RuntimeConfig`] (per its `default + deny_unknown_fields` serde
+//! contract) and calls
 //! [`crate::reload::ReloadHandle::reload`] with the held bootstrap
 //! config and the new runtime.
 //!
