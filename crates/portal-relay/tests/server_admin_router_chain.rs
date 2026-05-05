@@ -4,15 +4,17 @@
 //! `Server::with_components` → `Server::with_reload_handle` →
 //! `Server::admin_router()` → handler.
 //!
-//! The single-endpoint test files (`admin_reload_endpoint.rs`,
-//! `admin_get_current_config_endpoint.rs`) exercise each handler
-//! against a hand-rolled `AdminState`. This file exercises the
-//! orchestrator-assembled router via `Server::admin_router()` so a
-//! future refactor that breaks the `Server` → router bridge cannot
-//! pass with the per-endpoint tests still green. Calling
-//! `admin_router()` (rather than `build_admin_router(admin_state())`)
-//! also exercises the canonical orchestrator-to-router bridge
-//! through real handler dispatch.
+//! The five single-endpoint test files
+//! (`admin_reload_endpoint.rs`, `admin_get_current_config_endpoint.rs`,
+//! `admin_health_endpoint.rs`, `admin_policy_snapshot_endpoint.rs`,
+//! `admin_lease_count_endpoint.rs`) exercise each handler against a
+//! hand-rolled `AdminState`. This file exercises the orchestrator-
+//! assembled router via `Server::admin_router()` so a future
+//! refactor that breaks the `Server` → router bridge cannot pass
+//! with the per-endpoint tests still green. Calling `admin_router()`
+//! (rather than `build_admin_router(admin_state())`) also exercises
+//! the canonical orchestrator-to-router bridge through real handler
+//! dispatch.
 
 #![expect(
     clippy::expect_used,
