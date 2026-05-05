@@ -71,9 +71,15 @@ annotation at the call site WITH a reason that names:
 - Why utoipa registration is not appropriate.
 - Whether this is a v0.1 carve-out or permanent.
 
-Reviewers verify the reason during code review. A `#[expect]` without a
-specific reason is itself a CI failure (Rust's lint policy enforces non-empty
-`reason` strings on `#[expect]`).
+Reviewers verify the reason during code review. The `reason = "..."` field
+on `#[expect]` is technically optional in stable Rust 2024 — there is no
+workspace lint (such as `clippy::allow_attributes_without_reason`) currently
+configured to make it a hard CI gate. Enforcement is reviewer discipline
+plus project convention: every existing `#[expect(clippy::disallowed_methods,
+...)]` site in the workspace carries a specific reason naming the R9 / R2 /
+utoipa carve-out it claims (see [`architecture.md`](architecture.md) §R9 for
+the approved justification phrasings). A reasonless `#[expect]` is rejected
+at code review on that basis.
 
 ## v0.2 backlog
 
