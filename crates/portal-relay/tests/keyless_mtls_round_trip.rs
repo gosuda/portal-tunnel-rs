@@ -192,8 +192,7 @@ async fn spawn_keyless_server(pki: &TestPki) -> (ServerHandle, KeylessPolicy) {
 
     // 2. Build the bridge.  The adapter implements `rustls::sign::SigningKey`
     //    directly, so wrapping it in an `Arc<dyn SigningKey>` is the
-    //    workspace path — `KeylessSignerAdapter::inner` is `pub(crate)`
-    //    and not reachable from the integration test crate.
+    //    workspace path.
     let mut joinset: JoinSet<()> = JoinSet::new();
     let cancel = CancellationToken::new();
     let signing_key_dyn: Arc<dyn rustls::sign::SigningKey> = Arc::new(adapter);

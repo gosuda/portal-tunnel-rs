@@ -141,25 +141,6 @@ impl KeylessSignerAdapter {
 
         Ok(Self { inner })
     }
-
-    /// Borrow the inner provider key as `Arc<dyn SigningKey>`.
-    ///
-    /// Exposed `pub(crate)` so the U3 axum handler (and the
-    /// [`crate::keyless::bridge::Bridge`]) can share the same
-    /// `Arc<dyn SigningKey>` across its worker pool without going
-    /// back through the `SecretBox` boundary or re-parsing the DER.
-    /// Today this method is consumed only by U3 (Phase 6b/A Batch
-    /// 2) — listed as `expect(dead_code)` until that wiring lands
-    /// so the public surface this U2 commit promises is stable.
-    #[must_use]
-    #[expect(
-        dead_code,
-        reason = "consumed by U3 axum handler in Phase 6b/A Batch 2; \
-                  surfaced now so U2's pub(crate) seam is reviewable in isolation"
-    )]
-    pub(crate) fn inner(&self) -> &std::sync::Arc<dyn SigningKey> {
-        &self.inner
-    }
 }
 
 impl SigningKey for KeylessSignerAdapter {
