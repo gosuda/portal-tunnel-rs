@@ -396,7 +396,7 @@ async fn hostname_conflict_returns_409() {
     let (cid_b, siwe_b, _, _) = issue_challenge(&leases, eth, pk_b).await;
     let sig_b = sign_siwe(&siwe_b);
     let state2 = sdk_state(
-        leases,
+        leases.clone(),
         Arc::new(PolicyRuntime::new()),
         ReputationEngine::new(),
         None,
@@ -413,6 +413,23 @@ async fn hostname_conflict_returns_409() {
         .and_then(|v| v.as_str())
         .expect("error.code present");
     assert_eq!(code, "hostname_conflict");
+
+    // After the 409, identity A must STILL hold HOSTNAME — a buggy
+    // `register()` that swallowed the conflict but corrupted the
+    // hostname index would slip through without this assertion.
+    let holder = leases
+        .lookup_by_hostname(HOSTNAME)
+        .expect("identity A still holds HOSTNAME after conflict");
+    assert_eq!(
+        holder.identity,
+        IdentityKey(pk_a),
+        "hostname holder must be identity A, not identity B"
+    );
+    assert_eq!(
+        leases.lease_count(),
+        1,
+        "only identity A's lease should exist after the conflict",
+    );
 }
 
 /// AC5: source IP banned → 401 `ip_banned`. Banned check fires

@@ -581,6 +581,15 @@ pub struct RegisterResponseBody {
 /// - 500 `internal` — postcard / signer failures inside
 ///   [`crate::state::lease_token::issue`] (these are server-side
 ///   faults).
+///
+/// # Tracing fields & operator privacy
+///
+/// The `identity` field carries the 32-byte ed25519 pubkey hex (also
+/// emitted on the wire in the response — not a secret). Combined with
+/// `client_ip` in the same span, operators running verbose tracing
+/// effectively log `(client_ip, identity)` pairs for every register
+/// call. Operators MAY redact one or the other in their tracing
+/// subscriber if log retention or privacy policy requires it.
 #[tracing::instrument(
     name = "sdk.register",
     skip_all,
@@ -658,6 +667,16 @@ pub async fn register_handler(
     tracing::Span::current().record("identity", tracing::field::display(hex_lower(&identity.0)));
     let now = Timestamp::now();
     let expires_at = now.checked_add(LEASE_DEFAULT_TTL).unwrap_or(Timestamp::MAX);
+
+    // 8. Mint the lease access token, THEN register the lease.
+    //
+    // Hoare invariant: token mint is in-process and has no external
+    // side-effect on failure; registry insert (papaya tables) IS a
+    // side-effect. Mint first so a token-mint fault aborts cleanly
+    // without an orphaned lease holding the hostname slot.
+    let signer = portal_crypto::Ed25519Signer::new(&state.lease_token_signing_key);
+    let access_token = lease_token::issue(identity, expires_at, &signer)?;
+
     let mut record = LeaseRecord::new(
         identity,
         verified.hostname.clone(),
@@ -668,12 +687,8 @@ pub async fn register_handler(
     );
     record.reported_ip = verified.register_request.reported_ip;
 
-    // 8. Register the lease.
+    // 9. Register the lease.
     state.leases.register(record).await?;
-
-    // 9. Mint the lease access token.
-    let signer = portal_crypto::Ed25519Signer::new(&state.lease_token_signing_key);
-    let access_token = lease_token::issue(identity, expires_at, &signer)?;
 
     // 10. ENS round-trip — best-effort, never fails the request.
     let mut ens_named = false;
