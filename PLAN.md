@@ -75,9 +75,20 @@ Each commit ≤200 LoC substantive diff (file moves and generated files don't co
 
 ## Current implementation status
 
-- **Phase 0 — landed.** Workspace `Cargo.toml`, `rust-toolchain.toml`, all four ADRs (0001-0004), rewritten `AGENTS.md`, `deny.toml`, `prek.toml`, `.cargo/config.toml`, `.github/workflows/ci.yml`, `xtask/` skeleton, `docs/architecture.md`, `docs/adr/README.md`, nine crate stubs are all committed. CI pipeline runs fmt + clippy + nextest + deny + machete + msrv + llvm-cov + rustls-mandatory + wire-protocol-gates jobs.
-- **Phase 1 — implementation landed; gate verification at the marker-refresh commit.** `crates/portal-wire/src/*` types, `docs/wire-protocol.md`, `docs/threat-model.md`, `xtask/src/wire_drift_check.rs`, the five named U17 `proptest_*.rs` suites, and the workflow-level `PROPTEST_CASES=4096` env are committed. U16 (drift marker matches HEAD) and U17 (five suites at `PROPTEST_CASES=4096`) are checked by `cargo xtask wire-drift-check` and `cargo nextest run -p portal-wire` respectively; both must be re-run on the marker-refresh commit (and on every subsequent commit touching `crates/portal-wire`) before any Phase 2 work proceeds.
-- **Phases 2-7 — planned/stubbed.** All seven phase plans are committed under `docs/plans/2026-05-04-{002..008}-feat-*-plan.md`. Library crates contain stubs only; binaries print placeholder output. Phase 2 begins from these committed plans only after Phase 1 gates pass.
+Per-phase state below. Phase plans under `docs/plans/2026-05-04-{001..008}-feat-*-plan.md`
+carry the per-batch detail; this section names only landed / partial /
+pending plus gate-critical facts.
+
+- **Phase 0 — landed.** Workspace shape (workspace `Cargo.toml`, `rust-toolchain.toml`, `AGENTS.md`, [`docs/architecture.md`](docs/architecture.md), nine member crates) + ADRs 0001-0005 + 0007 + 0014-0016. CI gates: `fmt`, `clippy`, `nextest`, `deny`, `cargo-vet` (warn), `machete`, `msrv`, `llvm-cov`, `rustls-mandatory`, `wire-protocol-gates`, `multi-key-return-gate`, `utoipa-coverage-gate`, `dep-spawning-audit-gate`. Phase 0 has no standalone phase-plan file; its scope is the workspace bootstrap that the eight phase plans (`docs/plans/2026-05-04-{001..008}-feat-*-plan.md`) consume.
+- **Phase 1 — landed; gates per-commit.** U16 dual-component (drift marker + v0.1 `ReputationDelta` no-emit) and U17 (five `proptest_*.rs` suites at `PROPTEST_CASES=4096`) CI-enforced on every commit touching `crates/portal-wire`.
+- **Phase 2 — landed.** Per [`docs/plans/2026-05-04-002-feat-portal-crypto-plan.md`](docs/plans/2026-05-04-002-feat-portal-crypto-plan.md).
+- **Phase 3 — landed.** Per [`docs/plans/2026-05-04-003-feat-portal-net-plan.md`](docs/plans/2026-05-04-003-feat-portal-net-plan.md).
+- **Phase 4 — landed.** Per [`docs/plans/2026-05-04-004-feat-portal-acme-plan.md`](docs/plans/2026-05-04-004-feat-portal-acme-plan.md).
+- **Phase 5 — partial.** Per [`docs/plans/2026-05-04-005-feat-portal-relay-plan.md`](docs/plans/2026-05-04-005-feat-portal-relay-plan.md). **Pending**: Batch 7 R10 ENS Sybil-gating bypass; Batch 8 hot-reload + keyless I/O wiring; Batch 10 Admin View + R15 Status TUI.
+- **Phase 6a — landed.** Per [`docs/plans/2026-05-04-006-feat-portal-sdk-plan.md`](docs/plans/2026-05-04-006-feat-portal-sdk-plan.md).
+- **Phase 6b/A keyless — landed.** Per [`docs/plans/2026-05-04-007-feat-portal-relay-overlay-keyless-plan.md`](docs/plans/2026-05-04-007-feat-portal-relay-overlay-keyless-plan.md) §Phase 6b/A. ADR-0016 captures the async-bridge decision.
+- **Phase 6b/B overlay — partial behind a fork-pick cliff.** Per the same plan §Phase 6b/B and ADR-0015. **Pending**: Batch 3 smoltcp + `Overlay` orchestrator + `quinn::AsyncUdpSocket` bridge. **Gate-critical**: 2026-08-04 fork-pick cliff; fallback is MVP-without-overlay (multi-hop → v0.2) if both forks integration-block.
+- **Phase 7 — partial.** Per [`docs/plans/2026-05-04-008-feat-binaries-and-e2e-plan.md`](docs/plans/2026-05-04-008-feat-binaries-and-e2e-plan.md). **Pending**: Batch 3 single-process e2e harness; Batch 4 behavioral-trace Go-sidecar harness; Batch 6 `release.yml` cross-compile matrix (matrix shape derives from Phase 6b/B U7).
 
 ## Authority precedence
 
