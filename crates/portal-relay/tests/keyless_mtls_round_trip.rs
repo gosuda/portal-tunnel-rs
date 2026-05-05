@@ -223,8 +223,8 @@ async fn spawn_keyless_server(pki: &TestPki) -> (ServerHandle, KeylessPolicy) {
     // 5. Bind the listener on [::1]:0 — IPv6 loopback.  The plan asks
     //    for dual-stack [::]:0 in production (R12); the test uses
     //    [::1]:0 to keep the firewall surface zero.  Dual-stack is
-    //    asserted at the listener helper layer (Phase 5/U6), not
-    //    here.
+    //    asserted at the listener helper layer (Phase 5/U3 —
+    //    listeners/dual_stack.rs), not here.
     let listener = TcpListener::bind(SocketAddr::from((Ipv6Addr::LOCALHOST, 0u16)))
         .await
         .expect("bind");
