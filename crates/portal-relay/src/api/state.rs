@@ -36,12 +36,25 @@ pub struct AdminState {
     pub leases: LeaseRegistry,
     /// Policy runtime (read + write).
     pub policy: Arc<PolicyRuntime>,
-    /// Optional handle to the workspace's hot-reload primitive. When
-    /// `Some`, the `POST /v1/admin/config/reload` handler accepts new
-    /// [`crate::config::RuntimeConfig`] JSON and swaps via the handle.
-    /// When `None`, the handler returns
-    /// [`crate::api::envelope::ApiErrorCode::FeatureUnavailable`]
-    /// (503).
+    /// Optional handle to the workspace's hot-reload primitive. Three
+    /// admin handlers consume this field today; their behavior on the
+    /// `None` path differs by intent:
+    ///
+    /// - `POST /v1/admin/config/reload` — `Some`: accept new
+    ///   [`crate::config::RuntimeConfig`] JSON and swap via the
+    ///   handle. `None`: return
+    ///   [`crate::api::envelope::ApiErrorCode::FeatureUnavailable`]
+    ///   (503).
+    /// - `GET /v1/admin/config/current` — `Some`: return the live
+    ///   runtime snapshot. `None`: 503 `FeatureUnavailable`.
+    /// - `GET /v1/admin/policy/snapshot` — reads through
+    ///   [`crate::policy::PolicyRuntime`] (which itself carries an
+    ///   `Option<Arc<ReloadHandle>>`). `None`: returns 200 with
+    ///   sentinel values rather than 503, because the policy
+    ///   surface is observability-oriented.
+    ///
+    /// `GET /v1/admin/health` does NOT consult this field — the
+    /// stateless liveness contract is independent of bundle load.
     pub reload: Option<Arc<ReloadHandle>>,
 }
 
