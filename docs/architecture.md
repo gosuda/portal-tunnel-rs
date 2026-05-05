@@ -124,12 +124,14 @@ expected anti-pattern; this section exists to head it off.
 
 ## Open architectural sections (Phase 1+ owners)
 
-The following sections will be populated by the corresponding phase plans:
+Landed/partial/pending per-section state mirrors `PLAN.md` "Current
+implementation status"; pointers below resolve to the canonical doc or
+code module for each section.
 
 - **Wire framing + codec layout** — landed in Phase 1: see [`docs/wire-protocol.md`](wire-protocol.md). Spec/code lockstep is the U16 invariant; gate ownership lives in [`xtask/src/wire_drift_check.rs`](../xtask/src/wire_drift_check.rs).
 - **Threat model** — landed in Phase 1: see [`docs/threat-model.md`](threat-model.md). Adversary capabilities, multi-hop privacy claims, R10 8-class enumeration, and SEC-001..005 evaluation context are documented there.
-- **Lease registry data layout (papaya `pin_owned()` boundaries)** — Phase 5
-- **Hot-reload semantics for `arc-swap<Config>` trust-boundary keys** — Phase 5 (SEC-010)
-- **Three trust boundaries' rustls::ServerConfig assembly** — Phase 5
-- **WireGuard-userspace fork pick + smoltcp integration shape** — Phase 6b
-- **End-to-end harness + behavioral-trace replay shape** — Phase 7
+- **Lease registry data layout (papaya `pin_owned()` boundaries)** — landed in Phase 5 Batch 4: see `crates/portal-relay/src/state/lease_registry.rs`.
+- **Three trust boundaries' rustls::ServerConfig assembly** — landed in Phase 5 (Batch 2 listeners + Batch 5 envelope) and Phase 6b/A (Batch 2 keyless mTLS endpoint): see `crates/portal-relay/src/{listeners,api,keyless}/`.
+- **Hot-reload semantics for `arc-swap<Config>` trust-boundary keys** — pending Phase 5 Batch 8 (SEC-010); cohesive `arc-swap<RuntimeConfig>` + governor rebuild + tokio file-watcher.
+- **WireGuard-userspace fork pick + smoltcp integration shape** — partial. Fork pick (`defguard_boringtun` 0.6.5) landed in Phase 6b/B Batch 1-2: see [ADR-0015](adr/0015-wireguard-userspace-fork-pick.md) + `crates/portal-relay/src/overlay/wg_device.rs`. smoltcp + Overlay orchestrator + `quinn::AsyncUdpSocket` adapter pending Phase 6b/B Batch 3.
+- **End-to-end harness + behavioral-trace replay shape** — pending Phase 7 Batch 3 (single-process e2e) + Batch 4 (behavioral-trace Go sidecar).
