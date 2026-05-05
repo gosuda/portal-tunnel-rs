@@ -1,4 +1,6 @@
-//! [`ApiHttpsKey`] newtype and its file-backed constructor stub.
+//! [`ApiHttpsKey`] newtype + the `signing_key` accessor that hands the
+//! wrapped `Arc<dyn rustls::sign::SigningKey>` to the rustls
+//! `ServerConfig` builder.
 //!
 //! ## Zeroization design
 //!
@@ -9,22 +11,11 @@
 //! the last `Arc` reference is dropped.
 //!
 //! This mirrors the pattern used for [`KeylessSigningKeyHandle`][crate::KeylessSigningKeyHandle].
-//!
-//! ## PEM loading
-//!
-//! [`load_api_https_key`] is currently a **stub**.  `rustls-pemfile` is not
-//! yet pinned in `[workspace.dependencies]`.  Phase 5 will replace the stub
-//! with real PEM → DER decoding via `rustls_pemfile::private_key` and will
-//! call `rustls::crypto::aws_lc_rs::sign::any_supported_type` to obtain the
-//! concrete `Arc<dyn rustls::sign::SigningKey>`.
 
-use std::path::Path;
 use std::sync::Arc;
 
 use secrecy::SecretBox;
 use zeroize::Zeroize;
-
-use crate::error::PortalCryptoError;
 
 // ---------------------------------------------------------------------------
 // ApiHttpsKey
@@ -65,13 +56,17 @@ impl Zeroize for ApiHttpsKey {
 ///
 /// # Current status — STUB
 ///
-/// `rustls-pemfile` is not yet pinned in `[workspace.dependencies]`.  Until
-/// Phase 5 wires the real loader, this function always returns
-/// [`PortalCryptoError::HttpsKey`] with a message describing the deferral.
+/// The PEM-decoding body is not yet wired; until it lands, this function
+/// surfaces `PortalCryptoError::Io` for a missing path and
+/// [`PortalCryptoError::HttpsKey`] otherwise. The path-existence
+/// behavior is pinned by the regression test below; downstream callers
+/// can rely on that error shape today.
 ///
-/// Phase 5 will replace the stub body with:
+/// The eventual implementation will:
 /// 1. Read the file via [`std::fs::read`].
-/// 2. Parse PEM → DER via `rustls_pemfile::private_key`.
+/// 2. Parse PEM → DER via `rustls_pki_types::PrivateKeyDer::from_pem_slice`
+///    (the workspace's chosen PEM parser, already used by
+///    `portal-relay::keyless::material`).
 /// 3. Call `rustls::crypto::aws_lc_rs::sign::any_supported_type` on the
 ///    resulting `PrivateKeyDer<'static>` to get the `Arc<dyn SigningKey>`.
 /// 4. Return `SecretBox::new(Box::new(ApiHttpsKey(arc)))`.
@@ -79,17 +74,37 @@ impl Zeroize for ApiHttpsKey {
 /// # Errors
 ///
 /// - [`PortalCryptoError::Io`] — if the file cannot be opened or read.
-/// - [`PortalCryptoError::HttpsKey`] — always, until Phase 5 (stub).
+/// - [`PortalCryptoError::HttpsKey`] — always, until the real loader lands.
 pub fn load_api_https_key(path: &Path) -> Result<SecretBox<ApiHttpsKey>, PortalCryptoError> {
-    // Surface an Io error for a completely missing path so that the mandatory
-    // test (`load_api_https_key_returns_error_for_missing_path`) can assert
-    // `PortalCryptoError::Io` without requiring `rustls_pemfile`.
-    let _ = std::fs::metadata(path)?;
+    // I/O boundary check, designed to surface every access-failure
+    // mode as `PortalCryptoError::Io` without producing a `Vec<u8>`
+    // of plaintext key bytes that would sit outside
+    // `secrecy`/zeroization. Steps:
+    //
+    // 1. `File::open(path)?` — catches missing path, permission
+    //    denied, ENOTDIR, and other access failures at the syscall
+    //    level. Plain `metadata(path)?` would only probe
+    //    directory-entry accessibility and would let unreadable
+    //    files reach the `HttpsKey` arm with the wrong error type.
+    //    `std::fs::read(path)?` would surface the right error
+    //    category but at the cost of plaintext residency.
+    // 2. Verify the opened handle is a regular file via the
+    //    handle's own metadata (no TOCTOU window between this check
+    //    and the open). On Unix, `File::open` succeeds for
+    //    directories, so without this guard a key path pointing at
+    //    a directory would fall through to `HttpsKey` instead of
+    //    surfacing as `Io`.
+    let file = std::fs::File::open(path)?;
+    let meta = file.metadata()?;
+    if !meta.is_file() {
+        return Err(PortalCryptoError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "key path is not a regular file",
+        )));
+    }
 
-    // STUB: PEM loading not yet wired (Phase 5).
-    // rustls-pemfile is not pinned in [workspace.dependencies].
     Err(PortalCryptoError::HttpsKey(
-        "PEM loading not yet wired (Phase 5)".to_owned(),
+        "PEM loading not yet wired".to_owned(),
     ))
 }
 
@@ -120,10 +135,8 @@ mod tests {
     use super::*;
 
     /// Invoke the loader on a path that cannot possibly exist and assert that
-    /// the error is [`PortalCryptoError::Io`].
-    ///
-    /// The PEM stub branch makes a happy-path test impossible without
-    /// `rustls-pemfile`; that test is deferred to Phase 5.
+    /// the error is [`PortalCryptoError::Io`]. This pins the path-existence
+    /// surface of the stub independently of the eventual PEM-decoding body.
     #[test]
     fn load_api_https_key_returns_error_for_missing_path() {
         let missing = PathBuf::from("/nonexistent/portal-test/api-key.pem");
