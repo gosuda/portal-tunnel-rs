@@ -36,7 +36,7 @@ ban list ships in `deny.toml`; the amendment procedure is documented in
 | Time | `jiff 0.2` | `chrono`, `time` | [jiff README](https://docs.rs/jiff/) |
 | Parser | `winnow 1` | `nom` | [winnow README](https://docs.rs/winnow/) |
 | Builder | `bon 3` | `derive_builder`, `typed-builder`, hand-rolled | [bon docs](https://docs.rs/bon/) |
-| Async-fn-in-trait | edition-2024 native + `trait_variant` for Send-bound shapes | `async-trait` macro | rustc 1.75+ stabilization notes; [trait_variant docs](https://docs.rs/trait-variant/) |
+| Async-fn-in-trait | edition-2024 native + explicit `impl Future<Output = ...> + Send + 'a` RPIT for Send-bound shapes (per Amendment 2026-05-04 below; supersedes the original `trait_variant` pick) | `async-trait` macro, `trait_variant::make` | rustc 1.75+ stabilization notes; canonical pattern in [`crates/portal-crypto/src/ens/alloy_resolver.rs`](../../crates/portal-crypto/src/ens/alloy_resolver.rs) |
 | Singleton cell | `std::sync::OnceLock` | `lazy_static`, `once_cell` | rustc 1.70+ stabilization |
 | Coverage | `cargo-llvm-cov` | `tarpaulin` | [cargo-llvm-cov README](https://github.com/taiki-e/cargo-llvm-cov) |
 | Bench | `divan` (iterative) + `criterion` permitted (CI regression detection) | none | [divan README](https://docs.rs/divan/) |
@@ -76,7 +76,7 @@ amendment with documented sunset criterion.
 
 - `chrono` — use `jiff`
 - `nom` — use `winnow`
-- `async-trait` — use native async-fn-in-trait + `trait_variant`
+- `async-trait` — use native async-fn-in-trait + explicit `impl Future + Send + 'a` RPIT for Send-bound shapes (per Amendment 2026-05-04 below; the original `trait_variant` pick was superseded)
 - `derive_builder`, `typed-builder` — use `bon`
 - `lazy_static`, `once_cell` — use `std::sync::OnceLock` for singletons
 - `tarpaulin` — use `cargo-llvm-cov`
@@ -128,6 +128,51 @@ existing dep floors (`aws-sdk-route53@1.110` MSRV 1.91) remain satisfied.
 The CI matrix `cargo msrv verify` job and the per-toolchain build matrix in
 `.github/workflows/ci.yml` were updated in the same commit. The original
 1.91-pin prose above is preserved as the historical decision record.
+
+### Amendment 2026-05-04 — async-fn-in-trait Send-bound shape: `trait_variant` → explicit `impl Future + Send` RPIT
+
+The original pick (L39 picks table; L79 banned-deps follow-on) was
+"edition-2024 native async-fn-in-trait + `trait_variant` for Send-bound
+shapes". During Phase 2 Batch 7 (ENS resolver,
+[`crates/portal-crypto/src/ens/alloy_resolver.rs`](../../crates/portal-crypto/src/ens/alloy_resolver.rs)),
+`trait_variant::make` was found to expand into proc-macro spans where
+`clippy::future_not_send` fires at the macro's internal token positions;
+`#[expect(clippy::future_not_send, reason = "...")]` applied at the
+trait/item level cannot suppress lint events scoped to the macro's
+expansion site, so the workspace `-D warnings` CI gate fails. The
+rationale is captured at `alloy_resolver.rs:60-77`'s rustdoc.
+
+**Replacement pick.** Async traits that need Send-bounded futures use
+explicit return-position `impl Future<Output = ...> + Send + 'a` syntax in
+the trait declaration. The trait body uses non-`async fn` shape so the
+`Send` bound on the returned `impl Future` is express, not inferred:
+
+```rust
+pub trait EnsResolver: Send + Sync {
+    fn resolve<'a>(
+        &'a self,
+        name: &'a str,
+    ) -> impl core::future::Future<Output = Result<EthAddress, EnsError>> + Send + 'a;
+}
+```
+
+This is the pattern landed in `alloy_resolver.rs` (canonical) and
+[`crates/portal-acme/src/provider.rs`](../../crates/portal-acme/src/provider.rs).
+The macro-free shape keeps every clippy event at suppressible item-level
+spans, preserves the type-level `Send` guarantee, and removes the
+`trait_variant` workspace dep (zero member crates currently consume it).
+
+**Impact.** Same-commit changes alongside this amendment:
+
+- `Cargo.toml`: remove the `trait_variant = { package = "trait-variant", version = "0.1" }` workspace dep entry (no member crate consumes it; removal is dead-code cleanup, not a behavior change).
+- [`docs/architecture.md`](../architecture.md) §`trait_variant` Send-bound migration shape: rewritten to show the explicit-RPIT pattern.
+- [`AGENTS.md`](../../AGENTS.md) §Async traits with Send bounds (L88-93) already prescribes the explicit-RPIT shape and is the constitution; this amendment + architecture.md update brings the ADR + architecture overview into alignment with AGENTS.md and the code.
+
+The L39 picks-table cell and the L79 banned-deps line are updated in the
+same commit to name the explicit-RPIT pattern as the current rule, with
+inline parenthetical pointers back to this amendment; the historical
+`trait_variant` pick is preserved in each row's "Replaces" / rationale
+column. The `async-trait` macro ban remains in force.
 
 ## Consequences
 

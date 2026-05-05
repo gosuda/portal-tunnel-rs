@@ -129,33 +129,43 @@ Dependency auditing is governed by `cargo-vet` under
 `supply-chain/{audits,config}.toml`; gate timeline and the `cargo vet
 certify` workflow live in [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 
-## `trait_variant` Send-bound migration shape (R9)
+## Async-fn-in-trait Send-bound migration shape (R9)
 
 Edition 2024 native `async fn` in trait is the default. The compiler infers
 non-`Send` for the returned `impl Future` unless the auto-trait propagates
 through every `&self` field. When a trait must be Send-bounded for tokio
-multi-threaded scheduling, generate a parallel Send-bounded trait via
-`trait_variant::make`:
+multi-threaded scheduling, declare the trait method with explicit
+return-position `impl Future<Output = ...> + Send + 'a` syntax (per
+[ADR-0002 Amendment 2026-05-04](adr/0002-aggressive-2026-register.md)):
 
 ```rust
-#[trait_variant::make(SendableSignerExt: Send)]
-pub trait SignerExt {
-    async fn sign(&self, payload: &[u8]) -> Result<Signature, SignerError>;
+pub trait EnsResolver: Send + Sync {
+    fn resolve<'a>(
+        &'a self,
+        name: &'a str,
+    ) -> impl core::future::Future<Output = Result<EthAddress, EnsError>> + Send + 'a;
 }
 ```
 
-`trait_variant` generates `SendableSignerExt` whose returned future is Send-
-bounded. Implementors of the original `SignerExt` automatically satisfy
-`SendableSignerExt` when their `&self` fields are `Send + Sync`. Consumers
-that need Send (e.g., `tokio::spawn` boundaries) bound on the Send-variant.
+The non-`async fn` body shape lets the trait declaration express the `Send`
+bound directly. Impls that satisfy `Send + Sync` on their `&self` fields
+satisfy the bound automatically. Consumers crossing `tokio::spawn`
+boundaries hold the trait directly.
 
-This is the **only** sanctioned migration shape for async-fn-in-trait that
-needs a Send bound. `async-trait` is on the R9 / ADR-0002 Engineering-
-Default ban list as a direct dep; enforcement is review discipline plus the
-planned ast-grep CI gate ([`deny.toml`](../deny.toml) L104-114 documents
-why this is not expressible as a `bans.deny` array entry — async-trait
-appears transitively through alloy / axum / hyper / tokio so a full-tree
-deny would generate false positives, and `bans.deny` cannot scope to direct
+`trait_variant::make` was the original ADR-0002 pick but was superseded by
+the 2026-05-04 amendment: the macro expands into proc-macro spans where
+`clippy::future_not_send` fires at unsuppressable token positions (item-
+level `#[expect]` cannot scope to the macro's expansion site), failing the
+workspace `-D warnings` CI gate. The rationale is captured at
+[`crates/portal-crypto/src/ens/alloy_resolver.rs`](../crates/portal-crypto/src/ens/alloy_resolver.rs)
+L60-77, which is the canonical example of the explicit-RPIT pattern.
+
+`async-trait` is on the R9 / ADR-0002 Engineering-Default ban list as a
+direct dep; enforcement is review discipline plus the planned ast-grep CI
+gate ([`deny.toml`](../deny.toml) L104-114 documents why this is not
+expressible as a `bans.deny` array entry — async-trait appears
+transitively through alloy / axum / hyper / tokio so a full-tree deny
+would generate false positives, and `bans.deny` cannot scope to direct
 deps only). Reaching for `async-trait` after the first Send-related compile
 error is the expected anti-pattern; this section exists to head it off.
 

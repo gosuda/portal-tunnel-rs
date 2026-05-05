@@ -147,7 +147,10 @@ alloy-ens = { version = "2.0", features = ["provider"] }
 k256 = { version = "0.13", features = ["ecdsa"] }
 ed25519-dalek = { version = "2", features = ["pkcs8", "rand_core", "zeroize"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
-trait_variant = { package = "trait-variant", version = "0.1" }
+# `trait_variant` workspace dep removed per ADR-0002 Amendment 2026-05-04
+# (async-fn-in-trait Send-bound shape: trait_variant → explicit
+# `impl Future + Send + 'a` RPIT). Zero member crates consumed it; the
+# canonical pattern lives at `crates/portal-crypto/src/ens/alloy_resolver.rs`.
 # aws-lc-rs is a transitive dep through `rustls`'s `aws_lc_rs` feature; we
 # additionally declare it at workspace level so dev-deps can `use aws_lc_rs`
 # directly for signature-verification helpers in integration tests
