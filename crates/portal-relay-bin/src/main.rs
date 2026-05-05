@@ -59,7 +59,9 @@ use clap::{ArgMatches, CommandFactory, FromArgMatches, Parser, Subcommand, parse
 use compact_str::CompactString;
 use eyre::{Context as _, eyre};
 use portal_acme::{AcmeConfig, DirectoryUrl, KeyDir, Manager as AcmeManager, ProviderSelector};
-use portal_relay::Server;
+use portal_relay::policy::PolicyRuntime;
+use portal_relay::state::LeaseRegistry;
+use portal_relay::{ConfigLoadError, RelayConfigBundle, Server};
 use portal_relay_bin::init::{InitArgs, run_init};
 use tokio_util::sync::CancellationToken;
 
@@ -171,6 +173,29 @@ fn init_tracing() {
         .try_init();
 }
 
+/// Load `state_dir/bootstrap.json` + `state_dir/runtime.json` if
+/// BOTH files exist on disk. Returns `Ok(None)` if EITHER file is
+/// missing (`std::io::ErrorKind::NotFound`) — the operator has not
+/// run `portal-relay init` yet, or has deliberately omitted the
+/// runtime file. Returns `Ok(Some(bundle))` on full load, or
+/// `Err(_)` for any other error (malformed JSON, permissions, etc.).
+async fn load_bundle_if_present(
+    state_dir: &std::path::Path,
+) -> eyre::Result<Option<RelayConfigBundle>> {
+    let bootstrap_path = state_dir.join("bootstrap.json");
+    let runtime_path = state_dir.join("runtime.json");
+
+    match RelayConfigBundle::from_files(&bootstrap_path, &runtime_path).await {
+        Ok(bundle) => Ok(Some(bundle)),
+        Err(ConfigLoadError::Io { source, .. })
+            if source.kind() == std::io::ErrorKind::NotFound =>
+        {
+            Ok(None)
+        }
+        Err(other) => Err(other).context("loading config bundle"),
+    }
+}
+
 #[tracing::instrument(skip_all, fields(state_dir = %args.state_dir.display(), name = %args.name))]
 async fn serve(args: ServeArgs) -> eyre::Result<()> {
     tracing::info!("starting portal-relay");
@@ -214,7 +239,36 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
         .context("start ACME manager maintenance loop")?;
 
     // 2. Build the relay server.
-    let server = Server::new();
+    //
+    // Opportunistic config-bundle integration: if the operator ran
+    // `portal-relay init` (or hand-wrote both files), load the
+    // bundle and wire its `ReloadHandle` into `PolicyRuntime` so
+    // the iter-128/129 reload-aware reads (`is_ip_banned`,
+    // `bps_cap_per_identity`) reflect the on-disk operator config.
+    // If either file is missing, fall back to the default
+    // `PolicyRuntime` so the iter-119 baseline of `serve` working
+    // without `init` first is preserved.
+    let policy = if let Some(bundle) = load_bundle_if_present(&args.state_dir).await? {
+        let bundle_name = bundle.server.name.clone();
+        let ip_ban_count = bundle.runtime.ip_ban_list.len();
+        let bps_cap = bundle.runtime.bps_per_identity;
+        let handle = Arc::new(bundle.into_handle());
+        tracing::info!(
+            bundle_name = %bundle_name,
+            ip_ban_count,
+            bps_cap_per_identity = bps_cap,
+            "loaded U13 config bundle from state_dir; PolicyRuntime is reload-aware",
+        );
+        PolicyRuntime::new().with_reload_handle(handle)
+    } else {
+        tracing::info!(
+            "no bootstrap.json/runtime.json found in state_dir; \
+             using default PolicyRuntime (run `portal-relay init` to scaffold)",
+        );
+        PolicyRuntime::new()
+    };
+
+    let server = Server::with_components(LeaseRegistry::new(), policy);
     server.start().await.context("start relay server")?;
     let status = server.status().await;
     tracing::info!(?status, "relay server started");
