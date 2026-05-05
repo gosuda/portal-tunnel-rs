@@ -28,8 +28,8 @@
 //!
 //! - **ENS Sybil-gating bypass** (plan U12 step 4 carve-out).  The
 //!   minimum-engine apex blocks unconditionally; the bypass branch
-//!   that consults `Arc<dyn EnsResolver>` lands with the U6
-//!   admin/SDK API surface batch.
+//!   that consults `Arc<dyn EnsResolver>` lands in a follow-up
+//!   commit alongside the resolver-wiring work.
 //! - **Honeypot path matcher** (`Arc<HoneypotMatcher>` feeding
 //!   `SignalKind::HoneypotHit` from the listener pipeline).
 //! - **`reputation.json` round-trip** (U5 atomic-write integration

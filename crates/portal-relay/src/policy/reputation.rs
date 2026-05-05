@@ -44,8 +44,8 @@
 //!   "score >= `block_threshold` AND identity is not ENS-named"
 //!   condition. The minimum-engine apex is "score >=
 //!   `block_threshold` → Block" unconditionally; the bypass branch
-//!   that consults `Arc<dyn EnsResolver>` lands with the U6
-//!   admin/SDK API surface batch.
+//!   that consults `Arc<dyn EnsResolver>` lands in a follow-up
+//!   commit alongside the resolver-wiring work.
 //! - **Honeypot path matcher.** `Arc<HoneypotMatcher>` (compile-
 //!   time path glob set against `/.env`, `/wp-admin/*`, `/.git/*`)
 //!   feeds [`SignalKind::HoneypotHit`] from the listener pipeline;
@@ -165,8 +165,8 @@ pub enum SignalKind {
     /// argument so callers can override per call site.
     RateLimited,
     /// The request hit a configured honeypot path
-    /// (`/.env`, `/wp-admin/*`, …). Reserved for the U6 admin/SDK
-    /// API surface batch.
+    /// (`/.env`, `/wp-admin/*`, …). Reserved for the
+    /// `HoneypotMatcher` wiring follow-up.
     ///
     /// TODO(R10-followup): wire `Arc<HoneypotMatcher>` so the
     /// listeners pipeline can call `record_signal(_, HoneypotHit, _)`
