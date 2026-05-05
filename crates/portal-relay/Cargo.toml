@@ -62,10 +62,13 @@ repository.workspace = true
 # - postcard (canonical SignRequest signing-input encoding — SEC-007).
 # - governor (per-tenant rate limit keyed by client-cert subject; papaya-
 #   backed map of `DefaultDirectRateLimiter` instances).
-# - hyper { server, http1 } + hyper-util + http + tower (axum's Service
-#   primitive plumbed onto a `tokio_rustls::TlsAcceptor` so the keyless
-#   ServerConfig is constructed locally to this module — never aliased
-#   into state/ or listeners/, per R2 trust-boundary discipline).
+# - hyper-util + http + tower (axum's Service primitive plumbed onto a
+#   `tokio_rustls::TlsAcceptor` so the keyless ServerConfig is
+#   constructed locally to this module — never aliased into state/ or
+#   listeners/, per R2 trust-boundary discipline). The `hyper` crate
+#   itself is reached through hyper-util's re-exports
+#   (`hyper_util::server::conn::auto::Builder`,
+#   `hyper_util::service::TowerToHyperService`) — no direct `hyper` dep.
 # - tokio-rustls (TlsAcceptor over a TcpListener for the mTLS endpoint
 #   bind in `keyless::api`).
 # - rcgen + tokio-rustls + http-body-util (dev-only; integration test
@@ -91,7 +94,6 @@ compact_str = { workspace = true, features = ["serde"] }
 defguard_boringtun = { workspace = true }
 governor = { workspace = true }
 http = { workspace = true }
-hyper = { workspace = true }
 hyper-util = { workspace = true }
 jiff = { workspace = true }
 papaya = { workspace = true }

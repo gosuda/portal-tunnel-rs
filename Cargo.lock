@@ -3114,7 +3114,6 @@ dependencies = [
  "hyper-util",
  "rustls",
  "rustls-native-certs",
- "rustls-platform-verifier 0.7.0",
  "tokio",
  "tokio-rustls",
  "tower-service",
@@ -3352,32 +3351,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "879f10e63c20629ecabbb64a8010319738c66a5cd0c29b02d63d272b03751d01"
 dependencies = [
  "generic-array",
-]
-
-[[package]]
-name = "instant-acme"
-version = "0.8.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f05ad37c421b962354c358d347d4a6130151df9407978372d3ad7f0c8f71a64"
-dependencies = [
- "async-trait",
- "aws-lc-rs",
- "base64",
- "bytes",
- "http 1.4.0",
- "http-body 1.0.1",
- "http-body-util",
- "httpdate",
- "hyper",
- "hyper-rustls",
- "hyper-util",
- "rcgen",
- "rustls",
- "rustls-pki-types",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
 ]
 
 [[package]]
@@ -4164,19 +4137,15 @@ version = "0.1.0"
 dependencies = [
  "aws-sdk-route53",
  "bon",
- "bytes",
  "cloudflare",
  "compact_str",
- "eyre",
  "google-cloud-auth",
  "google-cloud-dns-v1",
  "google-cloud-gax",
- "instant-acme",
  "jiff",
  "rand_core 0.6.4",
  "rcgen",
  "secrecy",
- "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
@@ -4213,7 +4182,6 @@ dependencies = [
  "k256",
  "portal-crypto",
  "portal-wire",
- "postcard",
  "proptest",
  "rustls",
  "secrecy",
@@ -4223,7 +4191,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
- "tracing",
  "wiremock",
  "zeroize",
 ]
@@ -4278,7 +4245,6 @@ dependencies = [
  "governor",
  "http 1.4.0",
  "http-body-util",
- "hyper",
  "hyper-util",
  "jiff",
  "papaya",
@@ -4314,7 +4280,6 @@ dependencies = [
  "clap",
  "compact_str",
  "eyre",
- "jiff",
  "portal-acme",
  "portal-relay",
  "tokio",
@@ -4327,18 +4292,14 @@ dependencies = [
 name = "portal-sdk"
 version = "0.1.0"
 dependencies = [
- "bytes",
  "compact_str",
  "jiff",
- "portal-crypto",
  "portal-net",
  "portal-wire",
  "rcgen",
  "rustls",
- "secrecy",
  "thiserror 2.0.18",
  "tokio",
- "tokio-util",
  "tracing",
 ]
 

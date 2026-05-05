@@ -8,26 +8,20 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-# Cross-crate (Phase 1/2/3 outputs)
-portal-crypto = { workspace = true }
+# Cross-crate (Phase 1/3 outputs)
 portal-net = { workspace = true }
 portal-wire = { workspace = true }
 
 # Async runtime
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
-tokio-util = { workspace = true, features = ["rt"] }
 
 # Domain primitives
-bytes = { workspace = true }
 compact_str = { workspace = true }
 jiff = { workspace = true }
 
 # Errors + tracing
 thiserror = { workspace = true }
 tracing = { workspace = true }
-
-# Secrecy for tenant key newtypes
-secrecy = { workspace = true }
 
 # TLS — required for the RFC 5705 EKM exporter helper in `mitm.rs`.
 # Pulled from the workspace pin (rustls 0.23 + aws_lc_rs provider per R13).
