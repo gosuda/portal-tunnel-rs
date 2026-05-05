@@ -9,9 +9,10 @@
 //! until its owning unit lands (the unit that first consumes it adds
 //! the dep and the variant in the same commit).
 
+use compact_str::CompactString;
 use thiserror::Error;
 
-use crate::state::LeaseTokenError;
+use crate::state::{IdentityKey, LeaseTokenError};
 
 /// Top-level error type.
 #[non_exhaustive]
@@ -77,6 +78,20 @@ pub enum RelayError {
     /// exposes a stable Binding/Siwe error split). Phase 5 SDK-API S3.
     #[error("challenge: invalid signature: {0}")]
     ChallengeInvalidSignature(String),
+
+    /// `LeaseRegistry::register` rejected a record because its
+    /// hostname is already held by a different identity. Carries the
+    /// requested hostname and the identity currently holding it so
+    /// the API layer can shape a 409 `hostname_conflict` envelope
+    /// without resorting to string-prefix matching on `Config`.
+    /// Phase 5 SDK-API S6.
+    #[error("hostname '{hostname}' is held by another identity")]
+    HostnameConflict {
+        /// The hostname the caller tried to register.
+        hostname: CompactString,
+        /// The identity currently holding the hostname.
+        current_holder: IdentityKey,
+    },
 }
 
 /// Crate-wide `Result<T, RelayError>`.

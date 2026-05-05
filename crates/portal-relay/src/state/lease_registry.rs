@@ -236,12 +236,14 @@ impl LeaseRegistry {
     /// removed if it no longer points at this identity.
     ///
     /// Hostname conflicts (a different identity already holds the
-    /// hostname) surface as [`RelayError::Config`] with a
-    /// "hostname conflict" payload — the eventual API layer maps
-    /// this to HTTP 409.
+    /// hostname) surface as [`RelayError::HostnameConflict`] —
+    /// the API layer maps this to HTTP 409 `hostname_conflict`. The
+    /// typed variant carries both the requested hostname and the
+    /// current holder so callers do not have to pattern-match on a
+    /// stringified `Config` payload (Phase 5 SDK-API S6).
     ///
     /// # Errors
-    /// Returns [`RelayError::Config`] on hostname conflict.
+    /// Returns [`RelayError::HostnameConflict`] on hostname conflict.
     pub async fn register(&self, record: LeaseRecord) -> RelayResult<Arc<LeaseRecord>> {
         let _guard = self.inner.mutate.lock().await;
 
@@ -250,10 +252,10 @@ impl LeaseRegistry {
         if let Some(&existing_identity) = host_pin.get(&record.hostname)
             && existing_identity != record.identity
         {
-            return Err(RelayError::Config(format!(
-                "hostname '{}' is held by another identity",
-                record.hostname,
-            )));
+            return Err(RelayError::HostnameConflict {
+                hostname: record.hostname.clone(),
+                current_holder: existing_identity,
+            });
         }
         // If THIS identity previously held a different hostname,
         // drop the old hostname index entry.
@@ -717,7 +719,14 @@ mod tests {
                 ten_minutes_from_now(),
             ))
             .await;
-        assert!(matches!(result, Err(RelayError::Config(_))));
+        assert!(matches!(
+            result,
+            Err(RelayError::HostnameConflict {
+                hostname: ref h,
+                current_holder,
+            })
+            if h.as_str() == "shared.portal.test" && current_holder == id1,
+        ));
     }
 
     #[tokio::test]

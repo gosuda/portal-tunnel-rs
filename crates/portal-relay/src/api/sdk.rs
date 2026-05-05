@@ -29,8 +29,12 @@
 //! possession of any key); abuse is bounded by the per-IP outstanding
 //! cap enforced inside `LeaseRegistry::issue_register_challenge`.
 //!
-//! Subsequent handlers (`/v1/sdk/register`, `/v1/sdk/renew`,
-//! `/v1/sdk/unregister`, `/v1/sdk/connect`) land in follow-up commits.
+//! - `POST /v1/sdk/register` — finalize the SIWE handshake; mint a
+//!   lease and return [`RegisterResponseBody`] with a lease access
+//!   token. See the handler rustdoc for full semantics.
+//!
+//! Subsequent handlers (`/v1/sdk/renew`, `/v1/sdk/unregister`,
+//! `/v1/sdk/connect`) land in follow-up commits.
 
 use std::net::{IpAddr, SocketAddr};
 
@@ -47,7 +51,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::api::envelope::{ApiDataEnvelope, ApiError, ApiErrorCode, ok};
 use crate::api::state::SdkState;
-use crate::state::challenge::RegisterChallengeRequest as InnerRegisterChallengeRequest;
+use crate::state::challenge::{
+    RegisterChallengeRequest as InnerRegisterChallengeRequest,
+    RegisterRequest as InnerRegisterRequest,
+};
+use crate::state::lease_registry::{IdentityKey, LeaseRecord};
+use crate::state::lease_token;
 
 /// Wire body for `GET /v1/sdk/domain`.
 ///
@@ -432,6 +441,314 @@ pub async fn register_challenge_handler(
             siwe_message: resp.siwe_message_text,
         }),
     ))
+}
+
+/// Wire body for `POST /v1/sdk/register`.
+///
+/// Mirrors Go's `types.RegisterRequest` field set with one encoding
+/// deviation: the 65-byte SIWE signature ships as `"0x" + 130 hex`
+/// rather than via `serde-big-array` so the wire shape stays
+/// human-inspectable and parallels [`RegisterChallengeBody`]'s
+/// `eth_address` `0x`-hex convention. The `metadata` field carries
+/// the SDK-side opaque per-lease blob as a standard-base64 string —
+/// the same convention as `RegisterChallengeBody::metadata`. Empty
+/// `metadata` (`""`) decodes as a zero-byte blob.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RegisterRequestBody {
+    /// Echoes the issued challenge id (32 lowercase-hex chars, no
+    /// hyphens — `UUIDv4::simple`).
+    pub challenge_id: CompactString,
+    /// EIP-4361 SIWE message text the SDK signed. The relay
+    /// re-parses this and asserts it byte-equals the text it pinned
+    /// at challenge issue.
+    pub siwe_message_text: String,
+    /// 65-byte EIP-191 secp256k1 signature as `"0x" + 130 hex`
+    /// (case-insensitive). Decoded via [`decode_siwe_signature`].
+    pub siwe_signature: String,
+    /// Hostname the SDK wants to register.
+    pub hostname: CompactString,
+    /// Free-form per-lease metadata blob, standard-base64 of the
+    /// postcard-encoded bytes. Empty string = zero-byte blob.
+    #[serde(default)]
+    pub metadata: String,
+}
+
+/// Wire body for the `POST /v1/sdk/register` 201 response.
+///
+/// Mirrors Go's `types.RegisterResponse` field set, minus the v0.2
+/// transport-allocation fields (`udp_addr`, `tcp_addr`, `sni_port`,
+/// `keyless_url`) and Go's nested `Identity { name, address }`
+/// shape — Phase 5 v0.1 collapses identity to its 32-byte raw
+/// ed25519 protocol pubkey rendered as 64-char lowercase hex, which
+/// is the value the lease-access-token verifier matches on. The
+/// `protocol_version` / `release_version` pair mirrors
+/// [`DomainBody`] for SDK-side wire-version pinning across the
+/// register call.
+///
+/// `#[non_exhaustive]` blocks struct-literal construction from
+/// downstream Rust crates; it does NOT guarantee JSON-wire
+/// compatibility — a strict-decoder client that rejects unknown
+/// keys would still break on a field addition.
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct RegisterResponseBody {
+    /// 32-byte raw ed25519 protocol pubkey as 64-char lowercase hex
+    /// (no `0x` prefix). Bound to the lease-access-token claims.
+    pub identity: String,
+    /// Hostname the lease holds.
+    pub hostname: CompactString,
+    /// Lease expiry timestamp (RFC 3339).
+    pub expires_at: Timestamp,
+    /// Lease access token (signed JWT-style compact string per
+    /// [`crate::state::lease_token`]). The SDK echoes this on
+    /// `/v1/sdk/renew` and `/v1/sdk/connect`.
+    pub access_token: CompactString,
+    /// Wire-protocol version. v0.1 collapses to `CARGO_PKG_VERSION`.
+    pub protocol_version: &'static str,
+    /// Relay binary release version. v0.1 collapses to
+    /// `CARGO_PKG_VERSION`.
+    pub release_version: &'static str,
+}
+
+/// `POST /v1/sdk/register` — finalize the SIWE handshake, mint a
+/// lease, and return a lease access token.
+///
+/// ## Lease TTL
+///
+/// v0.1 hardcodes a 24h TTL ([`LEASE_DEFAULT_TTL`]) on the resulting
+/// [`LeaseRecord`]. Honoring a per-request `ttl` override (Go
+/// `RegisterRequest.TTL`) requires plumbing the field through
+/// [`InnerRegisterChallengeRequest`] / [`PendingChallenge`] which is
+/// out of scope for S6. The eventual `/v1/sdk/renew` handler is
+/// where TTL bumps live.
+///
+/// ## Pre-authorized deviation: `consume_register_challenge` already
+/// runs `verify_binding`
+///
+/// The slice plan calls for the handler to "extend
+/// `consume_register_challenge` to call `verify_binding`". The S3
+/// implementation already runs the SIWE+ed25519 binding verify
+/// inside `consume_register_challenge` (see
+/// `crates/portal-relay/src/state/lease_registry.rs:528-619`), so
+/// the handler does NOT duplicate it. The plan was stale at the time
+/// S6 landed; this rustdoc records the divergence so a reader of the
+/// plan does not look for the missing verify.
+///
+/// ## Error envelope mapping for SIWE failures
+///
+/// `RelayError::ChallengeInvalidSignature(_)` maps to 401
+/// `unauthorized` (matches the `LeaseTokenError::SignatureInvalid`
+/// pattern). The slice plan suggested 403 in passing; the
+/// envelope's existing 401 mapping is preserved for symmetry with
+/// the lease-token credential path. Reviewer note: a future flip to
+/// 403 would touch `envelope.rs::From<RelayError>` only and is a
+/// one-line change.
+///
+/// ## Hostname conflict envelope
+///
+/// `LeaseRegistry::register` returns
+/// [`RelayError::HostnameConflict`] on a hostname-vs-different-
+/// identity collision; the envelope mapping renders 409
+/// `hostname_conflict`. The typed error variant carries
+/// `current_holder` for operator audit but the holder identity does
+/// NOT surface on the wire (it would expose lease-graph topology to
+/// a probing caller).
+///
+/// ## ENS round-trip
+///
+/// On success, if `state.ens_resolver.is_some()`, the handler
+/// reverse-resolves the SIWE-recovered EOA, then forward-verifies
+/// the returned name maps back to the same EOA. On round-trip match
+/// the handler calls
+/// [`crate::policy::ReputationEngine::mark_ens_named`]. ENS
+/// failures (`Err(_)`) and bare `Ok(None)` / forward-resolve
+/// mismatches are logged at `tracing::warn` and DO NOT fail the
+/// request — registration is accepted on the strength of the SIWE
+/// signature alone, ENS-marking is bonus.
+///
+/// # Errors
+///
+/// - 400 `invalid_request` — malformed JSON body, malformed
+///   `siwe_signature` hex, malformed/unknown `challenge_id` (the
+///   challenge was never issued, was already consumed single-use,
+///   or was swept past TTL).
+/// - 401 `ip_banned` — source IP banned by policy.
+/// - 401 `unauthorized` — the SIWE signature failed
+///   binding-verification, or the pinned challenge expired between
+///   issue and consume.
+/// - 409 `hostname_conflict` — a different identity already holds
+///   the requested hostname.
+/// - 500 `internal` — postcard / signer failures inside
+///   [`crate::state::lease_token::issue`] (these are server-side
+///   faults).
+#[tracing::instrument(
+    name = "sdk.register",
+    skip_all,
+    fields(
+        client_ip = tracing::field::Empty,
+        identity = tracing::field::Empty,
+        ens_named = tracing::field::Empty,
+    ),
+)]
+pub async fn register_handler(
+    State(state): State<SdkState>,
+    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: Result<Json<RegisterRequestBody>, JsonRejection>,
+) -> Result<(StatusCode, Json<ApiDataEnvelope<RegisterResponseBody>>), ApiError> {
+    // 1. Decode the body.
+    let Json(req) = body.map_err(|err| {
+        ApiError::new(
+            ApiErrorCode::InvalidRequest,
+            format!("register body: {err}"),
+        )
+    })?;
+
+    // 2. Canonicalize the client IP (R12).
+    let xff = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok());
+    let real_ip = headers.get("x-real-ip").and_then(|v| v.to_str().ok());
+    let client_ip: IpAddr = state
+        .policy
+        .proxy_trust
+        .extract_client_ip(remote_addr, xff, real_ip);
+    tracing::Span::current().record("client_ip", tracing::field::display(client_ip));
+
+    // 3. Banned-IP check.
+    if state.policy.is_ip_banned(client_ip) {
+        return Err(ApiError::new(ApiErrorCode::IpBanned, "source ip is banned"));
+    }
+
+    // 4. Decode the 65-byte SIWE signature from `0x`-hex.
+    let siwe_signature = decode_siwe_signature(&req.siwe_signature)?;
+
+    // 5. Decode the metadata blob from base64 (empty string → empty
+    //    blob, mirroring the challenge body convention).
+    let metadata = if req.metadata.is_empty() {
+        Vec::new()
+    } else {
+        BASE64_STANDARD
+            .decode(req.metadata.as_bytes())
+            .map_err(|err| {
+                ApiError::new(
+                    ApiErrorCode::InvalidRequest,
+                    format!("metadata: not valid base64: {err}"),
+                )
+            })?
+    };
+
+    // 6. Construct the inner consume request and consume the
+    //    challenge. `consume_register_challenge` runs the
+    //    SIWE+ed25519 binding verify internally; failures are
+    //    typed via `RelayError` and map through the envelope.
+    let inner = InnerRegisterRequest {
+        challenge_id: req.challenge_id.clone(),
+        siwe_message_text: req.siwe_message_text,
+        siwe_signature,
+        hostname: req.hostname.clone(),
+        metadata,
+    };
+    let verified = state
+        .leases
+        .consume_register_challenge(&inner, Timestamp::now())
+        .await?;
+
+    // 7. Build the lease record. Identity = the binding-recovered
+    //    ed25519 protocol pubkey.
+    let identity = IdentityKey(verified.ed25519_pk.to_bytes());
+    tracing::Span::current().record("identity", tracing::field::display(hex_lower(&identity.0)));
+    let now = Timestamp::now();
+    let expires_at = now.checked_add(LEASE_DEFAULT_TTL).unwrap_or(Timestamp::MAX);
+    let mut record = LeaseRecord::new(
+        identity,
+        verified.hostname.clone(),
+        verified.metadata.clone(),
+        expires_at,
+        now,
+        verified.client_ip,
+    );
+    record.reported_ip = verified.register_request.reported_ip;
+
+    // 8. Register the lease.
+    state.leases.register(record).await?;
+
+    // 9. Mint the lease access token.
+    let signer = portal_crypto::Ed25519Signer::new(&state.lease_token_signing_key);
+    let access_token = lease_token::issue(identity, expires_at, &signer)?;
+
+    // 10. ENS round-trip — best-effort, never fails the request.
+    let mut ens_named = false;
+    if let Some(resolver) = state.ens_resolver.as_ref() {
+        match resolver.resolve_reverse(verified.eth_address).await {
+            Ok(Some(name)) => match resolver.resolve(&name).await {
+                Ok(addr) if addr == verified.eth_address => {
+                    state.engine.mark_ens_named(identity);
+                    ens_named = true;
+                }
+                Ok(_) => tracing::warn!(
+                    "ENS reverse-resolution returned {name} but forward-resolve did not match"
+                ),
+                Err(err) => tracing::warn!(?err, "ENS forward-resolve failed; skipping mark"),
+            },
+            Ok(None) => {} // No reverse record — common case, not an error.
+            Err(err) => tracing::warn!(?err, "ENS reverse-resolve failed; skipping mark"),
+        }
+    }
+    tracing::Span::current().record("ens_named", ens_named);
+
+    // 11. Respond.
+    let body = RegisterResponseBody {
+        identity: hex_lower(&identity.0),
+        hostname: verified.hostname,
+        expires_at,
+        access_token,
+        protocol_version: env!("CARGO_PKG_VERSION"),
+        release_version: env!("CARGO_PKG_VERSION"),
+    };
+    Ok((StatusCode::CREATED, ok(body)))
+}
+
+/// Default lease TTL for v0.1 register flow (24 hours). Mirrors Go
+/// `defaultLeaseTTL`. The SDK's per-request `ttl` override is not
+/// honored at register time in v0.1 — it is consumed by `/v1/sdk/renew`.
+const LEASE_DEFAULT_TTL: jiff::SignedDuration = jiff::SignedDuration::from_hours(24);
+
+/// Render a 32-byte buffer as 64-char lowercase hex (no `0x` prefix).
+/// Used to surface the registered identity on the wire.
+fn hex_lower(bytes: &[u8; 32]) -> String {
+    use core::fmt::Write as _;
+    bytes.iter().fold(String::with_capacity(64), |mut s, byte| {
+        let _ = write!(s, "{byte:02x}");
+        s
+    })
+}
+
+/// Decode a 65-byte SIWE signature from `"0x" + 130 hex` (mixed-case
+/// accepted). Rejects any other shape as `invalid_request`. Mirrors
+/// the [`decode_eth_address`] pattern.
+fn decode_siwe_signature(s: &str) -> Result<[u8; 65], ApiError> {
+    let invalid = |msg: &str| {
+        ApiError::new(
+            ApiErrorCode::InvalidRequest,
+            format!("siwe_signature: {msg}"),
+        )
+    };
+    let trimmed = s.trim();
+    let hex_body = trimmed
+        .strip_prefix("0x")
+        .or_else(|| trimmed.strip_prefix("0X"))
+        .ok_or_else(|| invalid("expected `0x` prefix"))?;
+    if hex_body.len() != 130 {
+        return Err(invalid("expected 130 hex chars after `0x`"));
+    }
+    let mut out = [0u8; 65];
+    for (i, byte) in out.iter_mut().enumerate() {
+        let hi = decode_hex_nibble(hex_body.as_bytes()[i * 2])
+            .ok_or_else(|| invalid("non-hex character"))?;
+        let lo = decode_hex_nibble(hex_body.as_bytes()[i * 2 + 1])
+            .ok_or_else(|| invalid("non-hex character"))?;
+        *byte = (hi << 4) | lo;
+    }
+    Ok(out)
 }
 
 /// Decode an `"0x" + 40 hex` EVM address into its 20-byte raw form.

@@ -205,6 +205,20 @@ impl From<RelayError> for ApiError {
             | RelayError::Wire(_)
             | RelayError::Keyless(_)
             | RelayError::Overlay(_) => Self::internal(),
+            // Hostname-conflict (Phase 5 SDK-API S6) is a typed
+            // outcome of `LeaseRegistry::register` — surface it as
+            // 409 `hostname_conflict` per the slice plan. The
+            // `current_holder` field stays off the wire (it carries
+            // a tenant pubkey and would expose lease-graph topology
+            // to a probing caller); only the requested hostname
+            // surfaces in the message.
+            RelayError::HostnameConflict {
+                hostname,
+                current_holder: _,
+            } => Self::new(
+                ApiErrorCode::HostnameConflict,
+                format!("hostname '{hostname}' is held by another identity"),
+            ),
             // Lease-access-token errors split client-side from
             // relay-side: a malformed / expired / wrong-sig / wrong-
             // version token is the caller's bad credential and should
