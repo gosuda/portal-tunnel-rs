@@ -37,6 +37,7 @@ use std::net::{IpAddr, SocketAddr};
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{ConnectInfo, State};
+use axum::http::uri::Authority;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
@@ -226,6 +227,26 @@ pub struct RegisterChallengeResponseBody {
 /// clients in practice always send Host, so this trade-off is
 /// invisible at the wire boundary.
 ///
+/// ## Host parsing + port-stripping in SIWE `domain`
+///
+/// The Host header is parsed as an [`Authority`] before it is used in
+/// any downstream string-formatting; a value that fails Authority
+/// parse (e.g., embedded whitespace, leading colon, control bytes
+/// that survive `to_str()`) returns 400 `invalid_request` rather
+/// than leaking through `build_siwe_challenge` to a 401
+/// `ChallengeInvalidSignature`. That separation matches the error
+/// taxonomy: a malformed Host is request-shape, not credential.
+///
+/// The SIWE `domain` is set to `authority.host()` — i.e., the
+/// host portion with the port stripped. The client must sign SIWE
+/// messages with `domain = "<relay-host>"` regardless of whether the
+/// relay listens on a non-standard port; this is forgiving across
+/// reverse-proxy port mappings and matches how SDK clients commonly
+/// think about "the relay's domain". The `register_uri` embedded in
+/// the SIWE message uses `authority.as_str()` (port preserved) so
+/// the URI accurately reflects how the SDK should reach
+/// `/v1/sdk/register`.
+///
 /// ### Security trade-off — Host is attacker-controlled
 ///
 /// `Host` is untrusted client input. A caller can therefore mint a
@@ -265,7 +286,9 @@ pub struct RegisterChallengeResponseBody {
 /// # Errors
 ///
 /// - 400 `invalid_request` — malformed JSON body, malformed
-///   `eth_address` / `ed25519_pk`, or empty `Host` header.
+///   `eth_address` / `ed25519_pk`, empty `Host` header, or a Host
+///   value that fails [`Authority`] parse (e.g., embedded
+///   whitespace, leading colon, control bytes).
 /// - 401 `ip_banned` — source IP is banned by either the in-memory
 ///   filter or the operator-managed snapshot.
 /// - 409 `transport_mismatch` — `hop_token != ""` together with
@@ -342,7 +365,9 @@ pub async fn register_challenge_handler(
         ));
     }
 
-    // 5. Domain resolution (Path A — Host header required).
+    // 5. Domain resolution (Path A — Host header required). Validate
+    //    as `Host = uri-host [":" port]` (no userinfo) before any
+    //    string-formatting so a malformed Host returns 400.
     let host = headers
         .get(header::HOST)
         .and_then(|v| v.to_str().ok())
@@ -354,7 +379,20 @@ pub async fn register_challenge_handler(
             "Host header required",
         ));
     }
-    let register_uri = format!("https://{host}/v1/sdk/register");
+    if host.contains('@') {
+        return Err(ApiError::new(
+            ApiErrorCode::InvalidRequest,
+            "Host header malformed: userinfo not permitted",
+        ));
+    }
+    let authority: Authority = host.parse().map_err(|err| {
+        ApiError::new(
+            ApiErrorCode::InvalidRequest,
+            format!("Host header malformed: {err}"),
+        )
+    })?;
+    let siwe_domain = authority.host();
+    let register_uri = format!("https://{}/v1/sdk/register", authority.as_str());
 
     // 6. Decode the wire-shape bytes for the inner challenge request.
     let eth_address = decode_eth_address(&req.eth_address)?;
@@ -377,7 +415,13 @@ pub async fn register_challenge_handler(
     // 7. Issue the challenge.
     let resp = state
         .leases
-        .issue_register_challenge(&inner, host, &register_uri, client_ip, Timestamp::now())
+        .issue_register_challenge(
+            &inner,
+            siwe_domain,
+            &register_uri,
+            client_ip,
+            Timestamp::now(),
+        )
         .await?;
 
     Ok((

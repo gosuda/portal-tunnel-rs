@@ -331,3 +331,66 @@ async fn missing_host_header_returns_400_invalid_request() {
         .expect("error.code present");
     assert_eq!(code, "invalid_request");
 }
+
+/// Regression for the 6ee0b9a reviewer's IMPORTANT-1 finding: a
+/// malformed Host that survives `to_str()` (ASCII-visible) but fails
+/// `http::uri::Authority` parse must surface as 400
+/// `invalid_request` — NOT 401 `ChallengeInvalidSignature` from
+/// leaking through `build_siwe_challenge`. The Host categorization
+/// is request-shape, not credential.
+#[tokio::test]
+async fn malformed_host_header_returns_400_invalid_request() {
+    let policy = Arc::new(PolicyRuntime::new());
+    let router = build_router(sdk_state_with_policy(policy));
+    let body = serde_json::to_vec(&happy_body()).expect("encode");
+
+    // Embedded space — valid `to_str()` but rejected by Authority parse.
+    let (status, json) = post_register_challenge(router, body, Some("foo bar.example")).await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "malformed Host must return 400 (not leak through to 401)"
+    );
+    let code = json
+        .pointer("/error/code")
+        .and_then(|v| v.as_str())
+        .expect("error.code present");
+    assert_eq!(code, "invalid_request");
+}
+
+/// Regression for the 6ee0b9a reviewer's IMPORTANT-2 finding: when
+/// the Host carries a port (e.g., `example.com:8443`), the SIWE
+/// `domain` field is the host portion ALONE (port stripped). SDK
+/// clients can therefore sign SIWE with `domain = "example.com"`
+/// regardless of whether the relay listens on a non-standard port.
+/// This pins the documented behavior in the handler rustdoc.
+#[tokio::test]
+async fn host_with_port_strips_in_siwe_domain() {
+    let policy = Arc::new(PolicyRuntime::new());
+    let router = build_router(sdk_state_with_policy(policy));
+    let body = serde_json::to_vec(&happy_body()).expect("encode");
+
+    let (status, json) = post_register_challenge(router, body, Some("example.com:8443")).await;
+    assert_eq!(status, StatusCode::CREATED, "happy path with port");
+
+    let siwe = json
+        .pointer("/data/siwe_message")
+        .and_then(|v| v.as_str())
+        .expect("siwe_message present");
+    // SIWE EIP-4361 messages start with `{domain} wants you to sign in...`.
+    // The SIWE domain must be `example.com` (no port). The first line
+    // is `<domain> wants you to sign in with your Ethereum account:`,
+    // so we anchor to that exact prefix to avoid being fooled by a
+    // later substring of `example.com:8443`.
+    assert!(
+        siwe.starts_with("example.com wants you to sign in"),
+        "SIWE domain must strip port; got message prefix: {}",
+        siwe.lines().next().unwrap_or(""),
+    );
+    // The register_uri (SIWE `URI:` line) preserves the port so the
+    // SDK-side URI match is exact against the actual listener.
+    assert!(
+        siwe.contains("https://example.com:8443/v1/sdk/register"),
+        "register_uri must preserve port; siwe={siwe}",
+    );
+}
