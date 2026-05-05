@@ -30,11 +30,11 @@ pub fn build_sdk_router(state: SdkState) -> axum::Router {
 
 /// Build the admin trust-boundary router.
 ///
-/// Mounts `POST /v1/admin/config/reload` (iter-135),
-/// `GET /v1/admin/config/current` (iter-136),
-/// `GET /v1/admin/health` (iter-138, stateless liveness), and
-/// `GET /v1/admin/policy/snapshot` (iter-148, derived-policy
-/// observability). Additional `/v1/admin/*` + `/metrics`
+/// Mounts the four [`admin`] handlers — `POST /v1/admin/config/reload`,
+/// `GET /v1/admin/config/current`, `GET /v1/admin/health`, and
+/// `GET /v1/admin/policy/snapshot`. See the [`admin`] module rustdoc
+/// for the per-endpoint contracts (handle-required vs stateless vs
+/// sentinel-on-no-handle). Additional `/v1/admin/*` + `/metrics`
 /// handlers register in follow-up commits.
 #[must_use]
 #[expect(
@@ -47,13 +47,13 @@ pub fn build_sdk_router(state: SdkState) -> axum::Router {
     reason = "Phase 7 U8.8 utoipa coverage gate names \
               `utoipa_axum::OpenApiRouter::route` for library-crate route \
               registration. The admin surface has no `ApiDoc::openapi()` \
-              aggregator wired in the workspace yet; iter-135 lands the \
-              FIRST admin endpoint (`POST /v1/admin/config/reload`) under \
-              the same carve-out shape as the keyless oracle. The \
-              utoipa-axum migration is a single Phase 7 follow-up that \
-              switches every admin handler in one diff once the aggregator \
-              lands — adopting utoipa-axum here for one route would \
-              fragment the migration. Recorded as a follow-up gap; \
+              aggregator wired in the workspace yet; the four admin \
+              handlers register through `axum::Router::route` under the \
+              same carve-out shape as the keyless oracle. The utoipa-axum \
+              migration is a single Phase 7 follow-up that switches every \
+              admin handler in one diff once the aggregator lands — \
+              adopting utoipa-axum here per route would fragment the \
+              migration. Recorded as a follow-up gap; the admin router is \
               reachable only via the admin trust-boundary listener."
 )]
 pub fn build_admin_router(state: AdminState) -> axum::Router {
