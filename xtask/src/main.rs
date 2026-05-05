@@ -173,6 +173,15 @@ fn run_ci(repo_root: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     // multi-key-return-gate (R2): mirrors the CI job of the same name.
     // Extracted to keep `run_ci` under clippy's `too_many_lines` threshold.
     multi_key_return_gate(repo_root, &mut failures);
+    // dep-spawning-audit-gate (Phase 7 U8.7): mirrors the CI job. The
+    // helper is already exposed as `cargo xtask dep-audit`; calling it
+    // here ensures local CI parity. The gate validates that
+    // `docs/dep-spawning-audit.md` carries every required ATX section
+    // header (Per-dep contracts, quinn, axum + hyper, instant-acme,
+    // defguard_boringtun, R9 honest-claim) — see `xtask/src/dep_audit.rs`.
+    if dep_audit::run(repo_root).is_err() {
+        failures.push("dep-spawning-audit");
+    }
 
     if failures.is_empty() {
         println!("xtask ci: all gates passed.");
