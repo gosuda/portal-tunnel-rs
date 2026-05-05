@@ -1,4 +1,4 @@
-//! [`RelayDescriptor`](RelayDescriptor) — relay identity + dual-stack addresses (R12).
+//! [`RelayDescriptor`] — relay identity + dual-stack addresses (R12).
 
 use std::net::{SocketAddrV4, SocketAddrV6};
 

@@ -1,4 +1,4 @@
-//! [`HopRoute`](HopRoute) — multi-hop attestation payload (Phase 6b consumes).
+//! [`HopRoute`] — multi-hop attestation payload (Phase 6b consumes).
 
 use serde::{Deserialize, Serialize};
 

@@ -1,4 +1,4 @@
-//! Signed postcard [`Envelope`](Envelope) and [`Claims`](Claims) (SEC-001).
+//! Signed postcard [`Envelope`] and [`Claims`] (SEC-001).
 
 use bytes::Bytes;
 use jiff::Timestamp;

@@ -9,10 +9,10 @@ pub enum Error {
     /// Go marker `0x00` must never appear on greenfield streams.
     #[error("legacy keepalive byte 0x00 (go wire drift)")]
     LegacyKeepaliveByte,
-    /// Unknown [`crate::channel::Channel`](Channel) discriminant.
+    /// Unknown [`crate::channel::Channel`] discriminant.
     #[error("unknown channel tag: {0}")]
     UnknownChannelTag(u8),
-    /// Unknown [`crate::channel::TcpProxyKind`](crate::channel::TcpProxyKind)
+    /// Unknown [`crate::channel::TcpProxyKind`]
     /// sub-discriminant byte (the byte following a `Channel::TcpProxy` tag).
     #[error("unknown tcp-proxy kind: {0}")]
     UnknownTcpProxyKind(u8),

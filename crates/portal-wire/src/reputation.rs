@@ -1,4 +1,4 @@
-//! [`ReputationDelta`](ReputationDelta) — v0.2 wire reservation (R10); **must not be emitted in v0.1**.
+//! [`ReputationDelta`] — v0.2 wire reservation (R10); **must not be emitted in v0.1**.
 
 use serde::{Deserialize, Serialize};
 

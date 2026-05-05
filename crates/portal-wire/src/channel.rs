@@ -1,4 +1,4 @@
-//! QUIC stream channel tag and [`ChannelCodec`](ChannelCodec).
+//! QUIC stream channel tag and [`ChannelCodec`].
 
 use std::convert::TryFrom;
 

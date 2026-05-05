@@ -1,4 +1,4 @@
-//! [`LeaseToken`](LeaseToken) + [`Scope`](Scope) (SEC-003).
+//! [`LeaseToken`] + [`Scope`] (SEC-003).
 
 use serde::{Deserialize, Serialize};
 

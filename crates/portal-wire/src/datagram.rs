@@ -1,4 +1,4 @@
-//! UDP [`DatagramFrame`](DatagramFrame) on `Channel::UdpDatagram`.
+//! UDP [`DatagramFrame`] on `Channel::UdpDatagram`.
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,7 @@ use crate::limits;
 pub struct DatagramFrame {
     /// Multiplexed UDP flow id.
     pub flow_id: u32,
-    /// Payload capped at [`limits::UDP_DATAGRAM_MAX`](crate::limits::UDP_DATAGRAM_MAX).
+    /// Payload capped at [`crate::limits::UDP_DATAGRAM_MAX`].
     pub payload: Bytes,
 }
 
