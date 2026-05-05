@@ -57,10 +57,16 @@ pass_filenames = false
 stages = ["pre-commit"]
 
 # Pre-push gate (slower; full test run before any history is published).
+# `PROPTEST_CASES=4096` is the workspace-canonical case count for the
+# Phase 1 U17 proptest suites; CI sets the same env var at workflow
+# scope (`.github/workflows/ci.yml:14`), so omitting it here would let
+# a local pre-push pass at the default 256 cases while CI runs against
+# the full 4096 — a silent coverage drop that masks proptest regressions
+# until the PR opens.
 [[repos.hooks]]
 id = "cargo-nextest"
-name = "cargo nextest run --workspace"
-entry = "cargo nextest run --workspace"
+name = "cargo nextest run --workspace (PROPTEST_CASES=4096)"
+entry = "env PROPTEST_CASES=4096 cargo nextest run --workspace"
 language = "system"
 types = ["rust"]
 pass_filenames = false
