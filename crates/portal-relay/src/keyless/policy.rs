@@ -21,15 +21,16 @@
 //!    refilled at [`KEYLESS_TENANT_SUSTAINED`] tokens / second.
 //!    Exhaustion ⇒ [`KeylessError::RateLimited`].
 //!
-//! ## SEC-015 deferred
+//! ## SEC-015 routing-context refuse-to-sign
 //!
-//! The `routing_context` field on `SignRequest` is intentionally NOT
-//! checked here — that is U4 territory
-//! (`policy::check_routing_context`).  U3 ships the wire field +
-//! carries it through to the canonical signing input verbatim; U4
-//! adds the refusal arm.  This module's rustdoc is the single
-//! authority on the U3-vs-U4 split; do not add a routing-context
-//! check here without flipping the U4 plan unit's status.
+//! Phase 6b/A U3 shipped the `routing_context` wire field; Phase 6b/A
+//! U4 added the refusal arm via [`check_routing_context`], wired into
+//! [`KeylessPolicy::validate`] as Step 0 (runs BEFORE every other
+//! check so a security-policy refusal short-circuits ahead of input-
+//! shape validation, key lookup, and rate-limit accounting). The
+//! routing-context matching matrix (`expected` vs `routed_hostname`
+//! cases — `Any` permissive, exact match, mismatch, missing context)
+//! is pinned by the U4 unit-test block at the bottom of this file.
 //!
 //! ## papaya choice
 //!
