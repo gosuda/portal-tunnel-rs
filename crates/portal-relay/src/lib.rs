@@ -22,7 +22,10 @@
 //!   out the deferrals — ENS Sybil-gating exemption (waits on
 //!   `Arc<dyn EnsResolver>` from B6's API surface), honeypot
 //!   call-site wiring, `reputation.json` persistence, hot-swap
-//!   support, per-signal-kind weight policy.
+//!   support. The per-signal-kind weight plumbing landed via
+//!   [`policy::reputation::ReputationConfig::signal_weights`] +
+//!   [`policy::reputation::ReputationEngine::record_signal_default`];
+//!   per-kind tuning values remain an ADR-0007 decision.
 //! - **Batches 8 + 10 fully pending**: hot-reload + keyless I/O
 //!   wiring; Admin View + R15 Status TUI.
 //!
