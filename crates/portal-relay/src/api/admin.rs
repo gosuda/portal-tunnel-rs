@@ -112,3 +112,37 @@ pub async fn get_current_config_handler(
     })?;
     Ok(ok((*handle.current()).clone()))
 }
+
+/// Wire body for `GET /v1/admin/health`. Carries the portal-relay
+/// crate version so an operator can verify which build a given
+/// listener is running.
+///
+/// Marked `#[non_exhaustive]` so future fields (commit SHA, build
+/// timestamp, server lifecycle phase) can land without a breaking
+/// change to the on-the-wire envelope shape.
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct HealthBody {
+    /// `CARGO_PKG_VERSION` of the running `portal-relay` crate —
+    /// captured at compile time via `env!`. Operators use this to
+    /// confirm a listener is on the version they intend.
+    pub version: &'static str,
+}
+
+/// `GET /v1/admin/health` — stateless liveness endpoint.
+///
+/// Returns 200 OK whenever the router is mounted; carries the crate
+/// version. Has no state dependency (does NOT require the
+/// `AdminState.reload` handle), so a brand-new dev relay
+/// (`Server::new()` with no bundle) is observable as alive
+/// immediately. Trust boundary inherits from the module rustdoc.
+///
+/// # Errors
+///
+/// Infallible. Signature returns [`ApiResult`] for envelope
+/// uniformity with the rest of the admin surface.
+pub async fn health_handler() -> ApiResult<HealthBody> {
+    Ok(ok(HealthBody {
+        version: env!("CARGO_PKG_VERSION"),
+    }))
+}

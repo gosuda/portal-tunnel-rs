@@ -30,9 +30,11 @@ pub fn build_sdk_router(state: SdkState) -> axum::Router {
 
 /// Build the admin trust-boundary router.
 ///
-/// Mounts `POST /v1/admin/config/reload` (iter-135) and
-/// `GET /v1/admin/config/current` (iter-136). Additional
-/// `/v1/admin/*` + `/metrics` handlers register in follow-up commits.
+/// Mounts `POST /v1/admin/config/reload` (iter-135),
+/// `GET /v1/admin/config/current` (iter-136), and
+/// `GET /v1/admin/health` (iter-138, stateless liveness).
+/// Additional `/v1/admin/*` + `/metrics` handlers register in
+/// follow-up commits.
 #[must_use]
 #[expect(
     clippy::double_must_use,
@@ -69,6 +71,7 @@ pub fn build_admin_router(state: AdminState) -> axum::Router {
         "/v1/admin/config/current",
         get(admin::get_current_config_handler),
     );
+    let r = r.route("/v1/admin/health", get(admin::health_handler));
     r.with_state(state)
 }
 
