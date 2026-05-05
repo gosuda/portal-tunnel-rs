@@ -163,6 +163,9 @@ fn run_ci(repo_root: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     if wire_drift_check::run(repo_root).is_err() {
         failures.push("wire-drift-check");
     }
+    // multi-key-return-gate (R2): mirrors the CI job of the same name.
+    // Extracted to keep `run_ci` under clippy's `too_many_lines` threshold.
+    multi_key_return_gate(repo_root, &mut failures);
 
     if failures.is_empty() {
         println!("xtask ci: all gates passed.");
@@ -170,6 +173,83 @@ fn run_ci(repo_root: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     } else {
         eprintln!("xtask ci: failed: {}", failures.join(", "));
         Err("ci gate(s) failed".into())
+    }
+}
+
+/// Run the R2 multi-key-return-gate: two regex checks against return-type
+/// shapes that clippy's `disallowed_methods` cannot express (no
+/// return-type predicate). Mirrors the `multi-key-return-gate` job in
+/// `.github/workflows/ci.yml`. The two patterns reject any function
+/// signature returning `(SecretBox<A>, SecretBox<B>)` or
+/// `(SigningKey, SigningKey)` shapes — bundled multi-key loaders that
+/// would defeat per-role isolation.
+///
+/// rg exit codes (per ripgrep manual):
+/// * 0  = at least one match found → R2 VIOLATION, fail the gate.
+/// * 1  = no matches → success, what we want.
+/// * 2+ = rg error (bad pattern, IO error, missing dir, etc.) →
+///   tool-level failure, also fail the gate so a broken pattern cannot
+///   silently pass.
+///
+/// `cmd_ok` collapses 0-vs-non-zero, which would treat rg-error (2)
+/// as success. Capture the exit status explicitly and gate on exactly
+/// code 1.
+fn multi_key_return_gate(repo_root: &Path, failures: &mut Vec<&'static str>) {
+    // The patterns must match a tuple return type that contains the
+    // forbidden ident twice — including the rustfmt-broken multiline
+    // shape `fn foo() -> (\n  SecretBox<A>,\n  SecretBox<B>,\n)`.
+    // Line-only regexes (e.g., `-> .*SecretBox.*SecretBox`) miss the
+    // multiline form: a contributor running `cargo fmt` after writing
+    // a one-line tuple return would silently bypass the gate. The
+    // `-U` flag enables ripgrep multi-line mode; `[^)]` then spans
+    // newlines, so the regex matches the entire content between
+    // `->` and the closing tuple paren regardless of formatting.
+    for (label, pattern) in [
+        (
+            "multi-key-return-gate (SecretBox<A>, SecretBox<B>)",
+            r"-> \([^)]*SecretBox[^)]*SecretBox",
+        ),
+        (
+            "multi-key-return-gate (SigningKey, SigningKey)",
+            r"-> \([^)]*SigningKey[^)]*SigningKey",
+        ),
+    ] {
+        let st = Command::new("rg")
+            .args([
+                "-U",
+                "--type",
+                "rust",
+                "--quiet",
+                "-e",
+                pattern,
+                "crates/portal-crypto",
+                "crates/portal-relay",
+                "crates/portal-sdk",
+                "crates/portal-net",
+            ])
+            .current_dir(repo_root)
+            .status();
+        match st {
+            Ok(s) => match s.code() {
+                Some(1) => {} // no match → success
+                Some(0) => {
+                    eprintln!("xtask ci: {label} matched a forbidden return-type shape");
+                    failures.push(label);
+                }
+                Some(other) => {
+                    eprintln!("xtask ci: {label} rg exited {other} (tool error, not a no-match)");
+                    failures.push(label);
+                }
+                None => {
+                    eprintln!("xtask ci: {label} rg terminated without exit code");
+                    failures.push(label);
+                }
+            },
+            Err(e) => {
+                eprintln!("xtask ci: failed to run rg for {label}: {e}");
+                failures.push(label);
+            }
+        }
     }
 }
 

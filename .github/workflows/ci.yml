@@ -114,9 +114,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Multi-key-return regex gate (R2 trust-boundary isolation)
+        # `-U` enables ripgrep multi-line mode so `[^)]` spans newlines.
+        # Without it, the regex misses rustfmt-broken multiline tuple
+        # returns like `fn foo() -> (\n  SecretBox<A>,\n  SecretBox<B>,\n)`,
+        # which a contributor would produce by running `cargo fmt` after
+        # writing a one-line tuple return. The pattern matches any tuple
+        # return type containing the forbidden ident at least twice
+        # before the closing paren — both shapes are caught.
         run: |
-          ! rg --type rust -e '-> .*SecretBox.*SecretBox' crates/portal-crypto crates/portal-relay crates/portal-sdk crates/portal-net
-          ! rg --type rust -e '-> .*SigningKey.*SigningKey' crates/portal-crypto crates/portal-relay crates/portal-sdk crates/portal-net
+          ! rg -U --type rust -e '-> \([^)]*SecretBox[^)]*SecretBox' crates/portal-crypto crates/portal-relay crates/portal-sdk crates/portal-net
+          ! rg -U --type rust -e '-> \([^)]*SigningKey[^)]*SigningKey' crates/portal-crypto crates/portal-relay crates/portal-sdk crates/portal-net
 
   nextest:
     name: cargo nextest
