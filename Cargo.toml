@@ -221,3 +221,13 @@ cargo_common_metadata = "allow"
 unsafe_code = "forbid"
 unused_must_use = "deny"
 missing_docs = "warn"
+
+# rustdoc-clean as of iteration 54 (all 9 crates audited; 51 broken
+# links repaired across 5 commits per Codex split-scope rule). Lock
+# the clean state in so future contributors hit a hard gate before
+# the warnings can accumulate again. clippy's `-D warnings` (already
+# in CI + xtask ci) escalates these to errors at CI time.
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"
+private_intra_doc_links = "deny"
+redundant_explicit_links = "deny"
