@@ -80,6 +80,15 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      # Second pass with --all-features to surface compile/lint
+      # errors in feature-gated modules. The default-features pass
+      # above doesn't compile modules behind off-by-default features
+      # (e.g. portal-crypto::api_https behind `rustls-integration`),
+      # so a missing import / stale type reference inside a gated
+      # module can slip through and only surface when a downstream
+      # caller enables the feature. Mirrored locally by `cargo xtask
+      # ci`'s clippy-all-features step.
+      - run: cargo clippy --workspace --all-features --all-targets -- -D warnings
 
   # R2 trust-boundary isolation gate (Phase 2 U12).
   #
