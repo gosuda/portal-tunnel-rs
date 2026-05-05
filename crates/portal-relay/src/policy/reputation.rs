@@ -237,7 +237,7 @@ impl ReputationDecision {
 /// always "as of `last_updated`" — the projected `now`-value is a
 /// pure function of the stored pair and the configured
 /// `decay_constant`.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct ReputationScore {
     /// The decayed-as-of-`last_updated` score.
     pub value: f64,
@@ -692,6 +692,46 @@ impl ReputationEngine {
     pub fn tracked_identities(&self) -> usize {
         self.inner.scores.pin().len()
     }
+
+    /// Capture the current score table as an owned in-memory
+    /// snapshot.
+    ///
+    /// The snapshot is a point-in-time read; concurrent
+    /// `record_signal` calls may land between iterator steps, so the
+    /// returned map is "what was observed during this iteration",
+    /// not a strict atomic snapshot of the engine.  For audit /
+    /// persistence layering this is acceptable — the engine's job is
+    /// to expose a best-effort observable; the state/operator layer
+    /// is the right place to compose this with
+    /// `state::persistence::write_json_atomic` and decide cadence,
+    /// file mode, and recovery semantics.
+    #[must_use]
+    pub fn snapshot(&self) -> std::collections::HashMap<IdentityKey, ReputationScore> {
+        let pinned = self.inner.scores.pin();
+        pinned.iter().map(|(k, v)| (*k, *v)).collect()
+    }
+
+    /// Restore (merge) an externally-supplied score map into the
+    /// engine.  Existing entries with the same `IdentityKey` are
+    /// overwritten; entries not present in the input are left
+    /// untouched so a post-restore signal sees the union of disk +
+    /// new state.
+    ///
+    /// Non-finite (`NaN` / `±inf`) values in the input are silently
+    /// dropped — the same invariant `record_signal` enforces, applied
+    /// to recovery to avoid contaminating the in-memory state with a
+    /// poisoned on-disk row.
+    pub fn restore_from_snapshot(
+        &self,
+        snap: std::collections::HashMap<IdentityKey, ReputationScore>,
+    ) {
+        let pinned = self.inner.scores.pin();
+        for (id, score) in snap {
+            if score.value.is_finite() {
+                pinned.insert(id, score);
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -856,5 +896,93 @@ mod tests {
     fn default_governor_quota_is_constructible() {
         let q = default_governor_quota();
         assert_eq!(q.burst_size().get(), REPUTATION_QUOTA_BURST);
+    }
+
+    #[test]
+    fn snapshot_then_restore_round_trips_score_table() {
+        let engine = ReputationEngine::new();
+        let id_a = IdentityKey([1u8; 32]);
+        let id_b = IdentityKey([2u8; 32]);
+
+        engine.record_signal(id_a, SignalKind::HoneypotHit, 25.0);
+        engine.record_signal(id_b, SignalKind::RateLimited, 5.0);
+
+        let snap = engine.snapshot();
+        assert_eq!(snap.len(), 2);
+        assert!(snap.contains_key(&id_a));
+        assert!(snap.contains_key(&id_b));
+
+        // Restore into a fresh engine and confirm the values land.
+        let restored = ReputationEngine::new();
+        assert_eq!(restored.tracked_identities(), 0);
+        restored.restore_from_snapshot(snap);
+        assert_eq!(restored.tracked_identities(), 2);
+        let snap2 = restored.snapshot();
+        assert!((snap2[&id_a].value - 25.0).abs() < 1e-9);
+        assert!((snap2[&id_b].value - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn restore_drops_non_finite_poisoned_rows() {
+        let engine = ReputationEngine::new();
+        let good = IdentityKey([3u8; 32]);
+        let bad_nan = IdentityKey([4u8; 32]);
+        let bad_inf = IdentityKey([5u8; 32]);
+
+        let mut snap = std::collections::HashMap::new();
+        snap.insert(
+            good,
+            ReputationScore {
+                value: 42.0,
+                last_updated: Timestamp::now(),
+            },
+        );
+        snap.insert(
+            bad_nan,
+            ReputationScore {
+                value: f64::NAN,
+                last_updated: Timestamp::now(),
+            },
+        );
+        snap.insert(
+            bad_inf,
+            ReputationScore {
+                value: f64::INFINITY,
+                last_updated: Timestamp::now(),
+            },
+        );
+
+        engine.restore_from_snapshot(snap);
+        let result = engine.snapshot();
+        assert_eq!(result.len(), 1, "only the finite row must survive");
+        assert!(result.contains_key(&good));
+        assert!(!result.contains_key(&bad_nan));
+        assert!(!result.contains_key(&bad_inf));
+    }
+
+    #[test]
+    fn restore_merges_rather_than_replaces() {
+        // Pre-existing in-memory state is preserved when the snapshot
+        // does not name the identity.
+        let engine = ReputationEngine::new();
+        let pre_existing = IdentityKey([6u8; 32]);
+        let from_disk = IdentityKey([7u8; 32]);
+
+        engine.record_signal(pre_existing, SignalKind::HoneypotHit, 10.0);
+
+        let mut snap = std::collections::HashMap::new();
+        snap.insert(
+            from_disk,
+            ReputationScore {
+                value: 20.0,
+                last_updated: Timestamp::now(),
+            },
+        );
+        engine.restore_from_snapshot(snap);
+
+        let result = engine.snapshot();
+        assert_eq!(result.len(), 2);
+        assert!(result.contains_key(&pre_existing));
+        assert!(result.contains_key(&from_disk));
     }
 }
