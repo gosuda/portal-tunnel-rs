@@ -65,6 +65,24 @@ use portal_relay::{ConfigLoadError, RelayConfigBundle, Server};
 use portal_relay_bin::init::{InitArgs, run_init};
 use tokio_util::sync::CancellationToken;
 
+/// Operator-facing env-var prefix layered onto `runtime.json` via figment.
+///
+/// Example: `PORTAL_RELAY_BPS_PER_IDENTITY=4096` overrides the runtime's
+/// `bps_per_identity`. The env layer is applied AFTER the JSON file, so
+/// the env var wins.
+///
+/// Trust-boundary key paths in `bootstrap.json` are NOT overridable
+/// (immutable post-startup); only `runtime.json` fields accept the env
+/// overlay. This keeps the bootstrap half single-sourced and auditable.
+///
+/// The trailing underscore is intentional: figment's [`Env::prefixed`]
+/// performs a literal-prefix match (no implicit append). Without the
+/// trailing `_`, an env var like `PORTAL_RELAYX_FOO` would collide with
+/// the prefix per the iter-144 figment-integration precondition.
+///
+/// [`Env::prefixed`]: figment::providers::Env::prefixed
+pub const ENV_PREFIX: &str = "PORTAL_RELAY_";
+
 /// Top-level CLI.
 #[derive(Debug, Parser)]
 #[command(name = "portal-relay", version, about = "Portal tunnel relay server")]
@@ -174,22 +192,48 @@ fn init_tracing() {
 }
 
 /// Load `state_dir/bootstrap.json` + `state_dir/runtime.json` if
-/// BOTH files exist on disk. Returns `Ok(None)` if EITHER file is
-/// missing (`std::io::ErrorKind::NotFound`) — the operator has not
-/// run `portal-relay init` yet, or has deliberately omitted the
-/// runtime file. Returns `Ok(Some(bundle))` on full load, or
-/// `Err(_)` for any other error (malformed JSON, permissions, etc.).
+/// BOTH files exist on disk.
+///
+/// Runtime fields accept env-var overlay via the [`ENV_PREFIX`] prefix
+/// (figment provider chain: `Json::file(runtime.json)` then
+/// `Env::prefixed(PORTAL_RELAY_)`). Bootstrap key paths are immutable;
+/// only the runtime half is overlaid. An env-var typo, type mismatch,
+/// or unknown field surfaces via the existing `Err(_)` path because
+/// [`RelayConfigBundle::from_files_with_env`] returns
+/// [`ConfigLoadError::Figment`] in those cases — operators reading a
+/// startup failure can attribute it to the env layer rather than the
+/// file by checking the variant.
+///
+/// Returns `Ok(None)` if `bootstrap.json` is missing
+/// (`std::io::ErrorKind::NotFound`) — the operator has not run
+/// `portal-relay init` yet. A missing `runtime.json` is silently
+/// tolerated by figment's non-required `Json::file` provider: the
+/// env layer (or [`RuntimeConfig`] defaults) supplies values. This
+/// matches operator expectation: a `K8s` deployment that ships only
+/// env vars and the bootstrap file should boot without a stub
+/// `runtime.json`.
+///
+/// Returns `Ok(Some(bundle))` on full load, or `Err(_)` for any
+/// other error (malformed JSON, permissions, env-var type mismatch,
+/// unknown env-var key, etc.).
+///
+/// [`RuntimeConfig`]: portal_relay::RuntimeConfig
 async fn load_bundle_if_present(
     state_dir: &std::path::Path,
 ) -> eyre::Result<Option<RelayConfigBundle>> {
     let bootstrap_path = state_dir.join("bootstrap.json");
     let runtime_path = state_dir.join("runtime.json");
 
-    match RelayConfigBundle::from_files(&bootstrap_path, &runtime_path).await {
+    match RelayConfigBundle::from_files_with_env(&bootstrap_path, &runtime_path, ENV_PREFIX).await {
         Ok(bundle) => Ok(Some(bundle)),
         Err(ConfigLoadError::Io { source, .. })
             if source.kind() == std::io::ErrorKind::NotFound =>
         {
+            // Bootstrap missing — operator has not run `portal-relay
+            // init`. Fall through to default `PolicyRuntime`. (A
+            // missing `runtime.json` does NOT reach this arm: figment's
+            // `Json::file` is non-required by default and silently
+            // treats a missing file as an empty dict.)
             Ok(None)
         }
         Err(other) => Err(other).context("loading config bundle"),
@@ -265,7 +309,13 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
             bundle_name = %bundle_name,
             ip_ban_count,
             bps_cap_per_identity = bps_cap,
+            env_overlay_prefix = ENV_PREFIX,
             "loaded U13 config bundle from state_dir; PolicyRuntime is reload-aware",
+        );
+        tracing::debug!(
+            target: "portal_relay::serve",
+            prefix = ENV_PREFIX,
+            "config env-overlay active; runtime fields accept env-var overrides",
         );
         handle
     });
@@ -419,5 +469,27 @@ async fn wait_for_shutdown_signal() {
         } else {
             tracing::info!("Ctrl+C received");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `ENV_PREFIX` MUST end with `_`. Figment's
+    /// [`figment::providers::Env::prefixed`] performs a literal-prefix
+    /// match: without the trailing underscore, an env var like
+    /// `PORTAL_RELAYX_FOO` would collide with the prefix and silently
+    /// be interpreted as a `RuntimeConfig` field. Pinning the exact
+    /// constant value keeps a future refactor from accidentally
+    /// dropping the underscore or renaming the prefix in a way that
+    /// breaks operator runbooks.
+    #[test]
+    fn env_prefix_is_portal_relay_underscore() {
+        assert_eq!(
+            ENV_PREFIX, "PORTAL_RELAY_",
+            "ENV_PREFIX is the operator-facing env-var contract; \
+             changing it is a breaking change for K8s/Docker deployments",
+        );
     }
 }
