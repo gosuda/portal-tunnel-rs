@@ -65,7 +65,7 @@
 //! - **Per-signal tracing.** Only [`ReputationEngine::decide`]
 //!   carries `#[tracing::instrument]` this iteration; emitting a
 //!   per-signal-kind audit span on every [`ReputationEngine::
-//!   record_signal`] is U13 territory.
+//!   record_signal`] lands in a follow-up commit.
 
 use std::net::IpAddr;
 use std::num::NonZeroU32;
