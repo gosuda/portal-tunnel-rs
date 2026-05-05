@@ -40,13 +40,29 @@ and the nine member-crate stubs. Phase 0 status lives in `PLAN.md`
 under "Current implementation status" alongside the per-phase
 landed/partial/pending state.
 
-## Frontmatter shape
+## Frontmatter shapes
 
-Each plan opens with a YAML frontmatter block carrying `phase`, `unit`,
-`status`, `owners`, and `dependencies`. The status field follows the
-roadmap convention: `proposed` → `accepted` → `landed` (with explicit
-batch-level state in the plan body when the phase ships in batches).
+Plans use one of two YAML frontmatter shapes (committed-as-is from
+their original `/ce-plan` runs):
 
-Reopening a `landed` plan requires the ADR-amendment procedure
+- **Shape A** (`title` / `type` / `status` / `date` / `origin`):
+  used by 001 portal-wire, 003 portal-net, 004 portal-acme, 005
+  portal-relay, 006 portal-sdk, 007 overlay+keyless. The `status`
+  field is `active` for in-flight plans.
+- **Shape B** (`name` / `overview` / `todos`): used by 002
+  portal-crypto and 008 binaries-and-e2e. The `todos` array carries
+  per-unit `id` + `content` + `status` (`status: pending|in_progress
+  |completed` per unit).
+
+Plan-level "is this phase landed?" status does NOT live in the
+frontmatter under either shape. The canonical per-phase
+landed/partial/pending state lives in `PLAN.md` "Current
+implementation status"; per-unit / per-batch state lives in the plan
+body's implementation-units section (Shape A) or the `todos` array
+(Shape B). Frontmatter `status: active` means "this plan is the
+contract; do not reopen without ADR amendment", not "phase is
+incomplete" — `active` is preserved even after the phase fully lands.
+
+Reopening an active plan requires the ADR-amendment procedure
 ([`docs/adr/README.md`](../adr/README.md) §Amendment procedure); ad-hoc
 plan rewrites mid-phase are out of process.
