@@ -98,7 +98,7 @@ pub fn build_discovery_router(state: DiscoveryState) -> axum::Router {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::policy::PolicyRuntime;
+    use crate::policy::{PolicyRuntime, ReputationEngine};
     use crate::state::LeaseRegistry;
     use std::sync::Arc;
 
@@ -106,7 +106,13 @@ mod tests {
     fn build_sdk_router_returns_router() {
         let leases = LeaseRegistry::new();
         let policy = Arc::new(PolicyRuntime::new());
-        let _r = build_sdk_router(SdkState { leases, policy });
+        let engine = ReputationEngine::new();
+        let _r = build_sdk_router(SdkState {
+            leases,
+            policy,
+            engine,
+            ens_resolver: None,
+        });
     }
 
     #[test]

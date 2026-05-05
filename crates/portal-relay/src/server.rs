@@ -69,11 +69,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use jiff::Timestamp;
+use portal_crypto::BoxedEnsResolver;
 use tokio::sync::{Mutex, watch};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
-use crate::api::AdminState;
+use crate::api::{AdminState, SdkState};
 use crate::error::RelayResult;
 use crate::policy::{PolicyRuntime, REPUTATION_PERSIST_INTERVAL, ReputationEngine};
 use crate::reload::ReloadHandle;
@@ -124,6 +125,32 @@ struct ServerInner {
     /// boxed into a sub-struct because both fields are cheap-clone
     /// and there is exactly one consumer (`start`) that reads them.
     reputation_persistence: Option<(ReputationEngine, PathBuf)>,
+    /// Optional reputation engine bound to the SDK trust-boundary
+    /// router. `Some` after [`Server::with_reputation_engine`];
+    /// `None` for servers without an engine wired into the SDK
+    /// surface (the bare [`Server::new`] used by lifecycle tests).
+    /// [`Server::sdk_state`] consumes this field — `None` panics
+    /// with a clear message because the (future) `/v1/sdk/register`
+    /// handler treats engine access as a required dependency.
+    ///
+    /// # Coupling discipline
+    ///
+    /// Operators that set both [`Self::reputation_persistence`]
+    /// (via [`Server::with_reputation_persistence`]) and this
+    /// field (via [`Server::with_reputation_engine`]) are
+    /// responsible for passing the **same** [`ReputationEngine`]
+    /// instance into both: the cadence loop and the SDK handler
+    /// must share a single Arc graph so a `mark_ens_named` write
+    /// from the handler is observable by the persist loop's
+    /// snapshot. The Server's plumbing does NOT enforce this in
+    /// v0.1 — a future ergonomic improvement could collapse the
+    /// two builders into one, but that is out of scope here.
+    reputation_engine: Option<ReputationEngine>,
+    /// Optional ENS resolver bound to the SDK trust-boundary
+    /// router. `Some` after [`Server::with_ens_resolver`]; `None`
+    /// for demo / no-ENS-configured deployments. Surfaced into
+    /// [`SdkState::ens_resolver`] verbatim.
+    ens_resolver: Option<BoxedEnsResolver>,
     /// Lifecycle guard. The mutex is held for short critical
     /// sections only — never across `JoinSet::join_next` awaits
     /// or other long-lived operations.
@@ -232,6 +259,8 @@ impl Server {
                 policy: Arc::new(policy),
                 reload_handle: None,
                 reputation_persistence: None,
+                reputation_engine: None,
+                ens_resolver: None,
                 lifecycle: Mutex::new(Lifecycle::Stopped),
             }),
         }
@@ -275,6 +304,8 @@ impl Server {
                 policy: Arc::clone(&self.inner.policy),
                 reload_handle: Some(handle),
                 reputation_persistence: self.inner.reputation_persistence.clone(),
+                reputation_engine: self.inner.reputation_engine.clone(),
+                ens_resolver: self.inner.ens_resolver.clone(),
                 lifecycle: Mutex::new(Lifecycle::Stopped),
             }),
         }
@@ -319,6 +350,103 @@ impl Server {
                 policy: Arc::clone(&self.inner.policy),
                 reload_handle: self.inner.reload_handle.as_ref().map(Arc::clone),
                 reputation_persistence: Some((engine, path)),
+                reputation_engine: self.inner.reputation_engine.clone(),
+                ens_resolver: self.inner.ens_resolver.clone(),
+                lifecycle: Mutex::new(Lifecycle::Stopped),
+            }),
+        }
+    }
+
+    /// Bind a [`ReputationEngine`] to this server's SDK trust-
+    /// boundary surface. The (future) `POST /v1/sdk/register`
+    /// handler reads through [`SdkState::engine`] (set by
+    /// [`Self::sdk_state`]) to call
+    /// [`ReputationEngine::mark_ens_named`] after a successful
+    /// SIWE+ENS gating check.
+    ///
+    /// # Coupling discipline
+    ///
+    /// Operators who set both [`Self::with_reputation_persistence`]
+    /// **and** this builder are responsible for passing the **same**
+    /// [`ReputationEngine`] instance to both. The cadence loop and
+    /// the SDK handler must share a single Arc graph so a
+    /// `mark_ens_named` write from the handler is observable by the
+    /// persist loop's snapshot. The Server's plumbing does NOT
+    /// enforce this in v0.1 — a future ergonomic improvement could
+    /// collapse the two builders into one, but that is out of scope
+    /// for this slice. The bin crate is the canonical site that
+    /// threads one engine clone through both call sites.
+    ///
+    /// # Hoare invariant
+    ///
+    /// Must be called before [`Self::start`] for the same reason
+    /// [`Self::with_reload_handle`] documents: the builder consumes
+    /// `self` and returns a new internal `Arc<ServerInner>` whose
+    /// lifecycle is fresh [`LifecyclePhase::Stopped`]. Calling
+    /// this after `start()` is operator misuse — the prior
+    /// `RuntimeState` is orphaned on the old `Arc<ServerInner>`
+    /// while the new one starts a disconnected lifecycle.
+    ///
+    /// In debug builds a `debug_assert!` on `lifecycle.try_lock()`
+    /// surfaces the misuse.
+    #[must_use]
+    pub fn with_reputation_engine(self, engine: ReputationEngine) -> Self {
+        debug_assert!(
+            self.inner
+                .lifecycle
+                .try_lock()
+                .is_ok_and(|guard| matches!(*guard, Lifecycle::Stopped)),
+            "Server::with_reputation_engine must be called before start(); \
+             try_lock failed (contention) or lifecycle is not Stopped",
+        );
+        Self {
+            inner: Arc::new(ServerInner {
+                leases: self.inner.leases.clone(),
+                policy: Arc::clone(&self.inner.policy),
+                reload_handle: self.inner.reload_handle.as_ref().map(Arc::clone),
+                reputation_persistence: self.inner.reputation_persistence.clone(),
+                reputation_engine: Some(engine),
+                ens_resolver: self.inner.ens_resolver.clone(),
+                lifecycle: Mutex::new(Lifecycle::Stopped),
+            }),
+        }
+    }
+
+    /// Bind a [`BoxedEnsResolver`] to this server's SDK trust-
+    /// boundary surface. The (future) `POST /v1/sdk/register`
+    /// handler reads through [`SdkState::ens_resolver`] (set by
+    /// [`Self::sdk_state`]) to drive the `address → ENS name`
+    /// lookup that gates the
+    /// [`ReputationEngine::mark_ens_named`] call.
+    ///
+    /// Optional in [`SdkState`]: deployments without an ENS
+    /// resolver configured (demo / development / no-RPC paths)
+    /// run with [`SdkState::ens_resolver`] left at `None`, and
+    /// the handler accepts the registration without performing
+    /// the ENS-bypass-marking step.
+    ///
+    /// # Hoare invariant
+    ///
+    /// Must be called before [`Self::start`]; same lifecycle
+    /// contract as [`Self::with_reload_handle`].
+    #[must_use]
+    pub fn with_ens_resolver(self, resolver: BoxedEnsResolver) -> Self {
+        debug_assert!(
+            self.inner
+                .lifecycle
+                .try_lock()
+                .is_ok_and(|guard| matches!(*guard, Lifecycle::Stopped)),
+            "Server::with_ens_resolver must be called before start(); \
+             try_lock failed (contention) or lifecycle is not Stopped",
+        );
+        Self {
+            inner: Arc::new(ServerInner {
+                leases: self.inner.leases.clone(),
+                policy: Arc::clone(&self.inner.policy),
+                reload_handle: self.inner.reload_handle.as_ref().map(Arc::clone),
+                reputation_persistence: self.inner.reputation_persistence.clone(),
+                reputation_engine: self.inner.reputation_engine.clone(),
+                ens_resolver: Some(resolver),
                 lifecycle: Mutex::new(Lifecycle::Stopped),
             }),
         }
@@ -344,6 +472,22 @@ impl Server {
         self.inner.reload_handle.as_ref().map(Arc::clone)
     }
 
+    /// Optional reputation-engine handle bound to the SDK trust-
+    /// boundary surface (cheap `Arc`-clone internally). `Some`
+    /// after [`Self::with_reputation_engine`]; `None` otherwise.
+    #[must_use]
+    pub fn reputation_engine(&self) -> Option<ReputationEngine> {
+        self.inner.reputation_engine.clone()
+    }
+
+    /// Optional ENS resolver bound to the SDK trust-boundary
+    /// surface (cheap `Arc`-clone internally). `Some` after
+    /// [`Self::with_ens_resolver`]; `None` otherwise.
+    #[must_use]
+    pub fn ens_resolver(&self) -> Option<BoxedEnsResolver> {
+        self.inner.ens_resolver.clone()
+    }
+
     /// Build the [`AdminState`] consumed by
     /// [`crate::api::build_admin_router`]. Canonical bridge between
     /// server orchestration and the admin axum router: the bin
@@ -356,6 +500,50 @@ impl Server {
             leases: self.leases(),
             policy: self.policy(),
             reload: self.reload_handle(),
+        }
+    }
+
+    /// Build the [`SdkState`] consumed by
+    /// [`crate::api::build_sdk_router`]. Canonical bridge between
+    /// server orchestration and the SDK axum router: the bin
+    /// crate constructs the `Server`, attaches the reputation
+    /// engine (via [`Self::with_reputation_engine`]) and the
+    /// optional ENS resolver (via [`Self::with_ens_resolver`]),
+    /// and then asks the server for an `SdkState` to hand to the
+    /// router builder.
+    ///
+    /// # Panics
+    ///
+    /// Panics with a clear message when [`Self::with_reputation_engine`]
+    /// has not been called: the (future) `POST /v1/sdk/register`
+    /// handler treats engine access as a required dependency and
+    /// the bin crate is the contract holder for wiring it. The
+    /// admin-router path tolerates a missing reload handle (it
+    /// surfaces 503 `FeatureUnavailable` at the handler layer);
+    /// the SDK-router path does not have a corresponding fallback
+    /// because every SDK handler needs the engine. Callers that
+    /// do not want this panic should not call `sdk_state` —
+    /// `Server::admin_router` and the lease-janitor lifecycle
+    /// remain reachable without it.
+    #[must_use]
+    #[expect(
+        clippy::expect_used,
+        reason = "the panic carries the required-precondition contract documented on \
+                  this method's `# Panics` section; callers that have not invoked \
+                  `with_reputation_engine` are operator-misuse and the eager panic \
+                  surfaces the misconfiguration at orchestrator-bridge time rather \
+                  than as a confusing handler-level NPE later"
+    )]
+    pub fn sdk_state(&self) -> SdkState {
+        let engine = self.inner.reputation_engine.clone().expect(
+            "Server::sdk_state requires Server::with_reputation_engine to be called first; \
+             the future SDK /v1/sdk/register handler treats engine access as a required dependency",
+        );
+        SdkState {
+            leases: self.leases(),
+            policy: self.policy(),
+            engine,
+            ens_resolver: self.ens_resolver(),
         }
     }
 
@@ -660,7 +848,7 @@ async fn janitor_loop(leases: LeaseRegistry, cancel: CancellationToken) {
 }
 
 #[cfg(test)]
-#[expect(clippy::unwrap_used, reason = "test-only setup")]
+#[expect(clippy::unwrap_used, clippy::expect_used, reason = "test-only setup")]
 mod tests {
     use std::time::Duration;
 
@@ -1026,5 +1214,101 @@ mod tests {
         );
         h1.register(rec).await.unwrap();
         assert_eq!(h2.lease_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn with_reputation_engine_lands_in_sdk_state() {
+        // Behavioral identity check: the engine the builder
+        // received and the engine surfaced via `sdk_state()` must
+        // be the same Arc graph. We mark via the builder-passed
+        // handle and read via the state-extracted handle; if the
+        // server made an internal copy somewhere along the way,
+        // the read would not see the mark.
+        let engine = ReputationEngine::new();
+        let server = Server::new().with_reputation_engine(engine.clone());
+        let state = server.sdk_state();
+
+        let id = crate::policy::IdentityKey([0xAB; 32]);
+        assert!(!engine.is_ens_named(id), "fresh engine: not marked");
+        engine.mark_ens_named(id);
+        assert!(
+            state.engine.is_ens_named(id),
+            "mark on builder-passed engine handle MUST be observable via \
+             SdkState::engine — the engine must traverse the builder + \
+             sdk_state path as a shared Arc graph",
+        );
+
+        // And: the accessor surfaces the same engine.
+        let accessor_engine = server
+            .reputation_engine()
+            .expect("with_reputation_engine wired the engine");
+        assert!(
+            accessor_engine.is_ens_named(id),
+            "Server::reputation_engine() accessor surfaces the same Arc graph",
+        );
+    }
+
+    /// Minimal stub [`portal_crypto::EnsResolver`] used to wrap a
+    /// [`BoxedEnsResolver`] for builder-plumbing tests. Always
+    /// errors / returns `Ok(None)` — handler-level behavioral
+    /// coverage lives in the future `/v1/sdk/register` commit.
+    struct ServerStubEnsResolver;
+
+    impl portal_crypto::EnsResolver for ServerStubEnsResolver {
+        #[expect(
+            clippy::manual_async_fn,
+            reason = "explicit impl Future + Send return is required to satisfy the trait's Send bound"
+        )]
+        fn resolve<'a>(
+            &'a self,
+            _name: &'a str,
+        ) -> impl core::future::Future<
+            Output = Result<portal_crypto::EthAddress, portal_crypto::EnsError>,
+        > + Send
+        + 'a {
+            async move {
+                Err(portal_crypto::EnsError::NameNotFound(
+                    "server-test-stub".to_owned(),
+                ))
+            }
+        }
+
+        #[expect(
+            clippy::manual_async_fn,
+            reason = "explicit impl Future + Send return is required to satisfy the trait's Send bound"
+        )]
+        fn resolve_reverse(
+            &self,
+            _addr: portal_crypto::EthAddress,
+        ) -> impl core::future::Future<Output = Result<Option<String>, portal_crypto::EnsError>>
+        + Send
+        + '_ {
+            async move { Ok(None) }
+        }
+    }
+
+    #[tokio::test]
+    async fn with_ens_resolver_lands_in_sdk_state_or_none_default() {
+        // Default path: no resolver wired in, sdk_state surfaces None.
+        let engine = ReputationEngine::new();
+        let server_default = Server::new().with_reputation_engine(engine.clone());
+        let state_default = server_default.sdk_state();
+        assert!(
+            state_default.ens_resolver.is_none(),
+            "default state: ens_resolver is None for demo / no-ENS deployments",
+        );
+        assert!(server_default.ens_resolver().is_none());
+
+        // Wired path: with_ens_resolver(some) surfaces Some via sdk_state.
+        let resolver = BoxedEnsResolver::new(ServerStubEnsResolver);
+        let server_wired = Server::new()
+            .with_reputation_engine(engine)
+            .with_ens_resolver(resolver);
+        let state_wired = server_wired.sdk_state();
+        assert!(
+            state_wired.ens_resolver.is_some(),
+            "with_ens_resolver(some) surfaces ens_resolver in SdkState",
+        );
+        assert!(server_wired.ens_resolver().is_some());
     }
 }

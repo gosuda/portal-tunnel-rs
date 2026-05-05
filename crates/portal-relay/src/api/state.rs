@@ -12,18 +12,58 @@
 
 use std::sync::Arc;
 
-use crate::policy::PolicyRuntime;
+use portal_crypto::BoxedEnsResolver;
+
+use crate::policy::{PolicyRuntime, ReputationEngine};
 use crate::reload::ReloadHandle;
 use crate::state::LeaseRegistry;
 
-/// State carried by the SDK trust-boundary router. SDK handlers see
-/// the lease registry (read + write) and the policy runtime (read).
+/// State carried by the SDK trust-boundary router.
+///
+/// SDK handlers see the lease registry (read + write), the policy
+/// runtime (read), the reputation engine (the future
+/// `/v1/sdk/register` handler calls [`ReputationEngine::mark_ens_named`]
+/// on it after a successful SIWE+ENS gating check), and an optional
+/// [`BoxedEnsResolver`] used to drive the `address → ENS name`
+/// lookup that backs the marking.
 #[derive(Clone)]
 pub struct SdkState {
     /// Lease registry (read + write).
     pub leases: LeaseRegistry,
     /// Policy runtime (read-only from the SDK surface).
     pub policy: Arc<PolicyRuntime>,
+    /// Reputation engine handle (cheap `Arc`-clone internally).
+    ///
+    /// The (future) `POST /v1/sdk/register` handler consumes this
+    /// field exclusively: after a successful SIWE signature check
+    /// and an `EnsResolver` round-trip that confirms the SIWE
+    /// address has a primary ENS name, the handler calls
+    /// [`ReputationEngine::mark_ens_named`] on this engine so the
+    /// reputation pipeline's [`ReputationEngine::decide`] step 4
+    /// bypass applies on subsequent traffic for that identity.
+    ///
+    /// MUST be the same `ReputationEngine` instance the
+    /// reputation-persist cadence loop (started by
+    /// [`crate::server::Server::with_reputation_persistence`])
+    /// flushes — the bin crate threads one engine clone through
+    /// both call sites. The Server's plumbing does NOT enforce
+    /// this in v0.1; it is the operator's contract.
+    pub engine: ReputationEngine,
+    /// Optional ENS resolver. `None` is the v0.1 default for demo
+    /// or no-ENS-configured deployments. The (future)
+    /// `POST /v1/sdk/register` handler consumes this field as
+    /// follows:
+    ///
+    /// - `Some`: after SIWE signature verification, the handler
+    ///   calls [`BoxedEnsResolver::resolve_reverse`] on the SIWE
+    ///   address; on `Ok(Some(name))` it forward-verifies via
+    ///   [`BoxedEnsResolver::resolve`] and, on round-trip match,
+    ///   marks the identity via [`ReputationEngine::mark_ens_named`].
+    /// - `None`: the registration is still accepted (SIWE alone is
+    ///   sufficient), but the ENS-bypass-marking step is skipped —
+    ///   the identity is not added to the engine's ENS-named cache,
+    ///   so [`ReputationEngine::decide`] step 4 does not apply.
+    pub ens_resolver: Option<BoxedEnsResolver>,
 }
 
 /// State carried by the admin trust-boundary router.
@@ -72,8 +112,45 @@ pub struct DiscoveryState {
 }
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "test-only setup")]
 mod tests {
+    use core::future::Future;
+
+    use portal_crypto::{EnsError, EnsResolver, EthAddress};
+
     use super::*;
+    use crate::policy::IdentityKey;
+
+    /// Minimal in-test [`EnsResolver`] used to wrap a
+    /// [`BoxedEnsResolver`] for `SdkState` plumbing tests. Always
+    /// returns `NameNotFound` / `Ok(None)` — handler-level
+    /// behavioral coverage lives in the future `/v1/sdk/register`
+    /// commit.
+    struct StubEnsResolver;
+
+    impl EnsResolver for StubEnsResolver {
+        #[expect(
+            clippy::manual_async_fn,
+            reason = "explicit impl Future + Send return is required to satisfy the trait's Send bound"
+        )]
+        fn resolve<'a>(
+            &'a self,
+            _name: &'a str,
+        ) -> impl Future<Output = Result<EthAddress, EnsError>> + Send + 'a {
+            async move { Err(EnsError::NameNotFound("stub".to_owned())) }
+        }
+
+        #[expect(
+            clippy::manual_async_fn,
+            reason = "explicit impl Future + Send return is required to satisfy the trait's Send bound"
+        )]
+        fn resolve_reverse(
+            &self,
+            _addr: EthAddress,
+        ) -> impl Future<Output = Result<Option<String>, EnsError>> + Send + '_ {
+            async move { Ok(None) }
+        }
+    }
 
     #[test]
     fn states_are_cheaply_cloneable() {
@@ -85,6 +162,8 @@ mod tests {
         let _sdk = SdkState {
             leases: leases.clone(),
             policy: Arc::clone(&policy),
+            engine: ReputationEngine::new(),
+            ens_resolver: None,
         };
         let _admin = AdminState {
             leases: leases.clone(),
@@ -92,5 +171,63 @@ mod tests {
             reload: None,
         };
         let _disc = DiscoveryState { leases };
+    }
+
+    #[tokio::test]
+    async fn sdk_state_carries_engine_and_resolver() {
+        // Type-level: SdkState is Send + Sync. If any field type ever
+        // regresses to a non-Send shape this assertion stops compiling.
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<SdkState>();
+
+        // Construct an `SdkState` carrying the new fields and verify
+        // (a) Clone is cheap (every field is Arc-shaped or `Option`
+        // around an Arc-shaped value), (b) the engine reference
+        // round-trips: marking via the original handle is observable
+        // via the state-carried clone, proving the Arc share-graph
+        // is intact rather than a sneaky deep clone, and (c) the
+        // boxed ENS resolver is actually invokable through the
+        // state-carried clone (not just held as a phantom shape).
+        let leases = LeaseRegistry::new();
+        let policy = Arc::new(PolicyRuntime::new());
+        let engine = ReputationEngine::new();
+        let resolver = BoxedEnsResolver::new(StubEnsResolver);
+        let state = SdkState {
+            leases,
+            policy,
+            engine: engine.clone(),
+            ens_resolver: Some(resolver),
+        };
+        let cloned = state.clone();
+
+        let id = IdentityKey([0x42; 32]);
+        assert!(!engine.is_ens_named(id), "fresh engine: not marked");
+        cloned.engine.mark_ens_named(id);
+        assert!(
+            engine.is_ens_named(id),
+            "mark on state-carried engine clone is visible through the source engine \
+             — the engine reference is truly shared, not duplicated",
+        );
+        assert!(
+            state.ens_resolver.is_some(),
+            "ens_resolver carried through Some-construction",
+        );
+        assert!(cloned.ens_resolver.is_some(), "ens_resolver survives Clone");
+
+        // Round-trip the resolver through the state-carried handle to
+        // verify the boxed resolver remains usable end-to-end. Stub
+        // returns `Ok(None)` for any reverse lookup; a regression that
+        // breaks the dyn-dispatch routing through `SdkState` would
+        // show up here as a panic or compile error.
+        let reverse = cloned
+            .ens_resolver
+            .as_ref()
+            .unwrap()
+            .resolve_reverse(EthAddress::new([0u8; 20]))
+            .await;
+        assert!(
+            matches!(reverse, Ok(None)),
+            "stub resolver routed through SdkState: expected Ok(None), got {reverse:?}",
+        );
     }
 }
