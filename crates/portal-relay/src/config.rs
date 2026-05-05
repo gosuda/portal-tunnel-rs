@@ -277,6 +277,11 @@ impl RelayConfigBundle {
     /// Field names are figment-conventional: env-var key (uppercase)
     /// strips the prefix and lowercases.
     ///
+    /// `env_prefix` is matched literally — figment's `Env::prefixed`
+    /// performs no implicit append. Operators should typically include
+    /// the trailing underscore (e.g. `"PORTAL_"`, not `"PORTAL"`); a
+    /// missing underscore makes `PORTALX_FOO` collide with the prefix.
+    ///
     /// The runtime side still respects [`RuntimeConfig`]'s
     /// `deny_unknown_fields` policy: an env var that does not match a
     /// `RuntimeConfig` field surfaces as
@@ -345,6 +350,13 @@ impl RelayConfigBundle {
 /// [`RelayConfigBundle::from_files_with_env`]: both load the bootstrap
 /// half identically (no env override on trust-boundary key paths),
 /// only the runtime half differs across the two entry points.
+///
+/// Free-standing rather than an inherent fn on [`RelayConfigBundle`]
+/// because it operates only on `server_path` and produces a
+/// [`RelayServerConfig`] — there is no `&self` to bind, and putting
+/// it inside the `impl RelayConfigBundle` block as an associated fn
+/// would obscure that it constructs a *component* of the bundle
+/// rather than a complete bundle.
 async fn load_server_config(server_path: &Path) -> Result<RelayServerConfig, ConfigLoadError> {
     let server_bytes =
         tokio::fs::read(server_path)
