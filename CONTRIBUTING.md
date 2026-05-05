@@ -7,7 +7,7 @@ non-negotiables; the why-we-chose-X rationale lives in `docs/adr/`.
 
 | Tool | Version | Install |
 |---|---|---|
-| Rust | `1.91` (workspace MSRV) | `rust-toolchain.toml` auto-installs via rustup |
+| Rust | `1.95` (workspace MSRV) | `rust-toolchain.toml` auto-installs via rustup |
 | `prek` | latest | `cargo install prek` (Rust-native) or `pip install prek` (the pip distribution ships the prebuilt Rust binary; no Python runtime needed at hook invocation) |
 | `taplo-cli` | latest | `cargo install taplo-cli --locked` |
 | `cargo-deny` | latest | `cargo install cargo-deny --locked` |
