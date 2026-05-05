@@ -72,19 +72,23 @@ U8.10 names the matrix shape:
 Per Phase 6b/B (ADR-0014 + ADR-0015), the WG userspace fork choice
 informs whether the matrix carries per-cell `--features` flags:
 
-- If Phase 6b/B U6 lands `defguard_boringtun` symmetrically across all
-  five cells → the matrix is symmetric (no per-cell `--features`).
-- If Phase 6b/B U6 surfaces a per-OS fork variance (e.g., NepTUN on
-  Linux only after license review, defguard_boringtun on macOS,
-  wiresock-derived on Windows) → the matrix carries per-cell
-  `--features` flags.
+- Symmetric `defguard_boringtun` across all five cells → no per-cell
+  `--features`.
+- Per-OS fork variance (e.g., NepTUN on Linux only after license
+  review, defguard_boringtun on macOS, wiresock-derived on Windows)
+  → per-cell `--features` flags.
 
-The current state (commit `f91b323`, Phase 6b/B U6 first half) ships
-the `WgDevice` adapter via `defguard_boringtun = 0.6.5` and is
-**symmetric** under the assumption that the same fork compiles on all
-five targets. The 2026-08-04 fork-pick cliff (per ADR-0015) is when
-this assumption locks; until then, `release.yml` is held back so the
-matrix shape settles cleanly with U7.
+The current state (commit `f91b323` — single-commit land of plan
+unit U6 per its own commit subject `feat(portal-relay): U6
+overlay::wg_device sealed trait + DefguardAdapter`) ships the
+`WgDevice` adapter via `defguard_boringtun = 0.6.5` and is
+**symmetric** under the assumption that the same fork compiles on
+all five targets. ADR-0015 keeps the fork choice revisable until the
+2026-08-04 fork-pick cliff; once that cliff passes the choice locks.
+`release.yml` is held back regardless until U7 (smoltcp + Overlay
+orchestrator, Phase 6b/B Batch 3, pending) lands, so the matrix
+shape settles cleanly with the real consumer of the WG device —
+see U7 status at the top of this section.
 
 ## Artifact surface (per release tag)
 
