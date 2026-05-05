@@ -82,7 +82,7 @@
 use std::collections::HashMap as StdHashMap;
 use std::net::IpAddr;
 use std::num::NonZeroU32;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -90,6 +90,7 @@ use compact_str::CompactString;
 use governor::{Quota, RateLimiter, clock::DefaultClock, state::keyed::DefaultKeyedStateStore};
 use jiff::{Timestamp, Unit};
 use papaya::HashMap as PapayaMap;
+use tokio_util::sync::CancellationToken;
 
 pub use crate::state::lease_registry::IdentityKey;
 
@@ -183,6 +184,23 @@ pub const REPUTATION_HONEYPOT_HIT_WEIGHT: f64 = 25.0;
 /// internal blocked-request callsite. Per-kind tuning is an
 /// ADR-0007 decision.
 pub const REPUTATION_BLOCKED_REQUEST_WEIGHT: f64 = 1.0;
+
+/// Default cadence between [`reputation_persist_loop`] ticks.
+///
+/// Phase 5 plan U12 §Approach calls for the reputation-engine
+/// snapshot to be flushed via [`ReputationEngine::persist_to_path`]
+/// on a 60-second cadence so a relay restart loses at most one
+/// minute of accumulated score. The value is exposed as a `pub
+/// const` so a future operator-tuning surface (admin API or
+/// `runtime.json` field) can override it without touching the
+/// loop body.
+#[expect(
+    clippy::duration_suboptimal_units,
+    reason = "Phase 5 plan U12 pins the literal `Duration::from_secs(60)` shape; \
+              keeping the seconds constructor matches the rest of the relay's \
+              cadence consts (e.g. `JANITOR_INTERVAL = Duration::from_secs(5)`)"
+)]
+pub const REPUTATION_PERSIST_INTERVAL: Duration = Duration::from_secs(60);
 
 // ---------------------------------------------------------------------------
 // LeaseId — third leg of the keyed-limiter triple
@@ -1154,6 +1172,77 @@ impl ReputationEngine {
     }
 }
 
+/// Drive [`ReputationEngine::persist_to_path`] on a fixed cadence
+/// until `cancel` fires.
+///
+/// Phase 5 plan U12 §Approach: "load score, decay + add weight,
+/// persist via U5 atomic-write helper on a 60s cadence." This is
+/// the cadence half — the load/decay/add halves live on the
+/// engine itself. The default cadence is
+/// [`REPUTATION_PERSIST_INTERVAL`]; tests pass a shorter value so
+/// they complete in well under a second.
+///
+/// ## Cadence semantics
+///
+/// Uses [`tokio::time::interval`] with
+/// [`tokio::time::MissedTickBehavior::Skip`] so a paused or
+/// scheduling-starved process does not burst-fire a backlog of
+/// writes when it resumes. The loop body is wrapped in a
+/// `tokio::select!` that races the cancellation token against the
+/// next tick: when cancellation fires, the loop exits at the
+/// `select` arm boundary without a final partial write.
+///
+/// ## Error handling
+///
+/// A failed persist (transient I/O, JSON serialize failure, parent
+/// directory unwritable, …) is logged via `tracing::error!` and
+/// the loop continues. The cadence task is best-effort durability;
+/// it deliberately does not propagate errors back to the server
+/// orchestrator because a transient FS hiccup must not kill the
+/// reputation snapshot loop for the lifetime of the relay.
+///
+/// ## Cancellation safety
+///
+/// The first tick is consumed synchronously (per
+/// [`tokio::time::interval`]'s default behaviour) so the spawning
+/// task does not write immediately on spawn. From then on the
+/// task races `cancel.cancelled()` against `ticker.tick()` in a
+/// biased `select!` so cancellation always wins ties — dropping
+/// the task or cancelling the token interrupts the wait, never an
+/// in-flight write.
+pub async fn reputation_persist_loop(
+    engine: ReputationEngine,
+    path: PathBuf,
+    interval: Duration,
+    cancel: CancellationToken,
+) {
+    let mut ticker = tokio::time::interval(interval);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // Skip the immediate first tick so spawning the task doesn't
+    // synchronously fire a persist before any signal has been
+    // recorded. Mirrors the [`crate::server::janitor_loop`] discipline.
+    let _ = ticker.tick().await;
+    loop {
+        tokio::select! {
+            biased;
+            () = cancel.cancelled() => {
+                tracing::debug!("reputation persist loop cancelled");
+                break;
+            }
+            _ = ticker.tick() => {
+                if let Err(err) = engine.persist_to_path(&path).await {
+                    tracing::error!(
+                        error = %err,
+                        path = %path.display(),
+                        "reputation snapshot persist failed; \
+                         continuing cadence loop",
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// Persisted-on-disk row for the reputation snapshot.
 ///
 /// Used by [`ReputationEngine::persist_to_path`] +
@@ -1771,6 +1860,100 @@ mod tests {
              after a burst — Sybil bypass is only for the reputation \
              block branch (step 4), not the rate limiter (step 2)",
         );
+    }
+
+    /// `reputation_persist_loop` flushes the engine's score
+    /// snapshot to disk on the configured cadence and exits
+    /// cleanly on cancellation.
+    ///
+    /// Test shape (Phase 5 plan U12 §Approach acceptance criterion 4):
+    ///
+    /// 1. Spawn the loop with a SHORT 100ms interval so the test
+    ///    completes well under the 2s budget.
+    /// 2. Record a signal on the engine.
+    /// 3. Wait long enough for one tick to elapse.
+    /// 4. Assert `reputation.json` exists on disk and the row we
+    ///    persisted round-trips through
+    ///    [`ReputationEngine::restore_from_path`] to a fresh
+    ///    engine.
+    /// 5. Cancel the loop's token and `await` its `JoinHandle`,
+    ///    confirming the task exits cleanly (no panic, no abort,
+    ///    no orphan).
+    #[tokio::test]
+    async fn reputation_persist_loop_flushes_on_cadence_and_exits_on_cancel() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("reputation.json");
+
+        let engine = ReputationEngine::new();
+        let id = IdentityKey([0xc3u8; 32]);
+        engine.record_signal(id, SignalKind::RateLimited, 4.5);
+
+        let cancel = CancellationToken::new();
+        let loop_engine = engine.clone();
+        let loop_path = path.clone();
+        let loop_cancel = cancel.clone();
+        // R9: structured spawn — we hold the JoinHandle below,
+        // cancel the token, and `.await` the handle before the
+        // test returns. Test code is allow-listed for the lint by
+        // the workspace clippy.toml escape clause.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "test code per R9: stored JoinHandle + CancellationToken \
+                      awaited at the end of the test"
+        )]
+        let handle = tokio::spawn(async move {
+            reputation_persist_loop(
+                loop_engine,
+                loop_path,
+                Duration::from_millis(100),
+                loop_cancel,
+            )
+            .await;
+        });
+
+        // Wait for at least one tick to fire. We poll the file's
+        // existence rather than `sleep` for a fixed budget so a
+        // slow scheduler does not flake the test, while a fast
+        // scheduler still completes quickly.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            if tokio::fs::metadata(&path).await.is_ok() {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "reputation.json was not written within 2s — \
+                 cadence loop is not flushing on the configured interval",
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        // The on-disk row must round-trip back to the score we
+        // recorded (+/- a tiny decay over the few-ms tick window).
+        let reader = ReputationEngine::new();
+        reader.restore_from_path(&path).await.unwrap();
+        let restored = reader.snapshot();
+        assert_eq!(restored.len(), 1, "expected exactly one persisted row");
+        let restored_score = restored.get(&id).unwrap().value;
+        assert!(
+            (restored_score - 4.5).abs() < 1e-3,
+            "round-tripped score {restored_score} should be ~4.5 \
+             (tiny decay over the sub-second tick window is acceptable)",
+        );
+
+        // Cancel and confirm clean exit. A task that has not
+        // exited within 1s of cancellation is considered stuck.
+        cancel.cancel();
+        let join_result = tokio::time::timeout(Duration::from_secs(1), handle).await;
+        match join_result {
+            Ok(Ok(())) => {}
+            Ok(Err(join_err)) => {
+                panic!("reputation_persist_loop panicked / was aborted: {join_err}")
+            }
+            Err(elapsed) => {
+                panic!("reputation_persist_loop did not exit within 1s of cancellation: {elapsed}")
+            }
+        }
     }
 
     /// `persist_to_path` then `restore_from_path` round-trips the

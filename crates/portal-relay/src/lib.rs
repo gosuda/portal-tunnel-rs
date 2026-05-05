@@ -29,8 +29,14 @@
 //!   `reputation.json` persistence helpers (`persist_to_path` /
 //!   `restore_from_path`) over a
 //!   [`policy::reputation::ReputationSnapshotEntry`] DTO list also
-//!   landed; only the 60s-cadence task that drives them remains B8
-//!   territory. Engine-side hot-swap also landed via
+//!   landed; the 60s-cadence task that drives them — exposed as
+//!   the free [`policy::reputation_persist_loop`] alongside the
+//!   tunable [`policy::REPUTATION_PERSIST_INTERVAL`] — also
+//!   landed and is wired into [`server::Server::start`] when the
+//!   operator opts in via [`server::Server::with_reputation_persistence`].
+//!   The listener-pipeline honeypot call site that drives
+//!   [`policy::reputation::ReputationEngine::record_honeypot_if_match`]
+//!   remains pending. Engine-side hot-swap also landed via
 //!   [`policy::reputation::ReputationEngine::swap_config`] (atomic
 //!   `(config, limiter)` pair behind [`arc_swap::ArcSwap`]); the
 //!   SIGHUP / admin-api reload run-loop **trigger** that calls

@@ -30,8 +30,8 @@ pub use proxy_trust::ProxyTrust;
 pub use reputation::{
     BlockReason, IdentityKey, LeaseId, REPUTATION_BACKPRESSURE_THRESHOLD,
     REPUTATION_BACKPRESSURE_YIELD, REPUTATION_BLOCK_THRESHOLD, REPUTATION_DECAY_CONSTANT,
-    REPUTATION_DECAY_HALF_LIFE_SECS, REPUTATION_QUOTA_BURST, REPUTATION_QUOTA_SUSTAINED,
-    ReputationConfig, ReputationDecision, ReputationEngine, ReputationScore, SignalKind,
-    apply_decay, default_governor_quota,
+    REPUTATION_DECAY_HALF_LIFE_SECS, REPUTATION_PERSIST_INTERVAL, REPUTATION_QUOTA_BURST,
+    REPUTATION_QUOTA_SUSTAINED, ReputationConfig, ReputationDecision, ReputationEngine,
+    ReputationScore, SignalKind, apply_decay, default_governor_quota, reputation_persist_loop,
 };
 pub use runtime::PolicyRuntime;

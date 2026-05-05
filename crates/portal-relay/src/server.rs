@@ -64,6 +64,7 @@
 //! because `Notify::notified()` requires the future to be polled
 //! BEFORE the notify call to capture a permit.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -74,7 +75,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::api::AdminState;
 use crate::error::RelayResult;
-use crate::policy::PolicyRuntime;
+use crate::policy::{PolicyRuntime, REPUTATION_PERSIST_INTERVAL, ReputationEngine};
 use crate::reload::ReloadHandle;
 use crate::state::LeaseRegistry;
 
@@ -110,6 +111,19 @@ struct ServerInner {
     /// state with the orphaned [`RuntimeState`] on the old
     /// `Arc<ServerInner>`.
     reload_handle: Option<Arc<ReloadHandle>>,
+    /// Optional reputation-persistence pair. `Some` after
+    /// [`Server::with_reputation_persistence`]; `None` for
+    /// servers without an engine wired in (e.g. the bare
+    /// [`Server::new`] used by lifecycle tests). When `Some`,
+    /// [`Server::start`] spawns a [`crate::policy::reputation_persist_loop`]
+    /// task into the `JoinSet` that flushes the engine's score
+    /// snapshot to `path` every [`REPUTATION_PERSIST_INTERVAL`]
+    /// until shutdown cancels the token.
+    ///
+    /// The pair is held flat (engine + `PathBuf`) rather than
+    /// boxed into a sub-struct because both fields are cheap-clone
+    /// and there is exactly one consumer (`start`) that reads them.
+    reputation_persistence: Option<(ReputationEngine, PathBuf)>,
     /// Lifecycle guard. The mutex is held for short critical
     /// sections only — never across `JoinSet::join_next` awaits
     /// or other long-lived operations.
@@ -217,6 +231,7 @@ impl Server {
                 leases,
                 policy: Arc::new(policy),
                 reload_handle: None,
+                reputation_persistence: None,
                 lifecycle: Mutex::new(Lifecycle::Stopped),
             }),
         }
@@ -259,6 +274,51 @@ impl Server {
                 leases: self.inner.leases.clone(),
                 policy: Arc::clone(&self.inner.policy),
                 reload_handle: Some(handle),
+                reputation_persistence: self.inner.reputation_persistence.clone(),
+                lifecycle: Mutex::new(Lifecycle::Stopped),
+            }),
+        }
+    }
+
+    /// Bind a [`ReputationEngine`] together with the on-disk path
+    /// at which the engine's score snapshot should be persisted on
+    /// the [`REPUTATION_PERSIST_INTERVAL`] cadence.
+    ///
+    /// Calling this builder enables the reputation-persist task —
+    /// a [`crate::policy::reputation_persist_loop`] driver — to be
+    /// spawned alongside the lease janitor when [`Self::start`] is
+    /// invoked. Without this builder, [`Self::start`] spawns only
+    /// the janitor and the reputation engine (if any) is not
+    /// flushed by the orchestrator.
+    ///
+    /// # Hoare invariant
+    ///
+    /// Must be called before [`Self::start`] for the same reason
+    /// [`Self::with_reload_handle`] documents: the builder consumes
+    /// `self` and returns a new internal `Arc<ServerInner>` whose
+    /// lifecycle is fresh [`LifecyclePhase::Stopped`]. Calling
+    /// this after `start()` is operator misuse — the prior
+    /// `RuntimeState` is orphaned on the old `Arc<ServerInner>`
+    /// while the new one starts a disconnected lifecycle.
+    ///
+    /// In debug builds a `debug_assert!` on `lifecycle.try_lock()`
+    /// surfaces the misuse.
+    #[must_use]
+    pub fn with_reputation_persistence(self, engine: ReputationEngine, path: PathBuf) -> Self {
+        debug_assert!(
+            self.inner
+                .lifecycle
+                .try_lock()
+                .is_ok_and(|guard| matches!(*guard, Lifecycle::Stopped)),
+            "Server::with_reputation_persistence must be called before start(); \
+             try_lock failed (contention) or lifecycle is not Stopped",
+        );
+        Self {
+            inner: Arc::new(ServerInner {
+                leases: self.inner.leases.clone(),
+                policy: Arc::clone(&self.inner.policy),
+                reload_handle: self.inner.reload_handle.as_ref().map(Arc::clone),
+                reputation_persistence: Some((engine, path)),
                 lifecycle: Mutex::new(Lifecycle::Stopped),
             }),
         }
@@ -384,6 +444,26 @@ impl Server {
         tasks.spawn(async move {
             janitor_loop(leases, janitor_cancel).await;
         });
+
+        // R10 reputation-persist cadence task. Only spawned when
+        // the operator opted in via
+        // [`Self::with_reputation_persistence`]; the bare
+        // [`Self::new`] / [`Self::with_components`] paths leave
+        // this `None` and `start` is a janitor-only spawn.
+        if let Some((engine, path)) = &self.inner.reputation_persistence {
+            let engine = engine.clone();
+            let path = path.clone();
+            let persist_cancel = cancel.clone();
+            tasks.spawn(async move {
+                crate::policy::reputation_persist_loop(
+                    engine,
+                    path,
+                    REPUTATION_PERSIST_INTERVAL,
+                    persist_cancel,
+                )
+                .await;
+            });
+        }
 
         *guard = Lifecycle::Running(RuntimeState { cancel, tasks });
         drop(guard);
