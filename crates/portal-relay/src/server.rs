@@ -152,22 +152,91 @@ struct ServerInner {
     /// for demo / no-ENS-configured deployments. Surfaced into
     /// [`SdkState::ens_resolver`] verbatim.
     ens_resolver: Option<BoxedEnsResolver>,
-    /// Optional lease-token signing-key handle. `Some` after
-    /// [`Server::with_relay_protocol_key`]; `None` until the
-    /// builder is invoked. Surfaced through
-    /// [`SdkState::lease_token_signing_key`] when
-    /// [`Server::sdk_state`] is called.
-    relay_protocol_key: Option<Arc<SecretBox<RelayEd25519Key>>>,
-    /// Optional lease-token verifier handle. `Some` after
-    /// [`Server::with_relay_protocol_key`] (derived from the same
-    /// key in one shot to satisfy the
+    /// Optional lease-token signing-key + verifier pair. `Some`
+    /// after [`Server::with_relay_protocol_key`] (which derives
+    /// the verifier from the same key in one shot to satisfy the
     /// [`SdkState`] verifier/signer pairing invariant); `None`
-    /// otherwise. Surfaced through [`SdkState::lease_token_verifier`].
-    relay_protocol_verifier: Option<Arc<Ed25519Verifier>>,
+    /// until the builder is invoked. The pair is held flat (one
+    /// `Option` over both halves) so the type system encodes the
+    /// "either both Some, or both None" invariant — eliminating
+    /// the structurally-unreachable orphan-`None` panic that a
+    /// two-field shape (one `Option` per half) would force every
+    /// `sdk_state` reader to defend against. Surfaced into
+    /// [`SdkState::lease_token_signing_key`] /
+    /// [`SdkState::lease_token_verifier`] when
+    /// [`Server::sdk_state`] is called.
+    relay_protocol: Option<RelayProtocolPair>,
     /// Lifecycle guard. The mutex is held for short critical
     /// sections only — never across `JoinSet::join_next` awaits
     /// or other long-lived operations.
     lifecycle: Mutex<Lifecycle>,
+}
+
+/// Paired lease-token signing key + derived verifier, held together
+/// inside [`ServerInner::relay_protocol`] as a single `Option`.
+///
+/// The pairing is set in one shot by
+/// [`Server::with_relay_protocol_key`]: the verifier is derived from
+/// the same key (via [`portal_crypto::verifying_key`]) and the two
+/// handles are then bundled here. Holding them as one struct rather
+/// than two parallel `Option`s on `ServerInner` removes a
+/// structurally-unreachable orphan-`None` arm from
+/// [`Server::sdk_state`] — a regression there would mean either both
+/// halves are `Some` or both are `None`, never a torn state.
+struct RelayProtocolPair {
+    /// Shared lease-token signing key. `Arc<SecretBox<…>>` because
+    /// [`portal_crypto::Ed25519Signer`] borrows from the underlying
+    /// key (lifetime `'k`) and therefore cannot itself be
+    /// `Arc`-wrapped; handlers reach for a fresh signer at call time.
+    key: Arc<SecretBox<RelayEd25519Key>>,
+    /// Shared lease-token verifier, derived from `key` at builder
+    /// time so handlers don't redo the scalar multiplication on
+    /// every verify call.
+    verifier: Arc<Ed25519Verifier>,
+}
+
+impl RelayProtocolPair {
+    /// Cheap-`Arc` clone of both halves of the pair. Used by
+    /// [`ServerInner::clone_for_rebuild`] so each builder doesn't
+    /// have to spell out the per-field `Arc::clone` ceremony.
+    fn arc_clone(&self) -> Self {
+        Self {
+            key: Arc::clone(&self.key),
+            verifier: Arc::clone(&self.verifier),
+        }
+    }
+}
+
+impl ServerInner {
+    /// Clone every field except `lifecycle`, which is reset to a
+    /// fresh `Mutex<Lifecycle::Stopped>`.
+    ///
+    /// The Server's builders consume `self` and return a new
+    /// `Arc<ServerInner>`; allocating a fresh `Lifecycle::Stopped`
+    /// guarantees post-`start()` misuse cannot accidentally share
+    /// lifecycle state with the orphaned [`RuntimeState`] on the old
+    /// `Arc<ServerInner>`. Every other field is either a cheap-`Arc`
+    /// clone or a value clone of an `Arc`-shaped option.
+    ///
+    /// Builders use this with struct-update syntax —
+    /// `..self.inner.clone_for_rebuild()` — to override only the
+    /// field they change, so adding a tenth field requires touching
+    /// only this helper rather than every builder body.
+    fn clone_for_rebuild(&self) -> Self {
+        Self {
+            leases: self.leases.clone(),
+            policy: Arc::clone(&self.policy),
+            reload_handle: self.reload_handle.as_ref().map(Arc::clone),
+            reputation_persistence: self.reputation_persistence.clone(),
+            reputation_engine: self.reputation_engine.clone(),
+            ens_resolver: self.ens_resolver.clone(),
+            relay_protocol: self
+                .relay_protocol
+                .as_ref()
+                .map(RelayProtocolPair::arc_clone),
+            lifecycle: Mutex::new(Lifecycle::Stopped),
+        }
+    }
 }
 
 /// Coarse-grained lifecycle phase reported by [`ServerStatus::phase`].
@@ -274,8 +343,7 @@ impl Server {
                 reputation_persistence: None,
                 reputation_engine: None,
                 ens_resolver: None,
-                relay_protocol_key: None,
-                relay_protocol_verifier: None,
+                relay_protocol: None,
                 lifecycle: Mutex::new(Lifecycle::Stopped),
             }),
         }
@@ -313,21 +381,15 @@ impl Server {
             "Server::with_reload_handle must be called before start(); \
              try_lock failed (contention) or lifecycle is not Stopped",
         );
+        // Per `ServerInner::clone_for_rebuild`'s contract: every
+        // unset field carries forward verbatim, only `reload_handle`
+        // is overridden, and `lifecycle` is reset to a fresh
+        // `Stopped` so misuse-after-start cannot share state with
+        // the orphaned `Arc<ServerInner>`.
         Self {
             inner: Arc::new(ServerInner {
-                leases: self.inner.leases.clone(),
-                policy: Arc::clone(&self.inner.policy),
                 reload_handle: Some(handle),
-                reputation_persistence: self.inner.reputation_persistence.clone(),
-                reputation_engine: self.inner.reputation_engine.clone(),
-                ens_resolver: self.inner.ens_resolver.clone(),
-                relay_protocol_key: self.inner.relay_protocol_key.as_ref().map(Arc::clone),
-                relay_protocol_verifier: self
-                    .inner
-                    .relay_protocol_verifier
-                    .as_ref()
-                    .map(Arc::clone),
-                lifecycle: Mutex::new(Lifecycle::Stopped),
+                ..self.inner.clone_for_rebuild()
             }),
         }
     }
@@ -367,19 +429,8 @@ impl Server {
         );
         Self {
             inner: Arc::new(ServerInner {
-                leases: self.inner.leases.clone(),
-                policy: Arc::clone(&self.inner.policy),
-                reload_handle: self.inner.reload_handle.as_ref().map(Arc::clone),
                 reputation_persistence: Some((engine, path)),
-                reputation_engine: self.inner.reputation_engine.clone(),
-                ens_resolver: self.inner.ens_resolver.clone(),
-                relay_protocol_key: self.inner.relay_protocol_key.as_ref().map(Arc::clone),
-                relay_protocol_verifier: self
-                    .inner
-                    .relay_protocol_verifier
-                    .as_ref()
-                    .map(Arc::clone),
-                lifecycle: Mutex::new(Lifecycle::Stopped),
+                ..self.inner.clone_for_rebuild()
             }),
         }
     }
@@ -428,19 +479,8 @@ impl Server {
         );
         Self {
             inner: Arc::new(ServerInner {
-                leases: self.inner.leases.clone(),
-                policy: Arc::clone(&self.inner.policy),
-                reload_handle: self.inner.reload_handle.as_ref().map(Arc::clone),
-                reputation_persistence: self.inner.reputation_persistence.clone(),
                 reputation_engine: Some(engine),
-                ens_resolver: self.inner.ens_resolver.clone(),
-                relay_protocol_key: self.inner.relay_protocol_key.as_ref().map(Arc::clone),
-                relay_protocol_verifier: self
-                    .inner
-                    .relay_protocol_verifier
-                    .as_ref()
-                    .map(Arc::clone),
-                lifecycle: Mutex::new(Lifecycle::Stopped),
+                ..self.inner.clone_for_rebuild()
             }),
         }
     }
@@ -474,19 +514,8 @@ impl Server {
         );
         Self {
             inner: Arc::new(ServerInner {
-                leases: self.inner.leases.clone(),
-                policy: Arc::clone(&self.inner.policy),
-                reload_handle: self.inner.reload_handle.as_ref().map(Arc::clone),
-                reputation_persistence: self.inner.reputation_persistence.clone(),
-                reputation_engine: self.inner.reputation_engine.clone(),
                 ens_resolver: Some(resolver),
-                relay_protocol_key: self.inner.relay_protocol_key.as_ref().map(Arc::clone),
-                relay_protocol_verifier: self
-                    .inner
-                    .relay_protocol_verifier
-                    .as_ref()
-                    .map(Arc::clone),
-                lifecycle: Mutex::new(Lifecycle::Stopped),
+                ..self.inner.clone_for_rebuild()
             }),
         }
     }
@@ -536,19 +565,12 @@ impl Server {
             "Server::with_relay_protocol_key must be called before start(); \
              try_lock failed (contention) or lifecycle is not Stopped",
         );
-        let key_arc = Arc::new(key);
-        let verifier = Arc::new(Ed25519Verifier::new(portal_crypto::verifying_key(&key_arc)));
+        let key = Arc::new(key);
+        let verifier = Arc::new(Ed25519Verifier::new(portal_crypto::verifying_key(&key)));
         Self {
             inner: Arc::new(ServerInner {
-                leases: self.inner.leases.clone(),
-                policy: Arc::clone(&self.inner.policy),
-                reload_handle: self.inner.reload_handle.as_ref().map(Arc::clone),
-                reputation_persistence: self.inner.reputation_persistence.clone(),
-                reputation_engine: self.inner.reputation_engine.clone(),
-                ens_resolver: self.inner.ens_resolver.clone(),
-                relay_protocol_key: Some(key_arc),
-                relay_protocol_verifier: Some(verifier),
-                lifecycle: Mutex::new(Lifecycle::Stopped),
+                relay_protocol: Some(RelayProtocolPair { key, verifier }),
+                ..self.inner.clone_for_rebuild()
             }),
         }
     }
@@ -643,33 +665,30 @@ impl Server {
             "Server::sdk_state requires Server::with_reputation_engine to be called first; \
              the future SDK /v1/sdk/register handler treats engine access as a required dependency",
         );
-        let lease_token_signing_key = self
+        // The signer/verifier pairing is held as a single
+        // `Option<RelayProtocolPair>` on `ServerInner`, so we
+        // unwrap once and destructure — the prior two-step
+        // `.expect(...).expect(...)` chain (and its
+        // structurally-unreachable second arm) is gone at the
+        // type level: either both halves are present or neither
+        // is.
+        let RelayProtocolPair { key, verifier } = self
             .inner
-            .relay_protocol_key
+            .relay_protocol
             .as_ref()
-            .map(Arc::clone)
+            .map(RelayProtocolPair::arc_clone)
             .expect(
                 "Server::sdk_state requires Server::with_relay_protocol_key to be called first; \
                  the future SDK /v1/sdk/register and /v1/sdk/connect handlers treat the \
                  lease-token signer/verifier pair as a required dependency",
-            );
-        let lease_token_verifier = self
-            .inner
-            .relay_protocol_verifier
-            .as_ref()
-            .map(Arc::clone)
-            .expect(
-                "Server::sdk_state internal invariant: relay_protocol_verifier must be Some \
-                 whenever relay_protocol_key is Some — both are populated together in \
-                 Server::with_relay_protocol_key",
             );
         SdkState {
             leases: self.leases(),
             policy: self.policy(),
             engine,
             ens_resolver: self.ens_resolver(),
-            lease_token_signing_key,
-            lease_token_verifier,
+            lease_token_signing_key: key,
+            lease_token_verifier: verifier,
         }
     }
 
