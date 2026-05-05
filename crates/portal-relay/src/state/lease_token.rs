@@ -185,10 +185,13 @@ pub fn issue(
 ///    domain separator.
 /// 7. Reject if `now >= claims.expires_at`.
 ///
-/// The expiry check happens **after** the signature check so that
-/// callers cannot use this function as an oracle to distinguish
-/// "valid signature, expired" from "invalid signature" via timing
-/// — the signature path always runs.
+/// The expiry check happens **after** the signature check, so a
+/// well-framed token's signature is always verified before its
+/// freshness is judged. Framing / version errors short-circuit
+/// before either signature or expiry runs — those failures are
+/// non-cryptographic and do not feed an oracle of cryptographic
+/// state. Callers that need stronger anti-oracle properties on
+/// the framing path should pre-validate the token shape.
 ///
 /// # Errors
 ///
@@ -202,9 +205,10 @@ pub fn verify(
     let (payload_b64, sig_b64) = token
         .split_once('.')
         .ok_or(LeaseTokenError::MalformedFraming)?;
-    if sig_b64.contains('.') {
-        return Err(LeaseTokenError::MalformedFraming.into());
-    }
+    // No second-`.` guard: base64url-no-pad's alphabet excludes `.`,
+    // so a stray `.` in `sig_b64` would already fail the URL_SAFE_NO_PAD
+    // decode below as `MalformedFraming` — a separate guard here would
+    // be dead code.
 
     let payload_bytes = URL_SAFE_NO_PAD
         .decode(payload_b64)
@@ -277,7 +281,7 @@ mod tests {
     }
 
     /// AC1 + AC6: round-trip returns Ok with matching identity and
-    /// expires_at.
+    /// `expires_at`.
     #[test]
     fn issue_then_verify_round_trip_returns_matching_claims() {
         let key = ed25519_from_seed_for_test([0x11u8; 32]);
