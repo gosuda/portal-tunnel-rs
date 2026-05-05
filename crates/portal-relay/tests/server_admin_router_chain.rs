@@ -1,5 +1,5 @@
-//! Integration test pinning the iter-135 + iter-136 + iter-137
-//! chain end-to-end:
+//! Integration test pinning the orchestrator-to-handler chain
+//! end-to-end:
 //!
 //! `Server::with_components` → `Server::with_reload_handle` →
 //! `Server::admin_router()` → handler.

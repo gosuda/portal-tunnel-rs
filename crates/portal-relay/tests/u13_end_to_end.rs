@@ -1,10 +1,11 @@
 //! U13 operator-workflow end-to-end composition tests.
 //!
-//! Each iter-123/127/128/129 surface has unit-test coverage in its
-//! own iteration; this file's tests pin the COMPOSITION — that the
-//! load-from-disk → `ReloadHandle` → `PolicyRuntime` → snapshot-read
-//! chain works as a unit, and that hot-reload propagates through
-//! every link.
+//! Each surface (`RelayConfigBundle::from_files`, `ReloadHandle`,
+//! `PolicyRuntime::with_reload_handle`, the snapshot-read getters)
+//! carries its own unit-test coverage; this file's tests pin the
+//! COMPOSITION — that the load-from-disk → `ReloadHandle` →
+//! `PolicyRuntime` → snapshot-read chain works as a unit, and that
+//! hot-reload propagates through every link.
 //!
 //! Scope: NOT the file-watcher path (that lives in
 //! `tests/config_file_watch.rs` behind a feature flag). These

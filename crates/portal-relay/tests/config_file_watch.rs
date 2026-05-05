@@ -11,9 +11,9 @@
 //! ```
 //!
 //! The non-flaky deserialize-and-reload contracts are pinned by
-//! the unit tests in `tests/arc_swap_reload.rs` (iter-123) and
-//! `crates/portal-relay/src/config.rs::tests` (iter-124); these
-//! integration tests cover only the FS-event-trigger boundary.
+//! the unit tests in `tests/arc_swap_reload.rs` and
+//! `crates/portal-relay/src/config.rs::tests`; these integration
+//! tests cover only the FS-event-trigger boundary.
 
 #![cfg(feature = "config_file_watch")]
 #![expect(
@@ -141,9 +141,9 @@ async fn watcher_logs_and_continues_on_invalid_json() {
     join.abort();
 }
 
-/// 3. Resilience pin: an unknown-field payload (per the
-///    iter-124 `deny_unknown_fields` policy) is logged and
-///    skipped; the watcher continues, and the next valid write
+/// 3. Resilience pin: an unknown-field payload (per
+///    `RuntimeConfig`'s `deny_unknown_fields` policy) is logged
+///    and skipped; the watcher continues, and the next valid write
 ///    drives a swap.
 #[tokio::test]
 #[ignore = "real-FS notify events are platform-dependent and CI-flaky"]
@@ -166,7 +166,7 @@ async fn watcher_logs_and_continues_on_unknown_field() {
     // The payload carries every known field (so the only
     // possible deserialize-failure cause is the unknown
     // sibling) — this isolates the `deny_unknown_fields`
-    // contract from the `default` half of the iter-124 policy.
+    // contract from the `default` half of `RuntimeConfig`'s policy.
     atomic_write(
         &path,
         r#"{"bps_per_identity": 8192, "ip_ban_list": [], "bps_per_idenity": 9999}"#,

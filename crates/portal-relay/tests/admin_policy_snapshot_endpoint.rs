@@ -1,6 +1,6 @@
 //! Integration tests for `GET /v1/admin/policy/snapshot`.
 //!
-//! Pin: derived-policy observability via the iter-147
+//! Pin: derived-policy observability via the
 //! `PolicyRuntime::bps_cap_per_identity` + `ip_ban_count` getters.
 //! No-handle path returns sentinel values (None / 0); attached-
 //! handle path reflects the runtime snapshot.

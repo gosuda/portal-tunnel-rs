@@ -122,7 +122,7 @@ async fn reload_endpoint_returns_invalid_request_for_bad_json() {
     assert_runtime_unchanged(&handle, &baseline);
 }
 
-/// Unknown field → 400 `invalid_request` (per iter-124's
+/// Unknown field → 400 `invalid_request` (per `RuntimeConfig`'s
 /// `deny_unknown_fields`). Confirms the deny path runs through the
 /// handler's `JsonRejection` mapping.
 #[tokio::test]

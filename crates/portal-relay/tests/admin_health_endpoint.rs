@@ -3,8 +3,8 @@
 //! Exercise the handler via `tower::ServiceExt::oneshot` against the
 //! `build_admin_router` output. Pin: 200 + body shape with crate
 //! version, and the no-handle independence contract that distinguishes
-//! `/health` from the iter-135 / iter-137 endpoints which DO route
-//! through `AdminState.reload`.
+//! `/health` from the `/config/reload` and `/config/current`
+//! endpoints which DO route through `AdminState.reload`.
 
 #![expect(
     clippy::expect_used,
@@ -66,8 +66,8 @@ async fn health_endpoint_returns_200_with_crate_version() {
     );
 }
 
-/// Explicit positive coverage of the no-handle path. The iter-135
-/// reload endpoint and iter-137 current-config endpoint both surface
+/// Explicit positive coverage of the no-handle path. The
+/// `/config/reload` and `/config/current` endpoints both surface
 /// 503 `feature_unavailable` when `AdminState.reload` is `None`;
 /// `/health` MUST NOT — the handler is stateless. A future refactor
 /// that routed health through `AdminState.reload` would break this
