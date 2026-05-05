@@ -68,9 +68,14 @@ pub enum EnsError {
 /// `#[expect]` attributes, causing the `-D warnings` gate to fail.  The trait
 /// is therefore defined directly with the `Send + Sync` bounds callers require.
 ///
+/// Two directions are exposed:
+///
+/// * [`Self::resolve`] — forward (`name → address`).
+/// * [`Self::resolve_reverse`] — reverse (`address → Option<name>`).
+///
 /// # Object safety
 ///
-/// This trait is **not object-safe** because `resolve` returns
+/// This trait is **not object-safe** because its methods return
 /// `impl Future`. Callers must hold the concrete type, or wrap any
 /// `EnsResolver` impl in [`BoxedEnsResolver`] for dynamic dispatch
 /// (which routes through a crate-sealed inner trait that returns
@@ -91,6 +96,36 @@ pub trait EnsResolver: Send + Sync {
         &'a self,
         name: &'a str,
     ) -> impl Future<Output = Result<EthAddress, EnsError>> + Send + 'a;
+
+    /// Reverse-resolve an Ethereum address to its primary ENS name
+    /// (the name configured via the `addr.reverse` resolver).
+    ///
+    /// Returns `Ok(Some(name))` when the address has a reverse record.
+    /// Returns `Ok(None)` when no reverse record is registered — this is
+    /// the **expected** result for the majority of Ethereum addresses;
+    /// callers must NOT treat it as an error.  Returns
+    /// [`EnsError::Rpc`] only on actual transport / contract failures,
+    /// never on "no reverse record".
+    ///
+    /// This is the inverse of [`Self::resolve`]: forward resolution
+    /// answers "what address does `vitalik.eth` map to?", reverse
+    /// resolution answers "is `0xd8dA…` ENS-named, and if so, by what
+    /// name?".
+    ///
+    /// Note: this method returns whatever name the reverse-resolver
+    /// claims; it does not forward-verify that the returned name
+    /// resolves back to `addr`.  Security-sensitive callers (e.g. the
+    /// R10 Sybil-gating bypass at
+    /// `crates/portal-relay/src/policy/reputation.rs`) should perform
+    /// that round-trip themselves via [`Self::resolve`] before treating
+    /// the name as authoritative.
+    ///
+    /// The returned future's lifetime is elided to `&self`'s lifetime;
+    /// `addr` is an owned [`EthAddress`] so no extra borrow is captured.
+    fn resolve_reverse(
+        &self,
+        addr: EthAddress,
+    ) -> impl Future<Output = Result<Option<String>, EnsError>> + Send + '_;
 }
 
 // ---------------------------------------------------------------------------
@@ -114,6 +149,11 @@ pub trait ObjectSafeEnsResolver: Send + Sync {
         &'a self,
         name: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<EthAddress, EnsError>> + Send + 'a>>;
+
+    fn resolve_reverse_boxed<'a>(
+        &'a self,
+        addr: EthAddress,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<String>, EnsError>> + Send + 'a>>;
 }
 
 impl<T: EnsResolver + ?Sized> ObjectSafeEnsResolver for T {
@@ -123,17 +163,25 @@ impl<T: EnsResolver + ?Sized> ObjectSafeEnsResolver for T {
     ) -> Pin<Box<dyn Future<Output = Result<EthAddress, EnsError>> + Send + 'a>> {
         Box::pin(self.resolve(name))
     }
+
+    fn resolve_reverse_boxed<'a>(
+        &'a self,
+        addr: EthAddress,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<String>, EnsError>> + Send + 'a>> {
+        Box::pin(self.resolve_reverse(addr))
+    }
 }
 
 /// Type-erased, dyn-dispatch-friendly wrapper around any [`EnsResolver`].
 ///
-/// `BoxedEnsResolver` exists because [`EnsResolver::resolve`] returns
+/// `BoxedEnsResolver` exists because [`EnsResolver`]'s methods return
 /// `impl Future`, which makes the trait itself non-object-safe.  This
-/// newtype routes calls through a crate-sealed `ObjectSafeEnsResolver`
-/// inner adapter so callers that need to hold an `Arc<dyn ...>`-shaped
-/// resolver (for example, code paths that select one of several
-/// resolvers at runtime) can do so without re-shaping their surface
-/// around generics.
+/// newtype routes both [`Self::resolve`] (forward) and
+/// [`Self::resolve_reverse`] (reverse) through a crate-sealed
+/// `ObjectSafeEnsResolver` inner adapter so callers that need to hold
+/// an `Arc<dyn ...>`-shaped resolver (for example, code paths that
+/// select one of several resolvers at runtime) can do so without
+/// re-shaping their surface around generics.
 ///
 /// Cloning is cheap: it bumps the inner `Arc` refcount.  No consumer in
 /// the workspace currently holds a `BoxedEnsResolver`; this type is the
@@ -162,6 +210,18 @@ impl BoxedEnsResolver {
         name: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<EthAddress, EnsError>> + Send + 'a>> {
         self.0.resolve_boxed(name)
+    }
+
+    /// Reverse-resolve through dynamic dispatch.
+    ///
+    /// Same `Ok(Some(name))` / `Ok(None)` / `Err(Rpc)` semantics as
+    /// [`EnsResolver::resolve_reverse`].
+    #[must_use = "futures do nothing unless awaited"]
+    pub fn resolve_reverse<'a>(
+        &'a self,
+        addr: EthAddress,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<String>, EnsError>> + Send + 'a>> {
+        self.0.resolve_reverse_boxed(addr)
     }
 }
 
@@ -247,6 +307,29 @@ impl EnsResolver for AlloyEnsResolver {
             Ok(EthAddress::new(alloy_addr.0.0))
         }
     }
+
+    #[expect(
+        clippy::manual_async_fn,
+        reason = "explicit impl Future + Send return is required to satisfy the trait's Send bound"
+    )]
+    fn resolve_reverse(
+        &self,
+        addr: EthAddress,
+    ) -> impl Future<Output = Result<Option<String>, EnsError>> + Send + '_ {
+        async move {
+            let alloy_addr = alloy::primitives::Address::from(addr.as_bytes());
+            match self.provider.lookup_address(&alloy_addr).await {
+                // Resolver registered but no name set → no reverse record.
+                Ok(name) if name.is_empty() => Ok(None),
+                Ok(name) => Ok(Some(name)),
+                // No reverse-registrar resolver for this address →
+                // no reverse record (the EXPECTED state for most addresses).
+                Err(alloy_ens::EnsError::ResolverNotFound(_)) => Ok(None),
+                // Genuine transport / contract failure.
+                Err(other) => Err(EnsError::Rpc(other.to_string())),
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -267,9 +350,18 @@ mod tests {
     // -----------------------------------------------------------------------
 
     /// A test-only mock that returns a pre-programmed address or error.
+    ///
+    /// The forward-resolution fields (`addr`, `not_found_name`) and the
+    /// reverse-resolution fields (`reverse_addr`, `reverse_name`) are
+    /// independent: a mock built via [`Self::resolves_to`] has no reverse
+    /// record, and a mock built via [`Self::reverse_resolves_to`] returns
+    /// `EnsError::NameNotFound` on forward lookups (the default for an
+    /// unset `addr`).
     struct MockEnsResolver {
         addr: Option<EthAddress>,
         not_found_name: String,
+        reverse_addr: Option<EthAddress>,
+        reverse_name: String,
     }
 
     impl MockEnsResolver {
@@ -277,6 +369,8 @@ mod tests {
             Self {
                 addr: Some(addr),
                 not_found_name: String::new(),
+                reverse_addr: None,
+                reverse_name: String::new(),
             }
         }
 
@@ -284,6 +378,17 @@ mod tests {
             Self {
                 addr: None,
                 not_found_name: name.to_owned(),
+                reverse_addr: None,
+                reverse_name: String::new(),
+            }
+        }
+
+        fn reverse_resolves_to(addr: EthAddress, name: &str) -> Self {
+            Self {
+                addr: None,
+                not_found_name: String::new(),
+                reverse_addr: Some(addr),
+                reverse_name: name.to_owned(),
             }
         }
     }
@@ -302,6 +407,22 @@ mod tests {
                     || Err(EnsError::NameNotFound(self.not_found_name.clone())),
                     Ok,
                 )
+            }
+        }
+
+        #[expect(
+            clippy::manual_async_fn,
+            reason = "explicit impl Future + Send return is required to satisfy the trait's Send bound"
+        )]
+        fn resolve_reverse(
+            &self,
+            addr: EthAddress,
+        ) -> impl Future<Output = Result<Option<String>, EnsError>> + Send + '_ {
+            async move {
+                match self.reverse_addr {
+                    Some(known) if known == addr => Ok(Some(self.reverse_name.clone())),
+                    _ => Ok(None),
+                }
             }
         }
     }
@@ -462,6 +583,68 @@ mod tests {
 
         assert_eq!(got_orig, expected);
         assert_eq!(got_clone, expected);
+    }
+
+    // -----------------------------------------------------------------------
+    // resolve_reverse — mock-only unit tests
+    // -----------------------------------------------------------------------
+
+    /// A mock configured with `reverse_resolves_to` returns `Ok(Some(name))`
+    /// when queried for the matching address.
+    #[tokio::test]
+    async fn mock_resolve_reverse_returns_name_when_configured() {
+        let addr = parse_addr_hex("d8dA6BF26964aF9D7eEd9e03E53415D37aA96045");
+        let resolver = MockEnsResolver::reverse_resolves_to(addr, "vitalik.eth");
+
+        let got = resolver
+            .resolve_reverse(addr)
+            .await
+            .expect("reverse resolution must not error");
+        assert_eq!(got, Some("vitalik.eth".to_owned()));
+    }
+
+    /// Querying an address other than the one configured returns `Ok(None)`,
+    /// not an error.
+    #[tokio::test]
+    async fn mock_resolve_reverse_returns_none_for_unconfigured_address() {
+        let known = parse_addr_hex("d8dA6BF26964aF9D7eEd9e03E53415D37aA96045");
+        let other = parse_addr_hex("0000000000000000000000000000000000000001");
+        let resolver = MockEnsResolver::reverse_resolves_to(known, "vitalik.eth");
+
+        let got = resolver
+            .resolve_reverse(other)
+            .await
+            .expect("reverse resolution for other address must not error");
+        assert_eq!(got, None);
+    }
+
+    /// A mock built via the forward-only `resolves_to` constructor has no
+    /// reverse data and therefore returns `Ok(None)` for any reverse query.
+    #[tokio::test]
+    async fn mock_resolve_reverse_returns_none_when_no_reverse_configured() {
+        let addr = parse_addr_hex("d8dA6BF26964aF9D7eEd9e03E53415D37aA96045");
+        let resolver = MockEnsResolver::resolves_to(addr);
+
+        let got = resolver
+            .resolve_reverse(addr)
+            .await
+            .expect("reverse resolution must not error");
+        assert_eq!(got, None);
+    }
+
+    /// `BoxedEnsResolver::resolve_reverse` round-trips through the
+    /// dyn-dispatch indirection to the underlying mock.
+    #[tokio::test]
+    async fn boxed_resolver_round_trips_resolve_reverse() {
+        let addr = parse_addr_hex("d8dA6BF26964aF9D7eEd9e03E53415D37aA96045");
+        let inner = MockEnsResolver::reverse_resolves_to(addr, "vitalik.eth");
+        let boxed = BoxedEnsResolver::new(inner);
+
+        let got = boxed
+            .resolve_reverse(addr)
+            .await
+            .expect("boxed reverse resolution must not error");
+        assert_eq!(got, Some("vitalik.eth".to_owned()));
     }
 
     // -----------------------------------------------------------------------

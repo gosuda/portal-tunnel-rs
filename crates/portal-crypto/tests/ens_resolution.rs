@@ -87,6 +87,19 @@ impl EnsResolver for MockEnsResolver {
         };
         async move { result }
     }
+
+    #[expect(
+        clippy::manual_async_fn,
+        reason = "explicit impl Future + Send return is required to satisfy the trait's Send bound"
+    )]
+    fn resolve_reverse(
+        &self,
+        _addr: EthAddress,
+    ) -> impl Future<Output = Result<Option<String>, EnsError>> + Send + '_ {
+        // This integration-test mock does not model reverse resolution;
+        // every address is reported as having no reverse record.
+        async move { Ok(None) }
+    }
 }
 
 // ---------------------------------------------------------------------------
