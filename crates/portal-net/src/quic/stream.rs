@@ -144,9 +144,9 @@ fn validate_open_outbound_args(
 /// tag prefix. For `Channel::TcpProxy`, also writes the sub-kind byte.
 ///
 /// All channel/`tcp_kind` validation happens **before** any side effect
-/// (`open_bi` / writes) via [`validate_open_outbound_args`], so a misuse
-/// never leaves a half-formed stream on the wire that the peer would have
-/// to time out.
+/// (`open_bi` / writes) via the private `validate_open_outbound_args`
+/// helper, so a misuse never leaves a half-formed stream on the wire
+/// that the peer would have to time out.
 ///
 /// # Errors
 /// Returns [`NetError::WireDecode`] when the channel/`tcp_kind` combination

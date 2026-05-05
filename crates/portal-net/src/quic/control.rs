@@ -145,10 +145,11 @@ const HANDSHAKE_REJECT_MESSAGE: &str = "verification failed";
 /// the signature verify. Constant-time is out of scope for U6.
 ///
 /// # Errors
-/// Returns [`NetError::BackhaulHandshake`] with the constant
-/// [`HANDSHAKE_REJECT_MESSAGE`] for ANY verification failure (audience,
-/// expired, purpose, signature) — failure modes are NOT distinguishable
-/// from the error payload.
+/// Returns [`NetError::BackhaulHandshake`] with a constant rejection
+/// message (`"verification failed"`, the private
+/// `HANDSHAKE_REJECT_MESSAGE` const above) for ANY verification
+/// failure (audience, expired, purpose, signature) — failure modes
+/// are NOT distinguishable from the error payload.
 pub fn verify_control_envelope(
     env: &Envelope,
     tenant_verifier: &portal_crypto::Ed25519Verifier,

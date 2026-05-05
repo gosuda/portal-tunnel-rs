@@ -149,9 +149,11 @@ fn build_dual_stack_socket(
 }
 
 /// Convert a [`socket2::Socket`] into a [`std::net::UdpSocket`] cross-platform.
-/// The path goes via [`OwnedFd`]/[`OwnedSocket`] which is the supported
-/// std-conversion idiom (socket2 does not implement `From<Socket> for UdpSocket`
-/// directly).
+/// The path goes via [`std::os::fd::OwnedFd`] on Unix and
+/// `std::os::windows::io::OwnedSocket` on Windows (intentionally not an
+/// intra-doc link because Windows std symbols don't resolve in
+/// Linux-host rustdoc builds) — the supported std-conversion idiom
+/// (socket2 does not implement `From<Socket> for UdpSocket` directly).
 #[cfg(unix)]
 fn socket_into_udp(socket: Socket) -> std::net::UdpSocket {
     use std::os::fd::OwnedFd;
