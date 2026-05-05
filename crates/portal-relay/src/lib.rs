@@ -6,12 +6,15 @@
 //! ## Phase 5 implementation status
 //!
 //! Phase 5 lands incrementally per
-//! `docs/plans/2026-05-04-005-feat-portal-relay-plan.md`.
-//!
-//! Batch 1 (U1, U2) ships the cargo-vet supply-chain harness and this
-//! empty crate skeleton. Subsequent units fill the modules below;
-//! until their owning batch lands, each module has a stub `mod.rs`
-//! that documents the deferral.
+//! `docs/plans/2026-05-04-005-feat-portal-relay-plan.md`. Per-batch
+//! state lives in `PLAN.md` "Current implementation status"; in
+//! summary, Batches 1-6 + 9 are landed (cargo-vet harness, listeners,
+//! identity loaders, persistence, papaya lease registry, envelope +
+//! SDK API endpoints, admin API + discovery, ECH router + server
+//! orchestrator) and Batches 7-8 + 10 remain pending (R10 ENS
+//! Sybil-gating bypass, hot-reload + keyless I/O wiring, Admin View +
+//! R15 Status TUI). Module-level rustdocs name the per-module deferral
+//! state where one applies.
 //!
 //! ## Trust boundaries (R2)
 //!
