@@ -42,6 +42,20 @@ fn admin_state_with(reload: Option<Arc<ReloadHandle>>) -> AdminState {
     }
 }
 
+/// Assert the entire runtime snapshot is byte-for-byte identical to
+/// the supplied baseline. Names the invariant the reject paths rely
+/// on: a 4xx response must not mutate ANY field of the runtime
+/// snapshot, not just the most obvious one (`bps_per_identity`). The
+/// full-struct comparison is load-bearing — a per-field check would
+/// silently miss a future field added to `RuntimeConfig`.
+fn assert_runtime_unchanged(handle: &ReloadHandle, baseline: &RuntimeConfig) {
+    let snap = handle.current();
+    assert_eq!(
+        &*snap, baseline,
+        "runtime snapshot must remain byte-identical to the captured baseline after a rejected request",
+    );
+}
+
 /// POST a JSON body to the reload endpoint and return the
 /// `(status, body_bytes)` pair.
 async fn post_reload(state: AdminState, body: &'static str) -> (StatusCode, Vec<u8>) {
@@ -113,10 +127,8 @@ async fn reload_endpoint_returns_feature_unavailable_when_no_handle() {
 /// handler. The body never reaches the reload handle.
 #[tokio::test]
 async fn reload_endpoint_returns_invalid_request_for_bad_json() {
-    let handle = Arc::new(ReloadHandle::new(
-        baseline_bootstrap(),
-        RuntimeConfig::default(),
-    ));
+    let baseline = RuntimeConfig::default();
+    let handle = Arc::new(ReloadHandle::new(baseline_bootstrap(), baseline.clone()));
     let state = admin_state_with(Some(Arc::clone(&handle)));
 
     let (status, bytes) = post_reload(state, "{ malformed json").await;
@@ -128,8 +140,7 @@ async fn reload_endpoint_returns_invalid_request_for_bad_json() {
         "bad JSON must surface invalid_request",
     );
 
-    // Sanity: the runtime config must not have been touched.
-    assert_eq!(handle.current().bps_per_identity, 0);
+    assert_runtime_unchanged(&handle, &baseline);
 }
 
 /// Unknown field → 400 `invalid_request` (per iter-124's
@@ -137,10 +148,8 @@ async fn reload_endpoint_returns_invalid_request_for_bad_json() {
 /// handler's `JsonRejection` mapping.
 #[tokio::test]
 async fn reload_endpoint_returns_invalid_request_for_unknown_field() {
-    let handle = Arc::new(ReloadHandle::new(
-        baseline_bootstrap(),
-        RuntimeConfig::default(),
-    ));
+    let baseline = RuntimeConfig::default();
+    let handle = Arc::new(ReloadHandle::new(baseline_bootstrap(), baseline.clone()));
     let state = admin_state_with(Some(Arc::clone(&handle)));
 
     let (status, bytes) = post_reload(state, r#"{"bps_per_idenity": 4096}"#).await;
@@ -152,6 +161,5 @@ async fn reload_endpoint_returns_invalid_request_for_unknown_field() {
         "unknown-field payload must surface invalid_request",
     );
 
-    // Sanity: the runtime config must not have been touched.
-    assert_eq!(handle.current().bps_per_identity, 0);
+    assert_runtime_unchanged(&handle, &baseline);
 }
