@@ -7,11 +7,13 @@
 //! `BpsManager`, ENS Sybil-gating bypass + honeypot matcher +
 //! persistence per plan U12 follow-ups.
 
+pub mod honeypot;
 pub mod ip_filter;
 pub mod proxy_trust;
 pub mod reputation;
 pub mod runtime;
 
+pub use honeypot::{HONEYPOT_DEFAULT_PATTERNS, HoneypotMatcher};
 pub use ip_filter::IpFilter;
 pub use proxy_trust::ProxyTrust;
 pub use reputation::{
