@@ -10,6 +10,14 @@ repository.workspace = true
 [[bin]]
 name = "portal-relay"
 path = "src/main.rs"
+# `cargo doc --workspace` would write this bin's rustdoc to
+# `target/doc/portal_relay/index.html`, the same path the
+# `portal-relay` library crate writes to. Disable bin rustdoc to
+# prevent the order-of-build shadowing (cargo's collision warning
+# does not abort the build, so the second target overwrites the
+# first's docs). The bin's user-facing surface is `--help`, not
+# rustdoc; the library crate's docs are the meaningful artifact.
+doc = false
 
 [features]
 default = []

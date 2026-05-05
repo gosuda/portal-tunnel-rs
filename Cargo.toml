@@ -240,8 +240,11 @@ missing_docs = "warn"
 # rustdoc-clean as of iteration 54 (all 9 crates audited; 51 broken
 # links repaired across 5 commits per Codex split-scope rule). Lock
 # the clean state in so future contributors hit a hard gate before
-# the warnings can accumulate again. clippy's `-D warnings` (already
-# in CI + xtask ci) escalates these to errors at CI time.
+# the warnings can accumulate again. Enforced by the `rustdoc` job
+# in `.github/workflows/ci.yml` and the matching step in
+# `cargo xtask ci` (added in iter-139): rustdoc reads this denylist
+# at doc-build time, so the gate is `cargo doc`, not clippy. clippy
+# does not surface rustdoc lints regardless of `-D warnings`.
 [workspace.lints.rustdoc]
 broken_intra_doc_links = "deny"
 private_intra_doc_links = "deny"

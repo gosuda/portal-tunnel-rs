@@ -90,6 +90,30 @@ jobs:
       # ci`'s clippy-all-features step.
       - run: cargo clippy --workspace --all-features --all-targets -- -D warnings
 
+  # `[workspace.lints.rustdoc]` (Cargo.toml) denies broken /
+  # private / redundant intra-doc links. Those denials are enforced
+  # by rustdoc, not by clippy — clippy reports clippy lints, never
+  # rustdoc lints. Without `cargo doc` running, the denylist is
+  # decorative.
+  #
+  # Dual pass mirrors the clippy job: default features for the
+  # baseline rustdoc graph, and `--all-features` so feature-gated
+  # rustdoc (e.g. modules behind `config_file_watch`) is also
+  # checked. `--no-deps` skips dependency rustdoc;
+  # `--document-private-items` surfaces broken links inside private
+  # item rustdoc.
+  rustdoc:
+    name: cargo doc (workspace lint denylist)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95"
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --workspace --no-deps --document-private-items
+      - run: cargo doc --workspace --all-features --no-deps --document-private-items
+
   # R2 trust-boundary isolation gate (Phase 2 U12).
   #
   # Bans function signatures whose return type contains two or more SecretBox

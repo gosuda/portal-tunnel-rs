@@ -54,9 +54,9 @@ struct Cli {
 enum Commands {
     /// Fail when `docs/wire-protocol.md` drift comment lags `git log -1 -- crates/portal-wire`.
     WireDriftCheck,
-    /// Run every CI workflow gate locally (fmt, taplo, clippy, nextest at
-    /// `PROPTEST_CASES=4096`, deny, vet warn-only, cargo-machete, msrv per
-    /// member, wire-drift, multi-key-return, dep-spawning-audit,
+    /// Run every CI workflow gate locally (fmt, taplo, clippy, rustdoc,
+    /// nextest at `PROPTEST_CASES=4096`, deny, vet warn-only, cargo-machete,
+    /// msrv per member, wire-drift, multi-key-return, dep-spawning-audit,
     /// rustls-mandatory, utoipa-coverage). Source of truth:
     /// `.github/workflows/ci.yml`; `run_ci` mirrors it gate-by-gate.
     Ci,
@@ -148,6 +148,11 @@ fn run_ci(repo_root: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     ) {
         failures.push("cargo clippy --all-features");
     }
+    // `cargo doc` dual gate mirrors the `rustdoc` CI job. Extracted to
+    // keep `run_ci` under clippy's `too_many_lines` threshold; helper
+    // pattern matches the `multi_key_return_gate` / `rustls_mandatory_gate`
+    // / `utoipa_coverage_gate` extractions below.
+    rustdoc_gate(repo_root, &mut failures);
     if !cmd_ok_with_env(
         repo_root,
         "cargo",
@@ -323,6 +328,42 @@ fn multi_key_return_gate(repo_root: &Path, failures: &mut Vec<&'static str>) {
                 failures.push(label);
             }
         }
+    }
+}
+
+/// Run the rustdoc dual gate: `cargo doc --workspace --no-deps
+/// --document-private-items` plus the same with `--all-features`.
+/// Mirrors the `rustdoc` job in `.github/workflows/ci.yml`. The
+/// workspace's `[workspace.lints.rustdoc]` denylist
+/// (broken / private / redundant intra-doc links) is enforced by
+/// rustdoc at doc-build time, not by clippy — without this gate
+/// the denylist is decorative. The dual pass mirrors the dual
+/// clippy gate so feature-gated rustdoc cannot drift.
+fn rustdoc_gate(repo_root: &PathBuf, failures: &mut Vec<&'static str>) {
+    if !cmd_ok(
+        repo_root,
+        "cargo",
+        &[
+            "doc",
+            "--workspace",
+            "--no-deps",
+            "--document-private-items",
+        ],
+    ) {
+        failures.push("cargo doc");
+    }
+    if !cmd_ok(
+        repo_root,
+        "cargo",
+        &[
+            "doc",
+            "--workspace",
+            "--all-features",
+            "--no-deps",
+            "--document-private-items",
+        ],
+    ) {
+        failures.push("cargo doc --all-features");
     }
 }
 
