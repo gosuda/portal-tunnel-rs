@@ -21,8 +21,7 @@ use std::sync::Arc;
 use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, StatusCode, header};
 use portal_relay::api::build_admin_router;
-use portal_relay::server::Server;
-use portal_relay::{ReloadHandle, RuntimeConfig};
+use portal_relay::{ReloadHandle, RuntimeConfig, Server};
 use tower::ServiceExt as _;
 
 mod common;
