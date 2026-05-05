@@ -116,11 +116,11 @@ impl PolicyRuntime {
     ///   ([`Self::with_reload_handle`] was never called), OR
     /// - The configured
     ///   [`crate::config::RuntimeConfig::bps_per_identity`] value is
-    ///   `0` (the iter-123 sentinel for "open / no cap").
+    ///   `0` (the documented sentinel for "open / no cap").
     ///
-    /// Returns `Some(cap)` only when both conditions are met: a
-    /// reload handle is attached AND the configured value is
-    /// non-zero.
+    /// Hoare invariant: returns `Some(cap)` only when both
+    /// conditions are met — a reload handle is attached AND the
+    /// configured value is non-zero.
     ///
     /// The future BPS-manager surface (Phase 5 plan §"`bps_manager`
     /// limits") will consume this getter to enforce the operator-
