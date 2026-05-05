@@ -5,12 +5,13 @@ Greenfield port of [`gosuda/portal-tunnel`](https://github.com/gosuda/portal-tun
 v2.1.8 — the Go upstream is the behavioral specification; the Rust port owns
 the wire (see [ADR-0001](docs/adr/0001-greenfield-wire.md)).
 
-> **Status**: Phase 0 + Phase 1 implementation committed on `refact/rework`.
-> Per-commit gate state — U16 (wire-drift marker) and U17 (proptest suites
-> at `PROPTEST_CASES=4096`) — lives in [`PLAN.md`](PLAN.md) under
-> "Current implementation status"; CI runs the same gates on every PR.
-> v0.1 ships when Phases 1-5 + 6a + 7-minus-overlay land; v0.2 backlog is
-> enumerated in the roadmap plan.
+> **Status**: Active development on `refact/rework`. Per-phase
+> landed/partial/pending state and per-commit gate state (U16 wire-drift
+> marker, U17 `PROPTEST_CASES=4096` proptest suites, plus the workspace
+> CI matrix) live in [`PLAN.md`](PLAN.md) under "Current implementation
+> status"; CI runs the same gates on every PR. v0.1 ships when Phases
+> 1-5 + 6a + 7-minus-overlay land; v0.2 backlog is enumerated in the
+> roadmap plan.
 
 ## Quick links
 
