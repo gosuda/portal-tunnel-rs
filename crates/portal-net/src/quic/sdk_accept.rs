@@ -233,9 +233,10 @@ async fn handle_stream(
 mod tests {
     use super::*;
 
-    /// The documented default handshake timeout is part of the public
-    /// contract — Phase 5/6a will start consuming it. The const value
-    /// itself is the assertion target.
+    /// The 10-second default handshake timeout is documented on
+    /// [`SdkAcceptor::with_handshake_timeout`] as part of that
+    /// method's public contract. This test pins the const that
+    /// backs that documented value.
     #[test]
     fn handshake_timeout_default_is_10s() {
         assert_eq!(DEFAULT_HANDSHAKE_TIMEOUT, Duration::from_secs(10));
