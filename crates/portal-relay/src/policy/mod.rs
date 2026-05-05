@@ -10,10 +10,13 @@
 //! [`honeypot`] path-matcher struct. The U12 R10-engine follow-ups
 //! are flagged inline by `TODO(R10-followup)` markers in
 //! `reputation.rs` (ENS Sybil-gating exemption, honeypot call-site
-//! wiring, the `reputation.json` 60s-cadence persistence loop,
-//! hot-swap support). The per-signal-kind weight plumbing and the
-//! engine-side `reputation.json` persist/restore helpers have
-//! landed; see this crate's `lib.rs` for current Phase 5 status.
+//! wiring). The per-signal-kind weight plumbing, the engine-side
+//! `reputation.json` persist/restore helpers, and the engine-side
+//! hot-swap surface ([`reputation::ReputationEngine::swap_config`])
+//! have all landed; the SIGHUP / admin-api reload run-loop trigger
+//! that calls `swap_config` on a config-file change remains Phase 5
+//! B8 territory. See this crate's `lib.rs` for current Phase 5
+//! status.
 
 pub mod honeypot;
 pub mod ip_filter;

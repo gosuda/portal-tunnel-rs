@@ -65,9 +65,15 @@
 //!   reasonable v0.1 values and pinned as `pub const`; the formal
 //!   ADR justifying those choices is a separate decision artifact
 //!   commit.
-//! - **Hot-reload.** `arc_swap::ArcSwap<ReputationConfig>` is U13
-//!   territory. The engine takes an `Arc<ReputationConfig>` so the
-//!   transition to `ArcSwap` is a single field swap.
+//! - **Hot-reload (engine-side).** Landed:
+//!   [`ReputationEngine::swap_config`] atomic-swaps the
+//!   `(ReputationConfig, RateLimiter)` pair behind
+//!   [`arc_swap::ArcSwap`] so concurrent
+//!   [`ReputationEngine::decide`] / [`ReputationEngine::record_signal`]
+//!   calls observe either the old pair or the new pair, never a mix.
+//!   The SIGHUP / admin-api reload **run-loop trigger** that calls
+//!   `swap_config` from a config-file change is Phase 5 B8 territory
+//!   — engine-side carve-out only here.
 //! - **Per-signal tracing.** Only [`ReputationEngine::decide`]
 //!   carries `#[tracing::instrument]` this iteration; emitting a
 //!   per-signal-kind audit span on every [`ReputationEngine::
@@ -354,9 +360,11 @@ pub fn apply_decay(
 // ReputationConfig
 // ---------------------------------------------------------------------------
 
-/// Per-engine tuning surface. Held behind an `Arc` so a future U13
-/// `ArcSwap<ReputationConfig>` swap-in is a single-field rewire
-/// from the engine's perspective.
+/// Per-engine tuning surface.
+///
+/// Held behind an `Arc` inside an [`arc_swap::ArcSwap`]-backed
+/// `EngineState` so [`ReputationEngine::swap_config`] atomic-swaps
+/// the config and its paired keyed limiter as one unit.
 #[derive(Debug, Clone)]
 pub struct ReputationConfig {
     /// Decay constant `λ` such that `score(t1) = score(t0) *
@@ -487,30 +495,34 @@ pub struct ReputationEngine {
     inner: Arc<Inner>,
 }
 
-struct Inner {
-    /// Per-identity decay-tracked scores.
-    scores: PapayaMap<IdentityKey, ReputationScore>,
-    /// Per-`(identity, ip, lease)` keyed rate limiter.
-    limiter: Limiter,
-    /// Tunable thresholds + decay constant.
-    ///
-    /// TODO(R10-followup): hot-swap support lands with Phase 5 Batch
-    /// 8 (U13) where the limiter-rebuild path is specified alongside
-    /// the threshold swap. Doing it here would create a
-    /// quota-vs-config inconsistency footgun (the limiter's
-    /// burst/sustained is baked in at construction; a swap of
-    /// `ReputationConfig::governor_quota` wouldn't actually re-quota
-    /// the limiter, and `config()` would report a value the engine
-    /// isn't enforcing). U13 is the right place to wire `ArcSwap` +
-    /// limiter rebuild as one cohesive change.
+/// Atomic-swap unit for hot-reload: holds the
+/// [`ReputationConfig`] plus the keyed [`Limiter`] that the
+/// config's `governor_quota` instantiates. Held behind
+/// [`arc_swap::ArcSwap`] so a config swap rebuilds the limiter
+/// inside the same `store` and never leaves the engine quoting
+/// the old quota under the new threshold doc.
+struct EngineState {
     config: Arc<ReputationConfig>,
+    limiter: Limiter,
+}
+
+struct Inner {
+    /// Per-identity decay-tracked scores. Lock-free reads/writes
+    /// on the hot path.
+    scores: PapayaMap<IdentityKey, ReputationScore>,
+    /// Atomic-swap pointer to the current `(config, limiter)`
+    /// pair. Hot-swap rebuilds both inside one `store()` so the
+    /// limiter never quotes the old `governor_quota` under the
+    /// new threshold doc.
+    state: arc_swap::ArcSwap<EngineState>,
 }
 
 impl core::fmt::Debug for ReputationEngine {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let state = self.inner.state.load();
         f.debug_struct("ReputationEngine")
             .field("scored_identities", &self.inner.scores.pin().len())
-            .field("config", &self.inner.config)
+            .field("config", state.config.as_ref())
             .finish_non_exhaustive()
     }
 }
@@ -535,31 +547,79 @@ impl ReputationEngine {
     /// a few seconds.
     #[must_use]
     pub fn with_config(config: ReputationConfig) -> Self {
-        let limiter = RateLimiter::keyed(config.governor_quota);
+        let state = Self::build_state(config);
         Self {
             inner: Arc::new(Inner {
                 scores: PapayaMap::new(),
-                limiter,
-                config: Arc::new(config),
+                state: arc_swap::ArcSwap::new(Arc::new(state)),
             }),
         }
     }
 
-    /// Borrow the engine's [`ReputationConfig`].
+    /// Construct an [`EngineState`] from a [`ReputationConfig`]:
+    /// build the keyed [`Limiter`] from `config.governor_quota` and
+    /// pair it with the config inside one struct so an
+    /// [`arc_swap::ArcSwap::store`] can swap both atomically.
+    fn build_state(config: ReputationConfig) -> EngineState {
+        let limiter = RateLimiter::keyed(config.governor_quota);
+        EngineState {
+            config: Arc::new(config),
+            limiter,
+        }
+    }
+
+    /// Atomically swap the engine's `(config, limiter)` pair.
+    ///
+    /// Builds a fresh keyed rate limiter from
+    /// `new_config.governor_quota` and stores both inside one
+    /// [`arc_swap::ArcSwap::store`] so concurrent
+    /// [`Self::decide`] / [`Self::record_signal`] calls observe
+    /// either the old pair or the new pair, never a mix
+    /// (Hoare invariant: the engine never reports a `config()`
+    /// value the limiter is not enforcing).
+    ///
+    /// This is the engine-side carve-out from Phase 5 B8; the
+    /// SIGHUP / admin-api reload run-loop **trigger** that calls
+    /// this method on a config-file change lands with B8.
+    ///
+    /// Note that the keyed limiter's per-key budget table is reset
+    /// (each tenant restarts under the new `governor_quota`). This
+    /// is the documented v0.1 hot-swap semantic — operators reload
+    /// when they want the new policy applied uniformly, not when
+    /// they want a partial graft.
+    ///
+    /// The per-identity score table is **not** reset; reputation
+    /// accumulates across reloads.
+    pub fn swap_config(&self, new_config: ReputationConfig) {
+        let new_state = Self::build_state(new_config);
+        self.inner.state.store(Arc::new(new_state));
+    }
+
+    /// Borrow the engine's [`ReputationConfig`] as a cheap clone of
+    /// the current [`Arc`] inside the [`arc_swap::ArcSwap`] pair.
+    ///
+    /// Returns an owned `Arc` (rather than a borrowed `&`) because
+    /// the underlying pointer can be replaced at any moment by
+    /// [`Self::swap_config`]; cloning the `Arc` lets the caller hold
+    /// onto the snapshot they observed without keeping the engine's
+    /// load-guard alive. Auto-deref through `Arc<ReputationConfig>`
+    /// keeps existing `engine.config().some_field` call sites
+    /// compiling without change.
     #[must_use]
-    pub fn config(&self) -> &ReputationConfig {
-        &self.inner.config
+    pub fn config(&self) -> Arc<ReputationConfig> {
+        Arc::clone(&self.inner.state.load().config)
     }
 
     /// Project the score for `identity` to `now`. Returns 0.0 for
     /// an identity the engine has never seen.
     #[must_use]
     pub fn score_at(&self, identity: IdentityKey, now: Timestamp) -> f64 {
+        let decay_constant = self.inner.state.load().config.decay_constant;
         self.inner
             .scores
             .pin()
             .get(&identity)
-            .map_or(0.0, |s| s.projected(now, self.inner.config.decay_constant))
+            .map_or(0.0, |s| s.projected(now, decay_constant))
     }
 
     /// Convenience: project the score for `identity` to
@@ -619,7 +679,7 @@ impl ReputationEngine {
             span.record("dropped", "non_finite_weight");
             return;
         }
-        let decay_constant = self.inner.config.decay_constant;
+        let decay_constant = self.inner.state.load().config.decay_constant;
         // Sample `now` once per signal — keeping the closure
         // deterministic in its (Option<&V>) input is what papaya's
         // CAS retry/memoisation contract requires.
@@ -687,16 +747,20 @@ impl ReputationEngine {
     /// [`ReputationConfig::signal_weights`].
     ///
     /// Equivalent to `self.record_signal(identity, signal_kind,
-    /// self.config().weight_for(signal_kind))`. Engine-internal
-    /// callsites in [`Self::decide`] use this so the previously
-    /// hardcoded `1.0` weight is now a config-driven knob; under
-    /// the [`ReputationConfig::default`] map every variant maps to
+    /// w)` where `w` is the per-kind weight pulled from the engine's
+    /// current [`ReputationConfig::signal_weights`] entry (read
+    /// through the [`arc_swap::ArcSwap`] guard so a concurrent
+    /// [`Self::swap_config`] is observed atomically with its paired
+    /// limiter rebuild). Engine-internal callsites in
+    /// [`Self::decide`] use this so the previously hardcoded `1.0`
+    /// weight is now a config-driven knob; under the
+    /// [`ReputationConfig::default`] map every variant maps to
     /// `1.0`, so behavior is bit-identical until an operator
     /// overrides a weight or a future variant lands without a
     /// default-map entry (in which case the [`ReputationConfig::
     /// weight_for`] fallback to `1.0` keeps the path well-defined).
     pub fn record_signal_default(&self, identity: IdentityKey, signal_kind: SignalKind) {
-        let weight = self.inner.config.weight_for(signal_kind);
+        let weight = self.inner.state.load().config.weight_for(signal_kind);
         self.record_signal(identity, signal_kind, weight);
     }
 
@@ -739,13 +803,18 @@ impl ReputationEngine {
     )]
     pub fn decide(&self, identity: IdentityKey, ip: IpAddr, lease: &LeaseId) -> ReputationDecision {
         let span = tracing::Span::current();
+        // One ArcSwap load amortises the limiter + config reads
+        // across the whole decision; a concurrent `swap_config`
+        // either lands before this load (we see the new pair) or
+        // after (we see the old pair) — never a mix.
+        let state = self.inner.state.load();
         let now = Timestamp::now();
         let score_before = self.score_at(identity, now);
         span.record("score_before", score_before);
 
         // Step 2: keyed governor limiter.
         let triple_key: TripleKey = (identity, ip, lease.clone());
-        if self.inner.limiter.check_key(&triple_key).is_err() {
+        if state.limiter.check_key(&triple_key).is_err() {
             self.record_signal_default(identity, SignalKind::RateLimited);
             let score_after = self.score_at(identity, Timestamp::now());
             span.record("score_after", score_after);
@@ -761,7 +830,7 @@ impl ReputationEngine {
         // address resolves to an ENS name (plan U12 step 4 carve-
         // out — "score >= block_threshold AND identity is not
         // ENS-named → Block").
-        if score_before >= self.inner.config.block_threshold {
+        if score_before >= state.config.block_threshold {
             self.record_signal_default(identity, SignalKind::BlockedRequest);
             let score_after = self.score_at(identity, Timestamp::now());
             span.record("score_after", score_after);
@@ -771,9 +840,9 @@ impl ReputationEngine {
         }
 
         // Step 5: backpressure band.
-        if score_before >= self.inner.config.backpressure_threshold {
+        if score_before >= state.config.backpressure_threshold {
             span.record("score_after", score_before);
-            let decision = ReputationDecision::Backpressure(self.inner.config.backpressure_yield);
+            let decision = ReputationDecision::Backpressure(state.config.backpressure_yield);
             span.record("decision", decision.label());
             return decision;
         }
@@ -1366,5 +1435,89 @@ mod tests {
             "expected Config error for duplicate identity_hex; got {result:?}",
         );
         assert_eq!(engine.tracked_identities(), 0);
+    }
+
+    /// `swap_config` resets limiter state. The pre-swap limiter
+    /// (large burst, exhausted by N back-to-back hits) is replaced
+    /// by a fresh limiter under the new `governor_quota`, so the
+    /// first post-swap `decide()` is `Allow` — the bucket state
+    /// did not carry over.
+    #[test]
+    fn swap_config_rebuilds_limiter_under_new_quota() {
+        // Pre-swap: a roomy quota whose burst we will fully drain.
+        let cfg = ReputationConfig {
+            governor_quota: Quota::per_second(NonZeroU32::new(100).unwrap())
+                .allow_burst(NonZeroU32::new(5).unwrap()),
+            ..ReputationConfig::default()
+        };
+        let engine = ReputationEngine::with_config(cfg);
+
+        let id = IdentityKey([0xeeu8; 32]);
+        let ip: IpAddr = "127.0.0.1".parse().unwrap();
+        let lease = LeaseId::from("swap-test");
+
+        // Drain the burst-5 bucket then prove the limiter is tripped.
+        for _ in 0..5 {
+            assert_eq!(engine.decide(id, ip, &lease), ReputationDecision::Allow);
+        }
+        assert_eq!(
+            engine.decide(id, ip, &lease),
+            ReputationDecision::Block(BlockReason::RateLimited),
+        );
+
+        // Swap in a clearly different quota (burst-1) and watch the
+        // first post-swap call land Allow — proves a fresh limiter,
+        // not the exhausted pre-swap bucket.
+        let new_cfg = ReputationConfig {
+            governor_quota: Quota::per_second(NonZeroU32::new(1).unwrap())
+                .allow_burst(NonZeroU32::new(1).unwrap()),
+            block_threshold: 999.0,
+            ..ReputationConfig::default()
+        };
+        engine.swap_config(new_cfg);
+
+        assert_eq!(engine.decide(id, ip, &lease), ReputationDecision::Allow);
+        assert_eq!(
+            engine.decide(id, ip, &lease),
+            ReputationDecision::Block(BlockReason::RateLimited),
+        );
+        assert_eq!(engine.config().block_threshold, 999.0);
+    }
+
+    /// `swap_config` does not touch the per-identity score table.
+    /// Reputation accumulates across reloads — the v0.1 contract
+    /// the rustdoc names.
+    #[test]
+    fn swap_config_preserves_score_table() {
+        let engine = ReputationEngine::new();
+        let id = IdentityKey([0xa5u8; 32]);
+        engine.record_signal(id, SignalKind::RateLimited, 7.5);
+        let before = engine.score(id);
+        assert!((before - 7.5).abs() < 1e-6);
+
+        engine.swap_config(ReputationConfig::default());
+
+        let after = engine.score(id);
+        assert!(
+            (after - 7.5).abs() < 1e-6,
+            "score {after} should survive swap_config (was {before})",
+        );
+        assert_eq!(engine.tracked_identities(), 1);
+    }
+
+    /// `swap_config` makes the new config visible through `config()`
+    /// — the read-side getter returns the post-swap pair.
+    #[test]
+    fn swap_config_returns_new_config_via_getter() {
+        let engine = ReputationEngine::new();
+        assert_eq!(engine.config().block_threshold, REPUTATION_BLOCK_THRESHOLD);
+
+        let new_cfg = ReputationConfig {
+            block_threshold: 999.0,
+            ..ReputationConfig::default()
+        };
+        engine.swap_config(new_cfg);
+
+        assert_eq!(engine.config().block_threshold, 999.0);
     }
 }

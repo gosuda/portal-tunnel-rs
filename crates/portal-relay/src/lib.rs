@@ -20,9 +20,8 @@
 //!   signal infra) plus the [`policy::honeypot`] matcher are
 //!   committed; `TODO(R10-followup)` markers in `reputation.rs` carve
 //!   out the remaining deferrals — ENS Sybil-gating exemption
-//!   (waits on `Arc<dyn EnsResolver>` from B6's API surface),
-//!   honeypot call-site wiring, the `reputation.json` 60s-cadence
-//!   persistence loop, hot-swap support. The per-signal-kind weight
+//!   (waits on `Arc<dyn EnsResolver>` from B6's API surface) and
+//!   honeypot call-site wiring. The per-signal-kind weight
 //!   plumbing landed via
 //!   [`policy::reputation::ReputationConfig::signal_weights`] +
 //!   [`policy::reputation::ReputationEngine::record_signal_default`];
@@ -31,7 +30,11 @@
 //!   `restore_from_path`) over a
 //!   [`policy::reputation::ReputationSnapshotEntry`] DTO list also
 //!   landed; only the 60s-cadence task that drives them remains B8
-//!   territory.
+//!   territory. Engine-side hot-swap also landed via
+//!   [`policy::reputation::ReputationEngine::swap_config`] (atomic
+//!   `(config, limiter)` pair behind [`arc_swap::ArcSwap`]); the
+//!   SIGHUP / admin-api reload run-loop **trigger** that calls
+//!   `swap_config` on a config-file change remains B8 territory.
 //! - **Batches 8 + 10 fully pending**: hot-reload + keyless I/O
 //!   wiring; Admin View + R15 Status TUI.
 //!

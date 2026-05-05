@@ -89,6 +89,7 @@ repository.workspace = true
 # - rand_core (workspace pin v0.6) — `OsRng` for the `with_random_key`
 #   construction-site path (unit tests + the U7 first-run init).
 [dependencies]
+arc-swap = { workspace = true }
 axum = { workspace = true }
 compact_str = { workspace = true, features = ["serde"] }
 defguard_boringtun = { workspace = true }
