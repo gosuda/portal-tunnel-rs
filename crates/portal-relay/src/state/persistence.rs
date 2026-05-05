@@ -2,12 +2,16 @@
 //! crash-recovery rejection.
 //!
 //! Single owner of "write JSON to a relay state file" for the entire
-//! crate. Used by:
+//! crate. Intended consumers (each is wired in a follow-up commit;
+//! none have a production call site against these helpers yet — only
+//! the in-module tests exercise them):
 //!
-//! - identity persistence (Phase 5 B3+ when full bundle loader lands)
-//! - lease registry snapshots (Phase 5 B4)
-//! - admin settings (Phase 5 B6)
-//! - R10 reputation snapshots (Phase 5 B7)
+//! - identity persistence (full identity-bundle loader)
+//! - lease registry snapshots
+//! - admin settings
+//! - R10 reputation snapshots
+//!
+//! See this crate's `lib.rs` for current Phase 5 status.
 //!
 //! ## Safety contract
 //!
