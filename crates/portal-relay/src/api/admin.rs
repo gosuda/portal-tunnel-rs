@@ -40,10 +40,13 @@ use crate::api::envelope::{ApiError, ApiErrorCode, ApiResult, ok};
 use crate::api::state::AdminState;
 use crate::config::RuntimeConfig;
 
-/// Response body for a successful reload.
+/// Response body for a successful reload. `accepted: true` is the
+/// only field on a 200 response.
 ///
-/// `accepted: true` is the only contract today; future fields may
-/// surface diff'd field names or validation warnings.
+/// `#[non_exhaustive]` blocks struct-literal construction from
+/// downstream Rust crates; it does NOT guarantee JSON-wire
+/// compatibility — a strict-decoder client that rejects unknown
+/// keys would still break on a field addition.
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct ReloadAcceptedBody {
