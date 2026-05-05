@@ -508,21 +508,36 @@ impl ReputationEngine {
     /// (the engine surface is symmetric; a future "good behaviour"
     /// signal would feed a negative weight).
     ///
-    /// `signal_kind` is currently informational — it is reserved
-    /// for future per-signal-kind weight policies + the U13
-    /// per-signal audit-span emission.
+    /// `signal_kind` is captured in the tracing span emitted by this
+    /// function (see [`tracing::instrument`] attribute below). The
+    /// per-signal-kind WEIGHT policy (different default weights for
+    /// honeypot vs rate-limit vs blocked-request) remains a follow-up;
+    /// today the caller passes the weight verbatim.
     ///
-    /// TODO(R10-followup): emit a `tracing::info` span here per
-    /// signal kind so the audit log captures the full causal
-    /// chain (currently only [`Self::decide`] is instrumented).
+    /// TODO(R10-followup): per-signal-kind weight policy — caller
+    /// should pass `SignalKind` only, and the engine looks up the
+    /// configured weight for that kind from `ReputationConfig`. This
+    /// closes the last shape of plan U12's per-signal calibration.
+    #[tracing::instrument(
+        level = "info",
+        skip_all,
+        fields(
+            identity = %hex_identity(&identity),
+            signal_kind = ?signal_kind,
+            weight = weight,
+            // Best-effort snapshot — see record-site comment for the
+            // racy-observation contract.
+            observed_score_after = tracing::field::Empty,
+            dropped = tracing::field::Empty,
+        ),
+    )]
     pub fn record_signal(&self, identity: IdentityKey, signal_kind: SignalKind, weight: f64) {
-        // Touch `signal_kind` so the parameter is not flagged as
-        // unused while the per-kind weight policy is deferred.
-        let _ = signal_kind;
+        let span = tracing::Span::current();
         // NaN/±inf would poison every subsequent threshold check
         // (`NaN >= threshold` is false), so reject at the gate
         // rather than store a sentinel.
         if !weight.is_finite() {
+            span.record("dropped", "non_finite_weight");
             return;
         }
         let decay_constant = self.inner.config.decay_constant;
@@ -574,6 +589,19 @@ impl ReputationEngine {
                 last_updated: now,
             },
         );
+        // Best-effort snapshot — emitted as `observed_score_after`.
+        // The re-read can race a concurrent `record_signal` from
+        // another thread that lands between our CAS and our re-read,
+        // so the value reported here is the score we observe, not
+        // strictly the post-state of THIS signal's CAS landing.
+        // Exact landing-value capture would require threading the
+        // closure's `next_value` out via interior mutability, which
+        // papaya 0.2's update closure shape does not accommodate
+        // cheaply; the racy-observation contract is acceptable for
+        // audit logging because every signal still emits its own
+        // span and the temporal ordering is preserved.
+        let observed = self.score_at(identity, now);
+        span.record("observed_score_after", observed);
     }
 
     /// Run the v0.1 R10 decision pipeline against the supplied
