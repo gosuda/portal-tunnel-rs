@@ -233,11 +233,11 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
     // Opportunistic config-bundle integration: if the operator ran
     // `portal-relay init` (or hand-wrote both files), load the
     // bundle and wire its `ReloadHandle` into `PolicyRuntime` so
-    // the iter-128/129 reload-aware reads (`is_ip_banned`,
-    // `bps_cap_per_identity`) reflect the on-disk operator config.
-    // If either file is missing, fall back to the default
-    // `PolicyRuntime` so the iter-119 baseline of `serve` working
-    // without `init` first is preserved.
+    // the reload-aware reads (`is_ip_banned`, `bps_cap_per_identity`,
+    // `ip_ban_count`) reflect the on-disk operator config. If either
+    // file is missing, fall back to the default `PolicyRuntime` so
+    // the baseline of `serve` working without `init` first is
+    // preserved.
     let bundle = load_bundle_if_present(&args.state_dir).await?;
     let reload_handle: Option<Arc<portal_relay::ReloadHandle>> = bundle.map(|bundle| {
         let bundle_name = bundle.server.name.clone();
@@ -274,8 +274,9 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
     // runtime.json. The JoinHandle is held for shutdown-time
     // abort; aborting drops the inner debouncer, which signals the
     // OS-level watcher to stop. Spawn-time errors log warn and
-    // continue without hot-reload (best-effort, per iter-126's
-    // resilience contract).
+    // continue without hot-reload (best-effort: a relay running
+    // without filesystem-watch is still operator-actionable via the
+    // POST /v1/admin/config/reload HTTP trigger).
     #[cfg(feature = "config_file_watch")]
     let watcher_handle: Option<tokio::task::JoinHandle<()>> = match &reload_handle {
         Some(handle) => {
