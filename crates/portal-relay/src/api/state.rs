@@ -5,8 +5,10 @@
 //! discovery router cannot accidentally reach the admin policy
 //! mutators because its state struct doesn't carry the handle.
 //!
-//! Phase 5 B6 lands the type plumbing only — fields land alongside
-//! their consuming handlers in subsequent batches.
+//! Phase 5 B6 landed the initial type plumbing; subsequent batches
+//! extend each struct alongside its consuming handlers — e.g.
+//! [`AdminState::reload`] landed with the
+//! `POST /v1/admin/config/reload` handler.
 
 use std::sync::Arc;
 
