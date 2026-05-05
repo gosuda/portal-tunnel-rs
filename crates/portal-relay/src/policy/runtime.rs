@@ -1,11 +1,16 @@
 //! `PolicyRuntime` — aggregator over the workspace's policy sub-modules.
 //!
-//! Phase 5 B5 lands the minimum viable shape: `IpFilter` +
-//! `ProxyTrust`. Subsequent batches extend with:
+//! Phase 5 B3 lands the minimum viable shape: `IpFilter` +
+//! `ProxyTrust`. The Phase 5 plan's U6 unit additionally sketched
+//! two surfaces that were narrowed-out at land time and remain
+//! follow-up work:
 //!
 //! - `Approver` — identity approval (auto / manual / banned).
 //! - `BpsManager` — bandwidth throttling (per-identity governor).
-//! - R10 reputation engine (Phase 5 B7).
+//!
+//! The R10 reputation engine lives as a sibling module
+//! ([`crate::policy::reputation`]) rather than an extension of this
+//! aggregator; see this crate's `lib.rs` for current Phase 5 status.
 
 use crate::policy::ip_filter::IpFilter;
 use crate::policy::proxy_trust::ProxyTrust;
