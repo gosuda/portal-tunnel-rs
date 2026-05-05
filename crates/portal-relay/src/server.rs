@@ -5,9 +5,13 @@
 //! - [`crate::policy::PolicyRuntime`] — IP filter + proxy trust.
 //! - 5s lease janitor task that drives `cleanup_expired`.
 //!
-//! Phase 5 B9 lands this orchestrator as a skeleton. Subsequent
-//! batches wire the actual axum listeners, the QUIC backhaul
-//! `Endpoint`, the keyless mTLS surface, and the metrics exporter.
+//! Phase 5 B9 lands this orchestrator as a skeleton. The composition
+//! glue that mounts the [`crate::api`] / [`crate::admin`] /
+//! [`crate::discovery`] axum routers and the [`crate::keyless`] mTLS
+//! surface onto live listeners, plus the `metrics-exporter-prometheus`
+//! integration that publishes the `/metrics` endpoint, is the work of
+//! subsequent commits. See this crate's `lib.rs` for current Phase 5
+//! status.
 //!
 //! ## Lifecycle
 //!
