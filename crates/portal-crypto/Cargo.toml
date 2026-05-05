@@ -36,6 +36,7 @@ http = { workspace = true }
 iri-string = { workspace = true }
 jiff = { workspace = true }
 k256 = { workspace = true }
+parking_lot = { workspace = true }
 secrecy = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -19,5 +19,7 @@
 // because `ens` itself is declared `pub(crate)` in `lib.rs`, making an inner
 // `pub(crate)` redundant. Visibility is already capped at the crate root.
 pub mod alloy_resolver;
+pub mod cache;
 
 pub use alloy_resolver::{AlloyEnsResolver, BoxedEnsResolver, EnsError, EnsResolver};
+pub use cache::{CachedEnsResolver, DEFAULT_ENS_CACHE_TTL};

@@ -4189,6 +4189,7 @@ dependencies = [
  "iri-string",
  "jiff",
  "k256",
+ "parking_lot",
  "portal-crypto",
  "portal-wire",
  "proptest",
