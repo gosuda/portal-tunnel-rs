@@ -144,6 +144,39 @@ async fn admin_router_built_from_default_server_returns_sentinels_for_policy_sna
 }
 
 #[tokio::test]
+async fn admin_router_built_from_default_server_returns_zero_for_lease_count() {
+    // The lease/count endpoint reads through `AdminState.leases`,
+    // not `AdminState.reload` — so a default `Server::new()`
+    // (no `with_reload_handle`) still serves a usable router whose
+    // lease count reflects the registry's actual content.
+    // `Server::new()` ships an empty `LeaseRegistry`, so the
+    // observable contract is 200 OK + count: 0. Pins this through
+    // the orchestrator-assembled router so a future
+    // `Server::admin_state` change that broke the leases field
+    // mapping cannot pass while `admin_lease_count_endpoint.rs`
+    // (which uses a hand-rolled `AdminState`) stayed green.
+    let server = Server::new();
+    let router = server.admin_router();
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/v1/admin/lease/count")
+        .body(Body::empty())
+        .expect("request build");
+    let response = router.oneshot(request).await.expect("oneshot service");
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body collect");
+    let body: serde_json::Value =
+        serde_json::from_slice(&bytes).expect("response is JSON envelope");
+    assert_eq!(
+        body,
+        serde_json::json!({"data": {"count": 0}}),
+        "default Server must surface count: 0 through admin_router()",
+    );
+}
+
+#[tokio::test]
 async fn admin_router_built_from_default_server_returns_503_for_reload() {
     // Server::new() leaves reload as None — the orchestrator-level
     // contract for "bundle was not loaded". The admin router must then
