@@ -15,6 +15,9 @@
 //!   state from [`crate::policy::PolicyRuntime`] (BPS cap +
 //!   operator-managed IP ban count); 200 always, sentinel values
 //!   when no handle attached.
+//! - `GET /v1/admin/lease/count` — active-lease count from
+//!   [`AdminState::leases`]; 200 always, count from a lock-free
+//!   read of the registry.
 //!
 //! Each handler carries a `#[tracing::instrument(name = "admin.…")]`
 //! span so operators can correlate admin requests with relay log
@@ -133,9 +136,10 @@ pub async fn get_current_config_handler(
 /// crate version so an operator can verify which build a given
 /// listener is running.
 ///
-/// Marked `#[non_exhaustive]` so future fields (commit SHA, build
-/// timestamp, server lifecycle phase) can land without a breaking
-/// change to the on-the-wire envelope shape.
+/// `#[non_exhaustive]` blocks struct-literal construction from
+/// downstream Rust crates; it does NOT guarantee JSON-wire
+/// compatibility — a strict-decoder client that rejects unknown
+/// keys would still break on a field addition.
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct HealthBody {
@@ -171,9 +175,10 @@ pub async fn health_handler() -> ApiResult<HealthBody> {
 /// BPS cap (`None` if open / no cap) and the operator-managed IP
 /// ban-list size.
 ///
-/// Marked `#[non_exhaustive]` so future fields (rate-limit hit
-/// counts, dynamic-ban count, reputation-engine snapshot
-/// counters) can land without breaking the wire shape.
+/// `#[non_exhaustive]` blocks struct-literal construction from
+/// downstream Rust crates; it does NOT guarantee JSON-wire
+/// compatibility — a strict-decoder client that rejects unknown
+/// keys would still break on a field addition.
 #[derive(Debug, Clone, Serialize)]
 #[non_exhaustive]
 pub struct PolicySnapshotBody {
@@ -189,6 +194,44 @@ pub struct PolicySnapshotBody {
     /// [`crate::policy::ip_filter::IpFilter::ban`] are NOT
     /// included (they have a separate observability path).
     pub ip_ban_count: usize,
+}
+
+/// Wire body for `GET /v1/admin/lease/count`.
+///
+/// Carries the active-lease count from the [`AdminState`]'s lease
+/// registry. Operator value: monitor lease accumulation (potential
+/// leak) or zero (operator misconfiguration).
+///
+/// `#[non_exhaustive]` blocks struct-literal construction from
+/// downstream Rust crates so a future field addition does not
+/// break the Rust API. It does NOT guarantee JSON-wire
+/// compatibility for strict clients — adding a field still
+/// surfaces a new key on the wire, which a `deny_unknown_fields`-
+/// equivalent strict-decoder client would reject.
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct LeaseCountBody {
+    /// Active lease count from the registry's lock-free read.
+    pub count: usize,
+}
+
+/// `GET /v1/admin/lease/count` — operator-facing lease count.
+///
+/// Reads from the [`AdminState`]'s lease registry via
+/// [`crate::state::LeaseRegistry::lease_count`] (lock-free read).
+/// Returns 200 OK with the current count regardless of reload-handle
+/// attachment — the lease registry is independent of the runtime
+/// config surface. Trust boundary inherits from the module rustdoc.
+///
+/// # Errors
+///
+/// Infallible. Signature returns [`ApiResult`] for envelope
+/// uniformity with the rest of the admin surface.
+#[tracing::instrument(name = "admin.lease_count", skip_all)]
+pub async fn lease_count_handler(State(state): State<AdminState>) -> ApiResult<LeaseCountBody> {
+    Ok(ok(LeaseCountBody {
+        count: state.leases.lease_count(),
+    }))
 }
 
 /// `GET /v1/admin/policy/snapshot` — derived-policy observability.

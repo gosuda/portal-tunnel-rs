@@ -53,8 +53,10 @@ pub struct AdminState {
     ///   sentinel values rather than 503, because the policy
     ///   surface is observability-oriented.
     ///
-    /// `GET /v1/admin/health` does NOT consult this field — the
-    /// stateless liveness contract is independent of bundle load.
+    /// `GET /v1/admin/health` and `GET /v1/admin/lease/count` do
+    /// NOT consult this field — health is stateless liveness and
+    /// lease count reads from `AdminState.leases`, both
+    /// independent of bundle load.
     pub reload: Option<Arc<ReloadHandle>>,
 }
 

@@ -30,12 +30,13 @@ pub fn build_sdk_router(state: SdkState) -> axum::Router {
 
 /// Build the admin trust-boundary router.
 ///
-/// Mounts the four [`admin`] handlers — `POST /v1/admin/config/reload`,
-/// `GET /v1/admin/config/current`, `GET /v1/admin/health`, and
-/// `GET /v1/admin/policy/snapshot`. See the [`admin`] module rustdoc
-/// for the per-endpoint contracts (handle-required vs stateless vs
-/// sentinel-on-no-handle). Additional `/v1/admin/*` + `/metrics`
-/// handlers register in follow-up commits.
+/// Mounts the five [`admin`] handlers — `POST /v1/admin/config/reload`,
+/// `GET /v1/admin/config/current`, `GET /v1/admin/health`,
+/// `GET /v1/admin/policy/snapshot`, and `GET /v1/admin/lease/count`.
+/// See the [`admin`] module rustdoc for the per-endpoint contracts
+/// (handle-required vs stateless vs sentinel-on-no-handle).
+/// Additional `/v1/admin/*` + `/metrics` handlers register in
+/// follow-up commits.
 #[must_use]
 #[expect(
     clippy::double_must_use,
@@ -47,7 +48,7 @@ pub fn build_sdk_router(state: SdkState) -> axum::Router {
     reason = "Phase 7 U8.8 utoipa coverage gate names \
               `utoipa_axum::OpenApiRouter::route` for library-crate route \
               registration. The admin surface has no `ApiDoc::openapi()` \
-              aggregator wired in the workspace yet; the four admin \
+              aggregator wired in the workspace yet; the five admin \
               handlers register through `axum::Router::route` under the \
               same carve-out shape as the keyless oracle. The utoipa-axum \
               migration is a single Phase 7 follow-up that switches every \
@@ -77,6 +78,7 @@ pub fn build_admin_router(state: AdminState) -> axum::Router {
         "/v1/admin/policy/snapshot",
         get(admin::policy_snapshot_handler),
     );
+    let r = r.route("/v1/admin/lease/count", get(admin::lease_count_handler));
     r.with_state(state)
 }
 

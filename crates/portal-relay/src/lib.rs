@@ -53,7 +53,7 @@
 //!   `RelayConfigBundle::from_files`, a v0.1 simple two-file
 //!   loader that reads both JSON files and produces a
 //!   [`reload::ReloadHandle`] via `into_handle()`. The HTTP admin
-//!   surface also landed (four endpoints — see [`api::admin`]
+//!   surface also landed (five endpoints — see [`api::admin`]
 //!   module rustdoc for the per-endpoint contracts); the
 //!   [`server::Server`] orchestrator surfaces an
 //!   [`api::AdminState`] via [`server::Server::admin_state`] and
