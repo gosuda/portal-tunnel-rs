@@ -51,10 +51,16 @@
 //!   feeds [`SignalKind::HoneypotHit`] from the listener pipeline;
 //!   the signal variant exists already so call sites can stub
 //!   today.
-//! - **Persistence.** `reputation.json` round-trip via U5
-//!   [`crate::state::write_json_atomic`] (60s cadence) is plan U12
-//!   step 6's persistence requirement; the engine is in-memory
-//!   only this iteration.
+//! - **Persistence.** Engine-side `reputation.json` round-trip
+//!   helpers ([`ReputationEngine::persist_to_path`] +
+//!   [`ReputationEngine::restore_from_path`]) consume U5
+//!   [`crate::state::persistence::write_json_atomic`] +
+//!   [`crate::state::persistence::read_json`] over a
+//!   `Vec<ReputationSnapshotEntry>` DTO (see
+//!   [`ReputationSnapshotEntry`]) with hex-encoded identities. The
+//!   60s-cadence task that drives the helpers from the relay's run
+//!   loop is plan U12 step 6's remaining persistence requirement
+//!   and lands with Phase 5 B8.
 //! - **ADR-0007.** Decay / threshold / weight defaults are set to
 //!   reasonable v0.1 values and pinned as `pub const`; the formal
 //!   ADR justifying those choices is a separate decision artifact
@@ -70,6 +76,7 @@
 use std::collections::HashMap as StdHashMap;
 use std::net::IpAddr;
 use std::num::NonZeroU32;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -79,6 +86,9 @@ use jiff::{Timestamp, Unit};
 use papaya::HashMap as PapayaMap;
 
 pub use crate::state::lease_registry::IdentityKey;
+
+use crate::error::RelayResult;
+use crate::state::persistence::{read_json, write_json_atomic};
 
 // ---------------------------------------------------------------------------
 // v0.1 defaults — provisional ADR-0007 values
@@ -820,6 +830,150 @@ impl ReputationEngine {
             }
         }
     }
+
+    /// Persist the engine's current score snapshot to `path` via the
+    /// workspace's atomic-write helper
+    /// ([`crate::state::persistence::write_json_atomic`]).
+    ///
+    /// The on-disk shape is `Vec<ReputationSnapshotEntry>` (see
+    /// [`ReputationSnapshotEntry`]) — an explicit DTO list rather
+    /// than a `HashMap<IdentityKey, _>`,
+    /// because `serde_json` rejects non-string map keys and
+    /// `IdentityKey` serializes as a `[u8; 32]` array. Each entry
+    /// carries the identity as a 64-char lowercase hex string + the
+    /// `ReputationScore` pair. The helper owns the temp-file +
+    /// rename + parent-fsync contract; this method exists so the
+    /// eventual 60s-cadence persistence loop in Phase 5 B8 can call
+    /// a single async function rather than re-deriving the
+    /// snapshot/encode/serialize/write quadruple at the call site.
+    ///
+    /// Iteration order over the snapshot map is unspecified; tests
+    /// that compare on-disk bytes verbatim must therefore restore
+    /// through [`Self::restore_from_path`] and compare via
+    /// [`Self::snapshot`] rather than via raw file content.
+    ///
+    /// # Errors
+    ///
+    /// Surfaces any [`crate::error::RelayError`] from the underlying
+    /// atomic-write helper:
+    /// - [`crate::error::RelayError::Io`] for FS failures (parent
+    ///   create, temp-write, rename, parent-fsync).
+    /// - [`crate::error::RelayError::Config`] if `serde_json`
+    ///   refuses the snapshot (in practice unreachable because the
+    ///   DTO is plain data).
+    pub async fn persist_to_path(&self, path: &Path) -> RelayResult<()> {
+        let snap = self.snapshot();
+        let entries: Vec<ReputationSnapshotEntry> = snap
+            .into_iter()
+            .map(|(identity, score)| ReputationSnapshotEntry {
+                identity_hex: hex_identity(&identity),
+                score,
+            })
+            .collect();
+        write_json_atomic(path, &entries).await
+    }
+
+    /// Restore an engine snapshot from `path` via the workspace's
+    /// JSON reader ([`crate::state::persistence::read_json`]),
+    /// converting each on-disk hex identity back to an
+    /// [`IdentityKey`] and merging the result into the in-memory
+    /// score table via [`Self::restore_from_snapshot`].
+    ///
+    /// The merge semantics match `restore_from_snapshot`: entries
+    /// not present in the file are left untouched, and non-finite
+    /// values in the file are silently dropped (the same invariant
+    /// `record_signal` enforces). A malformed `identity_hex` field
+    /// (wrong length or non-hex byte) fails the call as a whole —
+    /// partial restore would silently lose rows and is rejected.
+    ///
+    /// # Errors
+    ///
+    /// Surfaces any [`crate::error::RelayError`] from the underlying
+    /// reader, plus a [`crate::error::RelayError::Config`] for any
+    /// row whose `identity_hex` is not a 64-char lowercase hex
+    /// string:
+    /// - [`crate::error::RelayError::Io`] when the file is missing
+    ///   or unreadable.
+    /// - [`crate::error::RelayError::Config`] on JSON deserialization
+    ///   failure (corrupt file, schema drift) or invalid hex
+    ///   identity.
+    pub async fn restore_from_path(&self, path: &Path) -> RelayResult<()> {
+        let entries: Vec<ReputationSnapshotEntry> = read_json(path).await?;
+        let mut snap: std::collections::HashMap<IdentityKey, ReputationScore> =
+            std::collections::HashMap::with_capacity(entries.len());
+        for entry in entries {
+            let id = parse_hex_identity(&entry.identity_hex).map_err(|reason| {
+                crate::error::RelayError::Config(format!(
+                    "invalid identity_hex {:?} in {}: {reason}",
+                    entry.identity_hex,
+                    path.display(),
+                ))
+            })?;
+            // Duplicate identity rows would have the second
+            // silently overwrite the first, defeating the
+            // one-score-per-identity invariant the in-memory
+            // snapshot guarantees by construction. Reject the file
+            // up-front so the operator sees the corruption.
+            if snap.contains_key(&id) {
+                return Err(crate::error::RelayError::Config(format!(
+                    "duplicate identity_hex {:?} in {}",
+                    entry.identity_hex,
+                    path.display(),
+                )));
+            }
+            snap.insert(id, entry.score);
+        }
+        self.restore_from_snapshot(snap);
+        Ok(())
+    }
+}
+
+/// Persisted-on-disk row for the reputation snapshot.
+///
+/// Used by [`ReputationEngine::persist_to_path`] +
+/// [`ReputationEngine::restore_from_path`]. The list-of-entries
+/// shape exists so the on-disk JSON has string keys (the identity
+/// in lowercase hex), which is what `serde_json` requires from map
+/// keys; the in-memory engine continues to use
+/// `HashMap<IdentityKey, ReputationScore>` and the conversion lives
+/// at the disk boundary.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ReputationSnapshotEntry {
+    /// 64-char lowercase hex encoding of the 32-byte
+    /// [`IdentityKey`] — matches `hex_identity`'s output.
+    pub identity_hex: String,
+    /// The decay-tracked score paired with its `last_updated`
+    /// timestamp.
+    pub score: ReputationScore,
+}
+
+/// Parse a 64-char lowercase hex string back into an
+/// [`IdentityKey`].
+///
+/// Accepts only the exact shape produced by `hex_identity` —
+/// length 64, lowercase, [0-9a-f] — so a malformed file fails
+/// fast at the disk boundary rather than poisoning the in-memory
+/// score table with a default-zero or all-zero identity.
+fn parse_hex_identity(hex: &str) -> Result<IdentityKey, &'static str> {
+    if hex.len() != 64 {
+        return Err("expected 64 hex characters");
+    }
+    let mut out = [0u8; 32];
+    let bytes = hex.as_bytes();
+    for (i, slot) in out.iter_mut().enumerate() {
+        let hi = hex_nibble(bytes[i * 2])?;
+        let lo = hex_nibble(bytes[i * 2 + 1])?;
+        *slot = (hi << 4) | lo;
+    }
+    Ok(IdentityKey(out))
+}
+
+const fn hex_nibble(b: u8) -> Result<u8, &'static str> {
+    match b {
+        b'0'..=b'9' => Ok(b - b'0'),
+        b'a'..=b'f' => Ok(b - b'a' + 10),
+        _ => Err("non-lowercase-hex character"),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1131,5 +1285,86 @@ mod tests {
             "score {score} should be ~5.0 after record_signal_default \
              with configured weight 5.0",
         );
+    }
+
+    /// `persist_to_path` then `restore_from_path` round-trips the
+    /// score table through the workspace's atomic-write helper +
+    /// JSON reader. The DTO list shape (`Vec<ReputationSnapshotEntry>`)
+    /// is the on-disk surface; verifying via post-restore
+    /// `snapshot()` keeps the test independent of map iteration
+    /// order.
+    #[tokio::test]
+    async fn persist_and_restore_round_trips_through_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("reputation.json");
+
+        let writer = ReputationEngine::new();
+        let id_a = IdentityKey([0xa1u8; 32]);
+        let id_b = IdentityKey([0xb2u8; 32]);
+        writer.record_signal(id_a, SignalKind::RateLimited, 7.0);
+        writer.record_signal(id_b, SignalKind::HoneypotHit, 3.0);
+        writer.persist_to_path(&path).await.unwrap();
+
+        let reader = ReputationEngine::new();
+        reader.restore_from_path(&path).await.unwrap();
+        let restored = reader.snapshot();
+        assert_eq!(restored.len(), 2);
+        assert!(
+            (restored.get(&id_a).unwrap().value - 7.0).abs() < 1e-6,
+            "id_a score should round-trip to ~7.0",
+        );
+        assert!(
+            (restored.get(&id_b).unwrap().value - 3.0).abs() < 1e-6,
+            "id_b score should round-trip to ~3.0",
+        );
+    }
+
+    /// `restore_from_path` rejects a file with an invalid hex
+    /// identity (wrong length / non-lowercase-hex byte) as
+    /// [`crate::error::RelayError::Config`] rather than silently
+    /// inserting a zero-bytes identity.
+    #[tokio::test]
+    async fn restore_rejects_invalid_identity_hex() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("reputation.json");
+        // Hand-crafted file with one valid row plus one invalid
+        // (uppercase 'F' fails the lowercase-hex parser).
+        let bad = serde_json::json!([
+            { "identity_hex": "00".repeat(32), "score": { "value": 1.0, "last_updated": "2026-05-04T00:00:00Z" } },
+            { "identity_hex": "F".repeat(64),  "score": { "value": 1.0, "last_updated": "2026-05-04T00:00:00Z" } }
+        ]);
+        tokio::fs::write(&path, bad.to_string()).await.unwrap();
+
+        let engine = ReputationEngine::new();
+        let result = engine.restore_from_path(&path).await;
+        assert!(
+            matches!(result, Err(crate::error::RelayError::Config(_))),
+            "expected Config error for invalid hex; got {result:?}",
+        );
+        // Engine state is unchanged on failure.
+        assert_eq!(engine.tracked_identities(), 0);
+    }
+
+    /// `restore_from_path` rejects a file with duplicate
+    /// `identity_hex` rows so the in-memory invariant
+    /// (one-score-per-identity, no later-overwrite ambiguity) is
+    /// preserved at the disk boundary.
+    #[tokio::test]
+    async fn restore_rejects_duplicate_identity_hex() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("reputation.json");
+        let dupe = serde_json::json!([
+            { "identity_hex": "11".repeat(32), "score": { "value": 1.0, "last_updated": "2026-05-04T00:00:00Z" } },
+            { "identity_hex": "11".repeat(32), "score": { "value": 9.0, "last_updated": "2026-05-04T00:00:00Z" } }
+        ]);
+        tokio::fs::write(&path, dupe.to_string()).await.unwrap();
+
+        let engine = ReputationEngine::new();
+        let result = engine.restore_from_path(&path).await;
+        assert!(
+            matches!(result, Err(crate::error::RelayError::Config(_))),
+            "expected Config error for duplicate identity_hex; got {result:?}",
+        );
+        assert_eq!(engine.tracked_identities(), 0);
     }
 }

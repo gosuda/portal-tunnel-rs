@@ -19,13 +19,19 @@
 //!   `(identity, ip, lease)`, per-identity exponential-decay score,
 //!   signal infra) plus the [`policy::honeypot`] matcher are
 //!   committed; `TODO(R10-followup)` markers in `reputation.rs` carve
-//!   out the deferrals — ENS Sybil-gating exemption (waits on
-//!   `Arc<dyn EnsResolver>` from B6's API surface), honeypot
-//!   call-site wiring, `reputation.json` persistence, hot-swap
-//!   support. The per-signal-kind weight plumbing landed via
+//!   out the remaining deferrals — ENS Sybil-gating exemption
+//!   (waits on `Arc<dyn EnsResolver>` from B6's API surface),
+//!   honeypot call-site wiring, the `reputation.json` 60s-cadence
+//!   persistence loop, hot-swap support. The per-signal-kind weight
+//!   plumbing landed via
 //!   [`policy::reputation::ReputationConfig::signal_weights`] +
 //!   [`policy::reputation::ReputationEngine::record_signal_default`];
-//!   per-kind tuning values remain an ADR-0007 decision.
+//!   per-kind tuning values remain an ADR-0007 decision. Engine-side
+//!   `reputation.json` persistence helpers (`persist_to_path` /
+//!   `restore_from_path`) over a
+//!   [`policy::reputation::ReputationSnapshotEntry`] DTO list also
+//!   landed; only the 60s-cadence task that drives them remains B8
+//!   territory.
 //! - **Batches 8 + 10 fully pending**: hot-reload + keyless I/O
 //!   wiring; Admin View + R15 Status TUI.
 //!
