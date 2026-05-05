@@ -162,11 +162,19 @@ pub const REPUTATION_RATE_LIMITED_WEIGHT: f64 = 1.0;
 
 /// Default per-signal weight for [`SignalKind::HoneypotHit`].
 ///
-/// The honeypot wiring follow-up may amplify this once a tenant-
-/// noisiness baseline exists; today it matches `RateLimited` so the
-/// signal-shape decision is decoupled from the plumbing change.
-/// Per-kind tuning is an ADR-0007 decision.
-pub const REPUTATION_HONEYPOT_HIT_WEIGHT: f64 = 1.0;
+/// `25.0` per ADR-0007 §"Per-signal weights" — a honeypot path match is
+/// high-signal (production tenants do not request `/.env` or
+/// `/.git/config`). At the `100.0` block threshold + 24 h half-life
+/// decay constant, this means four honeypot hits inside one decay
+/// window cross the block threshold, while a single accidental
+/// misconfigured-probe hit decays well below threshold within hours.
+/// Plan U12 §Approach also names this exact value (25.0).
+///
+/// The listener-pipeline wiring that drives `record_signal(_,
+/// HoneypotHit, _)` from a matched glob is a separate followup
+/// (`TODO(R10-followup)` markers below); the weight constant is
+/// independent of that wiring.
+pub const REPUTATION_HONEYPOT_HIT_WEIGHT: f64 = 25.0;
 
 /// Default per-signal weight for [`SignalKind::BlockedRequest`].
 ///
