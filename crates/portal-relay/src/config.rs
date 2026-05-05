@@ -222,6 +222,25 @@ mod tests {
     }
 
     #[test]
+    fn runtime_config_rejects_unknown_field_alongside_valid_field() {
+        // Composition pin: a payload that carries BOTH a valid
+        // known field AND a typo'd sibling must reject. Without
+        // this assertion, a future contributor who naively splits
+        // `default` and `deny_unknown_fields` into separate structs
+        // would still pass `runtime_config_rejects_unknown_field`
+        // (which exercises only the fully-typo'd shape). This pin
+        // is the operator-realistic shape: an existing config file
+        // grows a typo on a new field while keeping the old one
+        // working.
+        let payload = r#"{"bps_per_identity": 1024, "bps_per_idenity": 2048}"#;
+        let err = serde_json::from_str::<RuntimeConfig>(payload).unwrap_err();
+        assert!(
+            err.to_string().contains("unknown field"),
+            "expected unknown-field error on composition, got: {err}",
+        );
+    }
+
+    #[test]
     fn relay_server_config_round_trips_through_json() {
         let original = sample_bootstrap();
         let encoded = serde_json::to_string(&original).unwrap();
