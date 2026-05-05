@@ -72,8 +72,10 @@ use tokio::sync::{Mutex, watch};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
+use crate::api::AdminState;
 use crate::error::RelayResult;
 use crate::policy::PolicyRuntime;
+use crate::reload::ReloadHandle;
 use crate::state::LeaseRegistry;
 
 /// Janitor cadence — Phase 5 spec U7 calls for 5s ticks. The choice
@@ -93,6 +95,13 @@ pub struct Server {
 struct ServerInner {
     leases: LeaseRegistry,
     policy: Arc<PolicyRuntime>,
+    /// Optional hot-reload handle. `Some` after
+    /// [`Server::with_reload_handle`]; `None` for servers
+    /// constructed via [`Server::new`] or the bare
+    /// [`Server::with_components`] (e.g. tests). The
+    /// [`crate::api::AdminState`] returned by [`Server::admin_state`]
+    /// surfaces this directly to the admin router.
+    reload_handle: Option<Arc<ReloadHandle>>,
     /// Lifecycle guard. The mutex is held for short critical
     /// sections only — never across `JoinSet::join_next` awaits
     /// or other long-lived operations.
@@ -190,12 +199,58 @@ impl Server {
     /// `portal-relay-bin` calls this with a `LeaseRegistry`
     /// pre-populated from disk (via `state::persistence`) and a
     /// `PolicyRuntime` configured from the on-disk admin settings.
+    ///
+    /// The resulting server has no [`ReloadHandle`] attached. Use
+    /// [`Self::with_reload_handle`] to bind one before [`Self::start`].
     #[must_use]
     pub fn with_components(leases: LeaseRegistry, policy: PolicyRuntime) -> Self {
         Self {
             inner: Arc::new(ServerInner {
                 leases,
                 policy: Arc::new(policy),
+                reload_handle: None,
+                lifecycle: Mutex::new(Lifecycle::Stopped),
+            }),
+        }
+    }
+
+    /// Bind a [`ReloadHandle`] to this server, returning a fresh
+    /// `Server` whose [`Self::admin_state`] surfaces the handle to
+    /// the admin trust-boundary router (`POST /v1/admin/config/reload`).
+    ///
+    /// # Hoare invariant
+    ///
+    /// Must be called before [`Self::start`]. A new
+    /// [`ServerInner`] is constructed by cloning the existing
+    /// `leases` (cheap [`LeaseRegistry`] clone) and `policy`
+    /// (cheap `Arc` clone) and attaching the supplied handle; the
+    /// new `lifecycle` is fresh [`Lifecycle::Stopped`]. Calling
+    /// this after `start()` is operator misuse: the prior
+    /// `RuntimeState` (with its janitor task) is orphaned on the
+    /// old [`Arc<ServerInner>`] while the new one starts a
+    /// disconnected lifecycle. The bin crate's `serve` flow places
+    /// this call between `with_components` and `start`, where the
+    /// invariant holds by construction.
+    ///
+    /// In debug builds a `debug_assert!` on `lifecycle.try_lock()`
+    /// surfaces the misuse: a non-`Stopped` phase under
+    /// `try_lock`'s synchronous probe (no `.await`) panics. Release
+    /// builds trust the caller per the doc-only contract.
+    #[must_use]
+    pub fn with_reload_handle(self, handle: Arc<ReloadHandle>) -> Self {
+        debug_assert!(
+            self.inner
+                .lifecycle
+                .try_lock()
+                .is_ok_and(|guard| matches!(*guard, Lifecycle::Stopped)),
+            "Server::with_reload_handle called on a server that is \
+             not in Lifecycle::Stopped (must be called before start())",
+        );
+        Self {
+            inner: Arc::new(ServerInner {
+                leases: self.inner.leases.clone(),
+                policy: Arc::clone(&self.inner.policy),
+                reload_handle: Some(handle),
                 lifecycle: Mutex::new(Lifecycle::Stopped),
             }),
         }
@@ -211,6 +266,29 @@ impl Server {
     #[must_use]
     pub fn policy(&self) -> Arc<PolicyRuntime> {
         Arc::clone(&self.inner.policy)
+    }
+
+    /// Optional hot-reload handle (cheap `Arc` clone of the
+    /// option's contents). `Some` after
+    /// [`Self::with_reload_handle`]; `None` otherwise.
+    #[must_use]
+    pub fn reload_handle(&self) -> Option<Arc<ReloadHandle>> {
+        self.inner.reload_handle.as_ref().map(Arc::clone)
+    }
+
+    /// Build the [`AdminState`] consumed by
+    /// [`crate::api::build_admin_router`]. Canonical bridge between
+    /// server orchestration and the admin axum router: the bin
+    /// crate constructs the `Server`, attaches the optional reload
+    /// handle, and then asks the server for an `AdminState` to
+    /// hand to the router builder.
+    #[must_use]
+    pub fn admin_state(&self) -> AdminState {
+        AdminState {
+            leases: self.leases(),
+            policy: self.policy(),
+            reload: self.reload_handle(),
+        }
     }
 
     /// Spawn the janitor task. Only valid from the
@@ -727,6 +805,67 @@ mod tests {
         // (none expected in this test) wake up.
         drop(injected_tx);
         server.shutdown().await;
+    }
+
+    fn baseline_bootstrap() -> crate::config::RelayServerConfig {
+        crate::config::RelayServerConfig::new(
+            compact_str::CompactString::const_new("server-test-relay"),
+            std::path::PathBuf::from("/var/lib/portal/relay"),
+            std::path::PathBuf::from("/etc/portal/api.key"),
+            std::path::PathBuf::from("/etc/portal/keyless.key"),
+            std::path::PathBuf::from("/etc/portal/quic.key"),
+        )
+    }
+
+    #[tokio::test]
+    async fn with_reload_handle_attaches_handle() {
+        let handle = Arc::new(ReloadHandle::new(
+            baseline_bootstrap(),
+            crate::config::RuntimeConfig::default(),
+        ));
+        let server = Server::new().with_reload_handle(Arc::clone(&handle));
+        assert!(server.reload_handle().is_some());
+        assert!(server.admin_state().reload.is_some());
+    }
+
+    #[tokio::test]
+    async fn default_server_has_no_reload_handle() {
+        let server = Server::new();
+        assert!(server.reload_handle().is_none());
+        assert!(server.admin_state().reload.is_none());
+    }
+
+    #[tokio::test]
+    async fn admin_state_carries_server_components() {
+        // Build a server with non-default leases (one record
+        // pre-registered) and observe both surfaces via `admin_state`:
+        // `leases` shares the live registry, `reload` mirrors the
+        // attached handle.
+        let leases = LeaseRegistry::new();
+        let now = Timestamp::now();
+        let later = now
+            .saturating_add(jiff::SignedDuration::from_secs(60))
+            .unwrap_or(Timestamp::MAX);
+        let rec = crate::state::LeaseRecord::new(
+            crate::state::IdentityKey([7u8; 32]),
+            "alice.test".into(),
+            Vec::new(),
+            later,
+            now,
+            std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+        );
+        leases.register(rec).await.unwrap();
+
+        let handle = Arc::new(ReloadHandle::new(
+            baseline_bootstrap(),
+            crate::config::RuntimeConfig::default(),
+        ));
+        let server = Server::with_components(leases, PolicyRuntime::new())
+            .with_reload_handle(Arc::clone(&handle));
+
+        let admin = server.admin_state();
+        assert_eq!(admin.leases.lease_count(), 1);
+        assert!(admin.reload.is_some());
     }
 
     #[tokio::test]

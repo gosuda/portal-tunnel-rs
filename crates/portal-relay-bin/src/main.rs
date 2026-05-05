@@ -197,6 +197,13 @@ async fn load_bundle_if_present(
 }
 
 #[tracing::instrument(skip_all, fields(state_dir = %args.state_dir.display(), name = %args.name))]
+#[expect(
+    clippy::too_many_lines,
+    reason = "serve composes ACME + bundle-load + reload-handle attach + \
+              file-watcher + signal-handler + drain in a strict ordered \
+              prologue; splitting fragments the lifecycle ordering that is \
+              load-bearing for shutdown correctness"
+)]
 async fn serve(args: ServeArgs) -> eyre::Result<()> {
     tracing::info!("starting portal-relay");
 
@@ -311,6 +318,15 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
     };
 
     let server = Server::with_components(LeaseRegistry::new(), policy);
+    let server = if let Some(handle) = reload_handle.as_ref() {
+        tracing::info!(
+            target: "portal_relay::serve",
+            "admin reload_handle attached to server",
+        );
+        server.with_reload_handle(Arc::clone(handle))
+    } else {
+        server
+    };
     server.start().await.context("start relay server")?;
     let status = server.status().await;
     tracing::info!(?status, "relay server started");
