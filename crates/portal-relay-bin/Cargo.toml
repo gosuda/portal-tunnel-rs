@@ -54,6 +54,12 @@ compact_str = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
+# Phase 5 B8 follow-up (`tests/load_bundle_with_env.rs`): the binary-
+# level env-overlay integration tests use `figment::Jail` for scoped
+# env-var isolation. The `Jail` type is gated on figment's `test`
+# feature, which is dev-only — the binary never imports figment
+# directly; it goes through `portal-relay`'s `from_files_with_env`.
+figment = { workspace = true, features = ["test"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "fs"] }
 

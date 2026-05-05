@@ -4455,6 +4455,7 @@ dependencies = [
  "clap",
  "compact_str",
  "eyre",
+ "figment",
  "portal-acme",
  "portal-relay",
  "serde_json",
