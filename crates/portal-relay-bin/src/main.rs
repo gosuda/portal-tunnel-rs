@@ -312,11 +312,6 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
             env_overlay_prefix = ENV_PREFIX,
             "loaded U13 config bundle from state_dir; PolicyRuntime is reload-aware",
         );
-        tracing::debug!(
-            target: "portal_relay::serve",
-            prefix = ENV_PREFIX,
-            "config env-overlay active; runtime fields accept env-var overrides",
-        );
         handle
     });
 
