@@ -10,37 +10,16 @@
     reason = "test-only setup; integration test crate"
 )]
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, StatusCode, header};
-use compact_str::CompactString;
 use portal_relay::api::{AdminState, build_admin_router};
-use portal_relay::policy::PolicyRuntime;
-use portal_relay::state::LeaseRegistry;
-use portal_relay::{RelayServerConfig, ReloadHandle, RuntimeConfig};
+use portal_relay::{ReloadHandle, RuntimeConfig};
 use tower::ServiceExt as _;
 
-/// Build a deterministic bootstrap config for the handle.
-fn baseline_bootstrap() -> RelayServerConfig {
-    RelayServerConfig::new(
-        CompactString::const_new("test-relay"),
-        PathBuf::from("/var/lib/portal/relay"),
-        PathBuf::from("/etc/portal/api.key"),
-        PathBuf::from("/etc/portal/keyless.key"),
-        PathBuf::from("/etc/portal/quic.key"),
-    )
-}
-
-/// Build an `AdminState` carrying the supplied (optional) reload handle.
-fn admin_state_with(reload: Option<Arc<ReloadHandle>>) -> AdminState {
-    AdminState {
-        leases: LeaseRegistry::new(),
-        policy: Arc::new(PolicyRuntime::new()),
-        reload,
-    }
-}
+mod common;
+use common::{admin_state_with, baseline_bootstrap};
 
 /// Assert the entire runtime snapshot is byte-for-byte identical to
 /// the supplied baseline. Names the invariant the reject paths rely

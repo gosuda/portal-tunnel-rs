@@ -16,26 +16,17 @@
     reason = "test-only setup; integration test crate"
 )]
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, StatusCode, header};
-use compact_str::CompactString;
 use portal_relay::api::build_admin_router;
 use portal_relay::server::Server;
-use portal_relay::{RelayServerConfig, ReloadHandle, RuntimeConfig};
+use portal_relay::{ReloadHandle, RuntimeConfig};
 use tower::ServiceExt as _;
 
-fn baseline_bootstrap() -> RelayServerConfig {
-    RelayServerConfig::new(
-        CompactString::const_new("chain-test-relay"),
-        PathBuf::from("/var/lib/portal/relay"),
-        PathBuf::from("/etc/portal/api.key"),
-        PathBuf::from("/etc/portal/keyless.key"),
-        PathBuf::from("/etc/portal/quic.key"),
-    )
-}
+mod common;
+use common::baseline_bootstrap;
 
 /// Build a `Server` with a freshly-constructed reload handle attached
 /// — the canonical chain the bin crate's `serve` flow walks when a
