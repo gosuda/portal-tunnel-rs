@@ -1246,6 +1246,20 @@ mod tests {
             accessor_engine.is_ens_named(id),
             "Server::reputation_engine() accessor surfaces the same Arc graph",
         );
+
+        // Reverse-direction Arc-identity: mark via the accessor handle
+        // and read via the state-extracted handle. The original assertion
+        // above proves builder→state shares an Arc; this proves
+        // accessor→state shares the SAME Arc (catches a regression
+        // where `reputation_engine()` accessor would clone-construct a
+        // new instance instead of routing through `ServerInner::reputation_engine`).
+        let id_reverse = crate::policy::IdentityKey([0xCD; 32]);
+        accessor_engine.mark_ens_named(id_reverse);
+        assert!(
+            state.engine.is_ens_named(id_reverse),
+            "mark on accessor-returned engine handle MUST be observable \
+             via SdkState::engine — both paths must share one Arc graph",
+        );
     }
 
     /// Minimal stub [`portal_crypto::EnsResolver`] used to wrap a
