@@ -886,31 +886,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn admin_router_returns_router_when_handle_attached() {
-        // Pin the API surface: `admin_router()` returns
-        // `axum::Router` when a reload handle is attached. Runtime
-        // dispatch behavior is covered by the chain integration test
-        // (`tests/server_admin_router_chain.rs`); this unit test pins
-        // the type-level contract.
-        let handle = Arc::new(ReloadHandle::new(
-            baseline_bootstrap(),
-            crate::config::RuntimeConfig::default(),
-        ));
-        let server = Server::new().with_reload_handle(handle);
-        let _: axum::Router = server.admin_router();
-    }
-
-    #[tokio::test]
-    async fn admin_router_returns_router_when_no_handle() {
-        // `admin_router()` works regardless of `with_reload_handle`
-        // attachment: `Server::new()` (reload = None) still yields a
-        // valid router. Runtime 503 behavior on the stateful
-        // endpoints is covered by the chain integration test.
-        let server = Server::new();
-        let _: axum::Router = server.admin_router();
-    }
-
-    #[tokio::test]
     async fn admin_state_carries_server_components() {
         // Build a server with non-default leases (one record
         // pre-registered) and observe both surfaces via `admin_state`:

@@ -95,6 +95,25 @@ async fn admin_router_built_from_server_handles_current_get() {
 }
 
 #[tokio::test]
+async fn admin_router_built_from_default_server_returns_200_for_health() {
+    // The stateless health endpoint must succeed regardless of
+    // whether `with_reload_handle` was called. Pins the rustdoc
+    // claim on `Server::admin_router()` that GET /v1/admin/health
+    // is always 200 through the orchestrator-assembled router —
+    // the per-handler test in `admin_health_endpoint.rs` exercises
+    // a hand-rolled `AdminState`, not this commit's bridge.
+    let server = Server::new();
+    let router = server.admin_router();
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/v1/admin/health")
+        .body(Body::empty())
+        .expect("request build");
+    let response = router.oneshot(request).await.expect("oneshot service");
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
 async fn admin_router_built_from_default_server_returns_503_for_reload() {
     // Server::new() leaves reload as None — the orchestrator-level
     // contract for "bundle was not loaded". The admin router must then
