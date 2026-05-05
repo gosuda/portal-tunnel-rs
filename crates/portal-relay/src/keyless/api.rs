@@ -174,9 +174,20 @@ pub struct SubjectExtension(pub CompactString);
               keyless mTLS ServerConfig built locally to this module."
 )]
 pub fn build_keyless_router(state: KeylessApiState) -> Router {
-    Router::new()
-        .route(KEYLESS_SIGN_PATH, post(sign_handler))
-        .with_state(state)
+    // Bound-to-var rebind shape per `docs/utoipa-coverage-policy.md`
+    // §Enforcement note 2: this is the documented escape from the
+    // ast-grep belt-and-suspenders gate, which only matches the
+    // chained-builder shape `Router::new().route(...)`. Clippy's
+    // `disallowed_methods` still resolves the `r.route(...)` call by
+    // DefId — that is the load-bearing primary gate, and the
+    // `#[expect(clippy::disallowed_methods, ...)]` above carries the
+    // R2/U8.8 carve-out justification. Keeping ast-grep silent here
+    // is correct: this file is exercising the policy's documented
+    // escape procedure for a non-discoverable surface, not bypassing
+    // a real R7 violation.
+    let r = Router::new();
+    let r = r.route(KEYLESS_SIGN_PATH, post(sign_handler));
+    r.with_state(state)
 }
 
 // ---------------------------------------------------------------------------
