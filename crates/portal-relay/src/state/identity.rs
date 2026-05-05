@@ -199,11 +199,15 @@ pub async fn load_quic_only(paths: &IdentityPaths) -> RelayResult<SecretBox<Quic
 ///
 /// # Errors
 ///
-/// - [`crate::error::RelayError::Io`] on filesystem faults that occur
-///   while creating the parent directory.
-/// - [`crate::error::RelayError::Crypto`] on `NotFound`, malformed
-///   JSON, hex-decode failure, length mismatch, or any other
-///   [`portal_crypto::PortalCryptoError`] surfaced by the loader.
+/// - [`crate::error::RelayError::Io`] on filesystem faults — both the
+///   parent-directory create and the key-file read (`NotFound`,
+///   `EACCES`, `ELOOP`, …). Mirrors `load_quic_only`'s discipline so
+///   operators triaging a missing or unreadable key get an `io:` error
+///   message rather than a generic `crypto:` one.
+/// - [`crate::error::RelayError::Crypto`] on malformed JSON, hex-
+///   decode failure, length mismatch, or any other non-Io
+///   [`portal_crypto::PortalCryptoError`] variant surfaced by the
+///   loader.
 pub async fn load_relay_protocol_only(
     paths: &IdentityPaths,
 ) -> RelayResult<SecretBox<RelayEd25519Key>> {
@@ -213,8 +217,10 @@ pub async fn load_relay_protocol_only(
     // a small (≤200-byte) JSON file; calling it directly inside the
     // async fn is fine — `spawn_blocking` would be over-engineering for
     // a one-shot read on the start path.
-    portal_crypto::load_relay_ed25519_key(&path)
-        .map_err(|e| crate::error::RelayError::Crypto(e.to_string()))
+    portal_crypto::load_relay_ed25519_key(&path).map_err(|e| match e {
+        portal_crypto::PortalCryptoError::Io(io_err) => crate::error::RelayError::Io(io_err),
+        other => crate::error::RelayError::Crypto(other.to_string()),
+    })
 }
 
 #[cfg(test)]
@@ -284,20 +290,34 @@ mod tests {
         );
     }
 
-    /// Missing-file surfaces as [`RelayError::Crypto`] (the
-    /// portal-crypto loader's `Io` arm flows through `to_string()`).
+    /// Missing-file surfaces as [`RelayError::Io`] — the loader
+    /// matches on `PortalCryptoError::Io` and routes filesystem
+    /// faults to the workspace's `Io` arm so operators triaging a
+    /// missing or unreadable key see an `io:` error message rather
+    /// than a generic `crypto:` one. Mirrors `load_quic_only`'s
+    /// discipline.
     #[tokio::test]
-    async fn load_relay_protocol_only_missing_file_surfaces_crypto_error() {
+    async fn load_relay_protocol_only_missing_file_surfaces_io_error() {
         use crate::error::RelayError;
 
         let dir = tempdir().unwrap();
         let paths = IdentityPaths::new(dir.path().to_path_buf());
-        // Don't create the file — the helper must surface a Crypto error.
+        // Don't create the file — the helper must surface an Io
+        // error with NotFound kind.
         let result = load_relay_protocol_only(&paths).await;
-        assert!(
-            matches!(result, Err(RelayError::Crypto(_))),
-            "missing relay_protocol.json must surface as RelayError::Crypto, got {result:?}",
-        );
+        match result {
+            Err(RelayError::Io(io_err)) => {
+                assert_eq!(
+                    io_err.kind(),
+                    std::io::ErrorKind::NotFound,
+                    "missing relay_protocol.json must surface as Io(NotFound), got kind {:?}",
+                    io_err.kind(),
+                );
+            }
+            other => panic!(
+                "missing relay_protocol.json must surface as RelayError::Io(NotFound), got {other:?}",
+            ),
+        }
     }
 
     /// A non-NotFound metadata error must surface as
