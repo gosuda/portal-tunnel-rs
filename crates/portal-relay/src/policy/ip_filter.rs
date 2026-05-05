@@ -39,6 +39,14 @@ impl IpFilter {
 
     /// Whether the supplied socket address is banned. Canonicalizes
     /// IPv4-mapped IPv6 to bare-IPv4 BEFORE lookup per R12-canon.
+    ///
+    /// The port component is discarded by canonicalization — only
+    /// the IP is matched against the ban table. Callers that have
+    /// only an [`std::net::IpAddr`] (e.g.,
+    /// [`crate::policy::PolicyRuntime::is_ip_banned`] consulting
+    /// the operator-managed [`crate::config::RuntimeConfig::ip_ban_list`])
+    /// may safely synthesize the `SocketAddr` with a placeholder
+    /// port (e.g., `0`).
     #[must_use]
     pub fn is_ip_banned(&self, addr: std::net::SocketAddr) -> bool {
         let canonical = canonicalize_source(addr);
