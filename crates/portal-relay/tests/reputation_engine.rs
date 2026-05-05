@@ -32,8 +32,6 @@
 //!   commit alongside the resolver-wiring work.
 //! - **Honeypot path matcher** (`Arc<HoneypotMatcher>` feeding
 //!   `SignalKind::HoneypotHit` from the listener pipeline).
-//! - **`reputation.json` round-trip** (U5 atomic-write integration
-//!   — the engine is in-memory only this iteration).
 
 #![expect(
     clippy::expect_used,
