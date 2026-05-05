@@ -41,10 +41,11 @@
 //!   [`config::RelayServerConfig`] and [`config::RuntimeConfig`]
 //!   also landed: both reject unknown JSON keys, with
 //!   [`config::RuntimeConfig`] additionally defaulting omitted
-//!   fields. The opt-in file-watcher
-//!   ([`reload::file_watch::watch_runtime_config`], behind
-//!   `cfg(feature = "config_file_watch")`) also landed: a
-//!   `notify`-backed task converts filesystem-write events into
+//!   fields. The opt-in file-watcher (a `watch_runtime_config`
+//!   helper behind `cfg(feature = "config_file_watch")` —
+//!   reachable as `portal_relay::watch_runtime_config` when the
+//!   feature is on) also landed: a `notify`-backed task converts
+//!   filesystem-write events into
 //!   [`reload::ReloadHandle::reload`] calls. The bootstrap-from-
 //!   disk path also landed via [`config::RelayConfigBundle`] +
 //!   `RelayConfigBundle::from_files`, a v0.1 simple two-file
