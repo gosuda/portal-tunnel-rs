@@ -317,7 +317,7 @@ impl Server {
     ///
     /// # Endpoint contract
     ///
-    /// The returned router responds to all three current admin
+    /// The returned router responds to all four current admin
     /// endpoints regardless of whether [`Self::with_reload_handle`]
     /// was invoked:
     ///
@@ -326,10 +326,13 @@ impl Server {
     /// - `GET  /v1/admin/config/current` — surfaces 503
     ///   `FeatureUnavailable` when no reload handle is attached.
     /// - `GET  /v1/admin/health` — stateless liveness; always 200.
+    /// - `GET  /v1/admin/policy/snapshot` — derived effective
+    ///   policy state; always 200, sentinel values (`None` cap,
+    ///   `0` ban count) when no reload handle is attached.
     ///
     /// `Server::new()` (no `with_reload_handle`) therefore yields a
-    /// router that still serves the stateless endpoint while the
-    /// stateful endpoints surface a documented 503.
+    /// router that still serves the two always-200 endpoints while
+    /// the two stateful endpoints surface a documented 503.
     #[must_use]
     #[expect(
         clippy::double_must_use,
