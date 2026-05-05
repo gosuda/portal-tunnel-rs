@@ -99,31 +99,35 @@ impl Zeroize for KeylessSigningKeyHandle {
 ///
 /// # Current status — STUB
 ///
-/// `rustls-pemfile` is not yet pinned in `[workspace.dependencies]`.  Until
-/// Phase 6b wires the real loader this function always returns
+/// The PEM-decoding body is not yet wired; this function always returns
 /// [`PortalCryptoError::Keyless`] with a message describing the deferral.
 ///
-/// Phase 6b will replace the stub body with:
-/// 1. Read the file via [`std::fs::read`].
-/// 2. Parse PEM → DER via `rustls_pemfile::private_key`.
-/// 3. Dispatch to a concrete `KeylessSigningKey` impl based on algorithm OID
+/// The eventual implementation will:
+/// 1. Open the file at the syscall boundary so any access failure
+///    (missing path, permission denied, ENOTDIR) surfaces as
+///    [`PortalCryptoError::Io`].
+/// 2. Read the PEM bytes into a `Zeroizing<Vec<u8>>` (or
+///    equivalent) so the buffer wipes on drop after parsing.
+/// 3. Parse PEM → DER via `rustls_pki_types::PrivateKeyDer::from_pem_slice`.
+/// 4. Dispatch to a concrete `KeylessSigningKey` impl based on algorithm OID
 ///    (Ed25519 first; RSA-PSS and ECDSA-P256 follow).
-/// 4. Return `SecretBox::new(Box::new(KeylessSigningKeyHandle(boxed)))`.
+/// 5. Return `SecretBox::new(Box::new(KeylessSigningKeyHandle(boxed)))`.
 ///
 /// # Errors
 ///
-/// Always returns [`PortalCryptoError::Keyless`] until Phase 6b.
+/// Always returns [`PortalCryptoError::Keyless`] today; the eventual
+/// implementation also surfaces [`PortalCryptoError::Io`] for path-
+/// access failures (per step 1 above).
 pub fn load_keyless_signing_key(
     _path: &Path,
 ) -> Result<SecretBox<KeylessSigningKeyHandle>, PortalCryptoError> {
-    // Note: unlike load_api_https_key, no file-existence probe is made.
-    // All errors are PortalCryptoError::Keyless until Phase 6b wires the real
-    // loader. Phase 6b should add a metadata probe here to surface
-    // PortalCryptoError::Io for missing paths.
-    // STUB: PEM loading not yet wired (Phase 6b).
-    // rustls-pemfile is not pinned in [workspace.dependencies].
+    // Note: unlike `load_api_https_key`, this stub does not probe the
+    // path. Adding a `File::open` boundary check here would be the
+    // mechanical port of the api_https approach; it lands when the
+    // real PEM-decoding body lands, alongside a regression test that
+    // pins the `Io` error category.
     Err(PortalCryptoError::Keyless(
-        "PEM loading not yet wired (Phase 6b)".to_owned(),
+        "PEM loading not yet wired".to_owned(),
     ))
 }
 
