@@ -92,11 +92,10 @@ deny = [
     # ---------------------------------------------------------------- Legacy direct picks
     # These are not commonly transitive in our register; full-tree ban is safe
     # except where `wrappers` carve out a known transitive parent set.
-    {
-        crate = "chrono",
-        reason = "use jiff (R8 / ADR-0002); transitive-only via cloudflare + google-cloud-auth wrappers below",
-        wrappers = ["cloudflare", "google-cloud-auth"],
-    },
+    { crate = "chrono", reason = "use jiff (R8 / ADR-0002); transitive-only via cloudflare + google-cloud-auth wrappers below", wrappers = [
+        "cloudflare",
+        "google-cloud-auth",
+    ] },
     { crate = "derive_builder", reason = "use bon (R8 / ADR-0002)" },
     { crate = "typed-builder", reason = "use bon (R8 / ADR-0002)" },
     { crate = "cargo-tarpaulin", reason = "use cargo-llvm-cov (R8 / ADR-0002)" },

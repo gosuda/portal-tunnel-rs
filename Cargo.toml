@@ -43,10 +43,7 @@ tower = "0.5"
 # need a `TlsAcceptor` / `TlsConnector` over a tokio stream. `default-features
 # = false` keeps the dep aligned with the workspace's aws-lc-rs provider
 # pin (R13).
-tokio-rustls = { version = "0.26", default-features = false, features = [
-    "aws-lc-rs",
-    "tls12",
-] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["aws-lc-rs", "tls12"] }
 
 # TLS — rustls MANDATORY (R13). aws_lc_rs provider; prefer-post-quantum opts the
 # X25519+ML-KEM-768 hybrid KEX in once rustls negotiates it. Server-side ECH is

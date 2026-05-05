@@ -87,6 +87,13 @@ fn run_ci(repo_root: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     if !cmd_ok(repo_root, "cargo", &["fmt", "--all", "--check"]) {
         failures.push("cargo fmt --check");
     }
+    // taplo fmt --check — mirrors the `taplo` CI job. Config + file
+    // list live in `.taplo.toml`. Spawn failure (taplo not installed)
+    // is a gate failure, not a warning: CI runs taplo unconditionally,
+    // so the local mirror must too.
+    if !cmd_ok(repo_root, "taplo", &["fmt", "--check"]) {
+        failures.push("taplo fmt --check");
+    }
     if !cmd_ok(
         repo_root,
         "cargo",
