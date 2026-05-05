@@ -1,13 +1,15 @@
 //! `portal-sdk` — client-side orchestration for the portal-tunnel
 //! greenfield Rust port.
 //!
-//! Owns:
+//! Owns (full Phase 6a scope per
+//! `docs/plans/2026-05-04-006-feat-portal-sdk-plan.md` — landed-vs-
+//! pending state below):
 //! - `expose` session lifecycle (lease registration, listener loop,
-//!   reconnect/backoff).
-//! - RFC 5705 MITM probe via rustls TLS exporter labels.
+//!   reconnect/backoff). **Pending — Phase 6a U6.**
+//! - RFC 5705 MITM probe via rustls TLS exporter labels. **Landed.**
 //! - Eclipse-resistant relay-set selection (R10 v0.1 — per-relay
-//!   defense).
-//! - Structured event bus for the R15 v0.1 Tunnel TUI mode.
+//!   defense). **Landed.**
+//! - Structured event bus for the R15 v0.1 Tunnel TUI mode. **Landed.**
 //!
 //! Does NOT own:
 //! - Wire encoding (lives in `portal_wire`).
@@ -22,8 +24,9 @@
 //! the crate scaffold (this `lib.rs`), [`error::SdkError`], and the
 //! [`events`] module ([`TunnelState`], [`TunnelEvent`],
 //! `broadcast`-channel factories). **B2** ships [`relay_set`],
-//! [`picker`], [`events`], and [`mitm`]; subsequent batches add
-//! `expose`, `listener`, and `identity`.
+//! [`picker`], and [`mitm`]. **U6 (`expose.rs`), U7 (`listener.rs`),
+//! and U8 (`identity.rs`)** remain pending — see `PLAN.md` "Current
+//! implementation status" for the per-unit deferral.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
