@@ -48,9 +48,14 @@ Technical Design`).
 config) loads its key from a distinct path through a distinct
 `secrecy::SecretBox<KeyType>` newtype constructor. The three constructors live
 in three distinct modules. A function returning more than one `SigningKey`
-from a single load call is rejected by a clippy `disallowed_methods` rule
-(Phase 5 deliverable). The trust-boundary table in `AGENTS.md` is the
-canonical reference.
+from a single load call is rejected by two complementary CI gates: clippy's
+`disallowed_methods` (`portal_crypto::load_all_keys` sentinel in
+[`../clippy.toml`](../clippy.toml), `allow-invalid = true` so it fires the
+moment the symbol is defined and called) plus the `multi-key-return-gate`
+regex job in [`../.github/workflows/ci.yml`](../.github/workflows/ci.yml) that
+catches the return-type shape `-> (SecretBox<A>, SecretBox<B>)` which
+`disallowed_methods` cannot express. The trust-boundary table in `AGENTS.md`
+is the canonical reference.
 
 The QUIC trust boundary lives in `portal-net` (FEAS-R2-5 / CORR-R2-06). Cross-
 crate plumbing of `SecretBox<QuicIdentityKey>` from `portal-relay`'s identity
@@ -61,13 +66,28 @@ plan).
 
 Every spawned task lives inside a `tokio::task::JoinSet` or carries a
 `tokio_util::sync::CancellationToken`. Free `tokio::spawn` is permitted only
-at the very top of `main`. Library code that calls `tokio::spawn` directly is
-rejected by a clippy `disallowed_methods` rule (Phase 5 deliverable).
+at the very top of `main`. Library code that calls `tokio::spawn` directly
+violates R9.
+
+**Mechanical CI enforcement of this invariant is currently deferred.** The
+committed Phase 5/6b plans assume a workspace-wide clippy
+`disallowed_methods` rule on `tokio::spawn` exists (Phase 5 plan
+§Concurrency, Phase 6b plan §U2 verification), but [`../clippy.toml`](../clippy.toml)
+does not yet carry the rule and current library code at
+`crates/portal-acme/src/manager.rs`, `crates/portal-net/src/allocator.rs`,
+and `crates/portal-relay/src/server.rs` does call free `tokio::spawn`.
+Closing this gap requires (a) adding the rule, (b) refactoring those call
+sites to take a `&mut JoinSet` from the caller (or applying
+`#[expect(clippy::disallowed_methods, reason = "...")]` at audited sites),
+and (c) verifying the workspace lints pass clean. Tracked as a follow-on
+landing alongside Phase 5 Batch 8 hot-reload (which already touches
+`server.rs` task-spawning).
 
 Each library crate documents its task-spawning contract — i.e., which entry
 points spawn tasks, which `JoinSet` / `CancellationToken` owns them, which
 graceful-shutdown sequence drains them. Per-dep task-spawning audit (quinn,
-axum, instant-acme, chosen WireGuard fork) lands in Phase 7 per F4.
+axum, instant-acme, chosen WireGuard fork) is documented in
+[`dep-spawning-audit.md`](dep-spawning-audit.md) per F4.
 
 ## Secret-handling invariant
 

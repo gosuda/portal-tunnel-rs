@@ -16,7 +16,7 @@ or `portal-types` crates (R7).
 | Crate | Owns | Phase |
 |---|---|---|
 | `portal-wire` | greenfield protocol types, codecs, framing constants | 1 |
-| `portal-crypto` | every `SecretBox<KeyType>` constructor; ed25519 + k256 + keyless skeleton | 2 |
+| `portal-crypto` | every `SecretBox<KeyType>` constructor; ed25519 + k256 primitives; `KeylessSigningKey` trait + `SecretBox<KeylessSigningKey>` newtype | 2 |
 | `portal-net` | quinn QUIC backhaul; TCP/UDP relay; QUIC trust boundary (`SecretBox<QuicIdentityKey>`) | 3 |
 | `portal-acme` | ACME issuance + DNS-01 providers (local / Cloudflare / Route53 / Cloud DNS) | 4 |
 | `portal-relay` | lease lifecycle, axum API surface, policy engine, discovery, overlay, keyless oracle (`SecretBox<ApiHttpsKey>`, `SecretBox<KeylessSigningKey>`) | 5–6b |
@@ -30,10 +30,15 @@ or `portal-types` crates (R7).
 
 Three trust surfaces. Each loads its signing key from a distinct path, holds it
 in a distinct `secrecy::SecretBox<KeyType>` newtype, and the type system rejects
-cross-use. A CI clippy `disallowed_methods` rule (Phase 5 deliverable) rejects
-any function returning more than one `SigningKey` from a single load call. The
-three `rustls::ServerConfig` instances are downstream consumers of these
-isolated key types, not load-bearing on their own.
+cross-use. Two complementary CI gates reject any function returning more than
+one `SigningKey` from a single load call: clippy's `disallowed_methods` sentinel
+(`portal_crypto::load_all_keys` in [`clippy.toml`](clippy.toml),
+`allow-invalid = true` so it fires the moment the symbol is defined and called)
+plus the `multi-key-return-gate` regex job in
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) that catches the
+return-type shape `-> (SecretBox<A>, SecretBox<B>)` which `disallowed_methods`
+cannot express. The three `rustls::ServerConfig` instances are downstream
+consumers of these isolated key types, not load-bearing on their own.
 
 | Surface | Key newtype | Owning crate | Downstream consumer |
 |---|---|---|---|
