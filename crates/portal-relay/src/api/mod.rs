@@ -9,6 +9,7 @@
 
 pub mod admin;
 pub mod envelope;
+pub mod sdk;
 pub mod state;
 
 pub use envelope::{
@@ -16,16 +17,46 @@ pub use envelope::{
 };
 pub use state::{AdminState, DiscoveryState, SdkState};
 
-/// Build the SDK trust-boundary router. Returns an empty router
-/// today; handlers register under `/v1/sdk/*` in a follow-up commit.
+/// Build the SDK trust-boundary router.
+///
+/// Mounts the [`sdk`] handlers landed so far — currently only
+/// `GET /v1/sdk/domain`. Additional `/v1/sdk/*` handlers
+/// (`register-challenge`, `register`, `renew`, `unregister`, `connect`)
+/// register in follow-up commits. See the [`sdk`] module rustdoc for
+/// the per-endpoint contracts (auth posture, CORS, etc.).
 #[must_use]
 #[expect(
     clippy::double_must_use,
     reason = "wrapper-fn boundary contract: `axum::Router` is `#[must_use]` \
               but constructor-return shape re-affirms it here"
 )]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "Phase 7 U8.8 utoipa coverage gate names \
+              `utoipa_axum::OpenApiRouter::route` for library-crate route \
+              registration. The SDK surface has no `ApiDoc::openapi()` \
+              aggregator wired in the workspace yet; the SDK handlers \
+              register through `axum::Router::route` under the same \
+              carve-out shape as the admin router and the keyless \
+              oracle. The utoipa-axum migration is a single Phase 7 \
+              follow-up that switches every handler in one diff once \
+              the aggregator lands — adopting utoipa-axum here per \
+              route would fragment the migration. Recorded as a \
+              follow-up gap."
+)]
 pub fn build_sdk_router(state: SdkState) -> axum::Router {
-    axum::Router::new().with_state(state)
+    use axum::routing::get;
+    // Bound-to-var rebind shape per `docs/utoipa-coverage-policy.md`
+    // §Enforcement note 2: this is the documented escape from the
+    // ast-grep belt-and-suspenders gate, which only matches the
+    // chained-builder shape `Router::new().route(...)`. Clippy's
+    // `disallowed_methods` still resolves the `r.route(...)` call by
+    // DefId — that is the load-bearing primary gate, and the
+    // `#[expect(clippy::disallowed_methods, ...)]` above carries the
+    // Phase 7 U8.8 carve-out justification.
+    let r = axum::Router::new();
+    let r = r.route("/v1/sdk/domain", get(sdk::domain_handler));
+    r.with_state(state)
 }
 
 /// Build the admin trust-boundary router.
