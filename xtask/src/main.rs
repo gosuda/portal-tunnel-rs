@@ -122,6 +122,32 @@ fn run_ci(repo_root: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     ) {
         failures.push("cargo clippy");
     }
+    // Second clippy pass with `--all-features` to surface compile/lint
+    // errors in feature-gated modules. The default-features pass above
+    // doesn't compile modules behind off-by-default features (e.g.
+    // `portal-crypto::api_https` behind `rustls-integration`), so a
+    // missing import or stale type reference inside a gated module can
+    // slip through the default-features gate and only surface when a
+    // downstream caller enables the feature. The 2026-05-04 iter-100
+    // build-regression incident — where iter-96 dropped two `use`
+    // imports inside the rustls-integration-gated `api_https/key.rs`
+    // and the default-features gate missed it — is the canonical
+    // example.
+    if !cmd_ok(
+        repo_root,
+        "cargo",
+        &[
+            "clippy",
+            "--workspace",
+            "--all-features",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings",
+        ],
+    ) {
+        failures.push("cargo clippy --all-features");
+    }
     if !cmd_ok_with_env(
         repo_root,
         "cargo",
