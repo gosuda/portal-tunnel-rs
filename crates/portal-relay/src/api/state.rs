@@ -28,8 +28,8 @@ pub struct SdkState {
 ///
 /// Admin handlers see the lease registry (read-only), the policy
 /// runtime (read + write — admin can ban/unban IPs, set BPS, etc),
-/// and an optional [`ReloadHandle`] for
-/// `POST /v1/admin/config/reload`.
+/// and an optional [`ReloadHandle`] consumed by the config-surface
+/// endpoints (per the field rustdoc on [`Self::reload`]).
 #[derive(Clone)]
 pub struct AdminState {
     /// Lease registry (read-only from the admin surface).
