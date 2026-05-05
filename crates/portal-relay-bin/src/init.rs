@@ -57,6 +57,16 @@ pub struct InitArgs {
 /// - Creating the state directory fails (`mkdir -p`).
 /// - Serializing either config to JSON fails.
 /// - Writing either file fails.
+///
+/// # Partial-failure caveat
+///
+/// The two writes are sequential and non-transactional. If the
+/// `bootstrap.json` write succeeds but the `runtime.json` write
+/// fails, `bootstrap.json` is left on disk. A subsequent non-`--force`
+/// run will refuse on the existing `bootstrap.json`. The operator
+/// must remove the stranded file (or rerun with `--force`) before
+/// re-init succeeds. Force-backup of overwritten files is
+/// out of scope for v0.1.
 pub async fn run_init(args: &InitArgs) -> eyre::Result<()> {
     let state_dir = &args.state_dir;
     let bootstrap_path = state_dir.join("bootstrap.json");
