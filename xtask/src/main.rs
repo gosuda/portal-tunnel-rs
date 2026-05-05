@@ -182,6 +182,16 @@ fn run_ci(repo_root: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     if dep_audit::run(repo_root).is_err() {
         failures.push("dep-spawning-audit");
     }
+    // rustls-mandatory (R13 / ADR-0002): mirrors the CI job. Asserts no
+    // transitive openssl in the resolved tree — `cargo tree --workspace
+    // --no-default-features -i openssl` must produce empty stdout. The
+    // CI job's bash form (`if cargo tree ... | grep -q .; then exit 1`)
+    // collapses non-empty stdout = violation; the structured form below
+    // captures stdout explicitly so a tool error (cargo not installed,
+    // metadata I/O failure) is reported separately from a real R13
+    // violation. `-i openssl` exits non-zero with empty stdout when the
+    // package is absent — that is the success case we want.
+    rustls_mandatory_gate(repo_root, &mut failures);
 
     if failures.is_empty() {
         println!("xtask ci: all gates passed.");
@@ -265,6 +275,64 @@ fn multi_key_return_gate(repo_root: &Path, failures: &mut Vec<&'static str>) {
                 eprintln!("xtask ci: failed to run rg for {label}: {e}");
                 failures.push(label);
             }
+        }
+    }
+}
+
+/// Run the R13 rustls-mandatory gate: assert `cargo tree --workspace
+/// --no-default-features -i openssl` proves openssl is not in the
+/// resolved tree. Mirrors the `rustls-mandatory` job in
+/// `.github/workflows/ci.yml`.
+///
+/// Three distinct outcomes, each handled explicitly so cargo errors
+/// cannot silently pass the gate:
+///
+/// * Non-empty stdout → openssl IS in the tree → R13 violation, fail.
+/// * Empty stdout + stderr contains the canonical
+///   `did not match any packages` (cargo's "package not in graph"
+///   message) → success: openssl is absent from the resolved tree.
+/// * Empty stdout + any other stderr (or no stderr at all) → cargo
+///   itself failed (network, manifest parse, OS error) → probe
+///   failure, fail. Treating these as success would let R13
+///   silently regress when cargo is broken.
+/// * Spawn error (cargo not installed) → also a probe failure;
+///   matches the "mirrors CI" contract since CI runs cargo
+///   unconditionally.
+fn rustls_mandatory_gate(repo_root: &Path, failures: &mut Vec<&'static str>) {
+    const NOT_IN_GRAPH_MARKER: &str = "did not match any packages";
+    let output = Command::new("cargo")
+        .args([
+            "tree",
+            "--workspace",
+            "--no-default-features",
+            "-i",
+            "openssl",
+        ])
+        .current_dir(repo_root)
+        .output();
+    match output {
+        Ok(out) if !out.stdout.is_empty() => {
+            eprintln!(
+                "xtask ci: rustls-mandatory (R13) violated — openssl in resolved tree:\n{}",
+                String::from_utf8_lossy(&out.stdout)
+            );
+            failures.push("rustls-mandatory (transitive openssl)");
+        }
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            if stderr.contains(NOT_IN_GRAPH_MARKER) {
+                // Canonical "package not in graph" — the success case.
+            } else {
+                eprintln!(
+                    "xtask ci: rustls-mandatory probe — cargo tree exited without the expected \
+                     '{NOT_IN_GRAPH_MARKER}' message:\nstdout: <empty>\nstderr: {stderr}"
+                );
+                failures.push("rustls-mandatory (probe error)");
+            }
+        }
+        Err(e) => {
+            eprintln!("xtask ci: rustls-mandatory probe failed to spawn cargo: {e}");
+            failures.push("rustls-mandatory (probe error)");
         }
     }
 }
