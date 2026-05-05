@@ -29,6 +29,18 @@
 
 #![forbid(unsafe_code)]
 
+// Phase 7 U8.11 install-script render API — public surface used by
+// the (forthcoming) admin router's `/__install.sh` and
+// `/__install.ps1` handlers. Module ships now so the rendering logic
+// + Go-parity tests are reviewable in isolation; the handler wire-up
+// is one-line per route at U6 plumbing time.
+#[expect(
+    dead_code,
+    reason = "handler integration is the next U8.11 follow-up commit \
+              once the public-facing relay router exists"
+)]
+mod installer;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
