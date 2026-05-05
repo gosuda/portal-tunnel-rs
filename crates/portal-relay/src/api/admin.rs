@@ -1,10 +1,24 @@
 //! Admin trust-boundary endpoint handlers.
 //!
-//! `POST /v1/admin/config/reload` is the operator HTTP trigger for
-//! hot-reload of [`crate::config::RuntimeConfig`]. Complements the
-//! `cfg(feature = "config_file_watch")` filesystem-write trigger
-//! (`reload::file_watch::watch_runtime_config`, iter-126) —
-//! operators may use either.
+//! ## Endpoints
+//!
+//! - `POST /v1/admin/config/reload` — hot-reload trigger for
+//!   [`crate::config::RuntimeConfig`]; complements the
+//!   `cfg(feature = "config_file_watch")` filesystem-write trigger
+//!   (`reload::file_watch::watch_runtime_config`).
+//! - `GET /v1/admin/config/current` — read the current runtime
+//!   snapshot (file + env overlay) from the attached
+//!   [`crate::reload::ReloadHandle`]; 503 when no handle attached.
+//! - `GET /v1/admin/health` — stateless liveness; returns 200 with
+//!   the crate version regardless of handle attachment.
+//! - `GET /v1/admin/policy/snapshot` — derived effective policy
+//!   state from [`crate::policy::PolicyRuntime`] (BPS cap +
+//!   operator-managed IP ban count); 200 always, sentinel values
+//!   when no handle attached.
+//!
+//! Each handler carries a `#[tracing::instrument(name = "admin.…")]`
+//! span so operators can correlate admin requests with relay log
+//! entries when debugging 503/400 paths.
 //!
 //! ## Trust boundary
 //!
