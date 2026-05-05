@@ -540,6 +540,20 @@ struct Inner {
     /// listener-pipeline integration unblockable while leaving the
     /// hot-reload story for U13.
     honeypot_matcher: Arc<HoneypotMatcher>,
+    /// Per-identity ENS-named presence cache. Populated by the
+    /// (future) `/v1/sdk/register` handler after a successful
+    /// `EnsResolver::resolve(siwe_address)` lookup, consulted by
+    /// [`ReputationEngine::decide`] step 4 to bypass the
+    /// block-at-threshold branch for ENS-named identities (plan
+    /// U12 §"flow"). v0.1 stores presence-only (`()` value) — the
+    /// bypass decision is boolean, the actual ENS name is not
+    /// load-bearing for the engine's policy logic. A future
+    /// audit-shape-richness commit may upgrade the value type to
+    /// `EnsName` for richer span-field surface.
+    ///
+    /// Lock-free per-identity insert / remove / get on the hot
+    /// path matches the `scores` storage discipline.
+    ens_named: PapayaMap<IdentityKey, ()>,
 }
 
 impl core::fmt::Debug for ReputationEngine {
@@ -600,6 +614,7 @@ impl ReputationEngine {
                 scores: PapayaMap::new(),
                 state: arc_swap::ArcSwap::new(Arc::new(state)),
                 honeypot_matcher: Arc::new(honeypot_matcher),
+                ens_named: PapayaMap::new(),
             }),
         }
     }
@@ -860,6 +875,39 @@ impl ReputationEngine {
         Arc::clone(&self.inner.honeypot_matcher)
     }
 
+    /// Mark `identity` as ENS-named — populated by the (future)
+    /// `/v1/sdk/register` handler after a successful
+    /// `EnsResolver::resolve(siwe_address)` lookup. Subsequent
+    /// [`Self::decide`] calls bypass the block-at-threshold branch
+    /// (plan U12 §"flow" step 4) for marked identities; backpressure
+    /// (step 5) and the keyed governor limiter (step 2) still apply.
+    ///
+    /// Idempotent — re-marking a present identity is a no-op.
+    pub fn mark_ens_named(&self, identity: IdentityKey) {
+        self.inner.ens_named.pin().insert(identity, ());
+    }
+
+    /// Remove `identity` from the ENS-named cache. Called by the
+    /// (future) registration / lease-eviction path when an ENS name
+    /// expires or a tenant is deregistered. The bypass at
+    /// [`Self::decide`] step 4 stops applying immediately on the
+    /// next call.
+    ///
+    /// Idempotent — removing an absent identity is a no-op.
+    pub fn unmark_ens_named(&self, identity: IdentityKey) {
+        self.inner.ens_named.pin().remove(&identity);
+    }
+
+    /// Returns `true` iff `identity` was previously passed to
+    /// [`Self::mark_ens_named`] and has not been
+    /// [`Self::unmark_ens_named`]-ed since. Read-only — does not
+    /// mutate the cache. Used by [`Self::decide`] step 4 and
+    /// exposed for the admin policy-snapshot endpoint.
+    #[must_use]
+    pub fn is_ens_named(&self, identity: IdentityKey) -> bool {
+        self.inner.ens_named.pin().contains_key(&identity)
+    }
+
     /// Run the v0.1 R10 decision pipeline against the supplied
     /// `(identity, ip, lease)` triple.
     ///
@@ -881,10 +929,13 @@ impl ReputationEngine {
     ///    [`ReputationDecision::Backpressure`].
     /// 6. Else, return [`ReputationDecision::Allow`].
     ///
-    /// TODO(R10-followup): step 4 should bypass the block branch
-    /// for ENS-named identities (plan U12 §"flow"); requires
-    /// wiring `Arc<dyn portal_crypto::EnsResolver>` into the
-    /// engine. The minimum-engine apex is unconditional.
+    /// Step 4 honors the ENS-Sybil-gating bypass — identities
+    /// previously passed to [`Self::mark_ens_named`] (populated by
+    /// the future `/v1/sdk/register` handler after an
+    /// `EnsResolver::resolve(siwe_address)` lookup) skip the
+    /// block branch and fall through to step 5's backpressure
+    /// check. The bypass surfaces in the audit span as
+    /// `sybil_bypass = true`.
     #[tracing::instrument(
         level = "warn",
         skip_all,
@@ -895,6 +946,7 @@ impl ReputationEngine {
             score_before = tracing::field::Empty,
             score_after = tracing::field::Empty,
             decision = tracing::field::Empty,
+            sybil_bypass = tracing::field::Empty,
         ),
     )]
     pub fn decide(&self, identity: IdentityKey, ip: IpAddr, lease: &LeaseId) -> ReputationDecision {
@@ -920,20 +972,28 @@ impl ReputationEngine {
             return decision;
         }
 
-        // Step 4: hard-block apex.
+        // Step 4: hard-block apex with ENS-Sybil-gating bypass.
         //
-        // TODO(R10-followup): consult `Arc<dyn EnsResolver>` here
-        // and bypass the block branch when the SIWE-claimed
-        // address resolves to an ENS name (plan U12 step 4 carve-
-        // out — "score >= block_threshold AND identity is not
-        // ENS-named → Block").
+        // Plan U12 step 4: "score >= block_threshold AND identity
+        // is not ENS-named → Block". The presence cache is
+        // populated by the (future) `/v1/sdk/register` handler
+        // after `EnsResolver::resolve(siwe_address)` returns
+        // `Some(name)`; consulted here as a `bool`. ENS-named
+        // identities still get backpressure (step 5) and rate-limit
+        // (step 2) — only the hard-block branch is bypassed.
         if score_before >= state.config.block_threshold {
-            self.record_signal_default(identity, SignalKind::BlockedRequest);
-            let score_after = self.score_at(identity, Timestamp::now());
-            span.record("score_after", score_after);
-            let decision = ReputationDecision::Block(BlockReason::ReputationExceeded);
-            span.record("decision", decision.label());
-            return decision;
+            if self.is_ens_named(identity) {
+                // Sybil-gating bypass — record the audit field and
+                // fall through to step 5's backpressure check.
+                span.record("sybil_bypass", true);
+            } else {
+                self.record_signal_default(identity, SignalKind::BlockedRequest);
+                let score_after = self.score_at(identity, Timestamp::now());
+                span.record("score_after", score_after);
+                let decision = ReputationDecision::Block(BlockReason::ReputationExceeded);
+                span.record("decision", decision.label());
+                return decision;
+            }
         }
 
         // Step 5: backpressure band.
@@ -1603,6 +1663,114 @@ mod tests {
         let matcher = engine.honeypot_matcher();
         assert_eq!(matcher.exact_pattern_count(), 1, "/.env");
         assert_eq!(matcher.prefix_pattern_count(), 2, "/.git/* + /wp-admin/*");
+    }
+
+    /// `mark_ens_named` + `is_ens_named` round-trip; `unmark_ens_named`
+    /// clears the bit. Both mark and unmark are idempotent.
+    #[test]
+    fn ens_named_cache_round_trips() {
+        let engine = ReputationEngine::new();
+        let id = IdentityKey([0xe1u8; 32]);
+
+        assert!(!engine.is_ens_named(id), "fresh engine: not marked");
+        engine.mark_ens_named(id);
+        assert!(engine.is_ens_named(id), "after mark: present");
+
+        // Re-mark is idempotent.
+        engine.mark_ens_named(id);
+        assert!(engine.is_ens_named(id), "after re-mark: still present");
+
+        engine.unmark_ens_named(id);
+        assert!(!engine.is_ens_named(id), "after unmark: absent");
+
+        // Re-unmark is idempotent.
+        engine.unmark_ens_named(id);
+        assert!(!engine.is_ens_named(id), "after re-unmark: still absent");
+    }
+
+    /// Plan U12 step 4 bypass: at-or-above `block_threshold` an
+    /// ENS-named identity falls through to step 5 (Backpressure)
+    /// instead of returning `Block(ReputationExceeded)`. Pins the
+    /// Sybil-gating bypass — the load-bearing carve-out R10 v0.1
+    /// relies on for false-positive recovery.
+    #[test]
+    fn decide_above_threshold_bypasses_block_for_ens_named_identity() {
+        let engine = ReputationEngine::new();
+        let id = IdentityKey([0xe2u8; 32]);
+        let ip: IpAddr = "127.0.0.1".parse().unwrap();
+        let lease: LeaseId = CompactString::new("lease-x");
+
+        // Force the score above block_threshold by recording a
+        // signal heavy enough to exceed the default 100.0 ceiling.
+        engine.record_signal(id, SignalKind::HoneypotHit, 150.0);
+        let score = engine.score(id);
+        assert!(score >= REPUTATION_BLOCK_THRESHOLD);
+
+        // Without ENS-marker: block.
+        let decision = engine.decide(id, ip, &lease);
+        assert!(
+            matches!(
+                decision,
+                ReputationDecision::Block(BlockReason::ReputationExceeded),
+            ),
+            "non-ENS identity at score >= block_threshold must Block, got {decision:?}",
+        );
+
+        // With ENS-marker: bypass to Backpressure.
+        engine.mark_ens_named(id);
+        let decision = engine.decide(id, ip, &lease);
+        assert!(
+            matches!(decision, ReputationDecision::Backpressure(_)),
+            "ENS-named identity at score >= block_threshold must \
+             Backpressure (step 4 bypass + step 5 fall-through), got {decision:?}",
+        );
+
+        // After unmark: back to Block.
+        engine.unmark_ens_named(id);
+        let decision = engine.decide(id, ip, &lease);
+        assert!(
+            matches!(
+                decision,
+                ReputationDecision::Block(BlockReason::ReputationExceeded),
+            ),
+            "after unmark, identity at score >= block_threshold must \
+             Block again, got {decision:?}",
+        );
+    }
+
+    /// The bypass does NOT apply to step 2 (governor key-triple
+    /// rate limit). An ENS-named identity that exhausts the keyed
+    /// limiter is still rate-limited — Sybil gating only carves
+    /// out the reputation-block branch (step 4).
+    #[test]
+    fn ens_named_identity_still_rate_limited_by_governor() {
+        let engine = ReputationEngine::new();
+        let id = IdentityKey([0xe3u8; 32]);
+        let ip: IpAddr = "127.0.0.1".parse().unwrap();
+        let lease: LeaseId = CompactString::new("lease-y");
+
+        engine.mark_ens_named(id);
+
+        // Drain the keyed limiter for this triple by issuing a burst
+        // larger than the default Quota's burst capacity. The first
+        // few calls return Allow; subsequent calls return
+        // Block(RateLimited) regardless of ENS-named state.
+        let mut hit_rate_limit = false;
+        for _ in 0..1000 {
+            if matches!(
+                engine.decide(id, ip, &lease),
+                ReputationDecision::Block(BlockReason::RateLimited),
+            ) {
+                hit_rate_limit = true;
+                break;
+            }
+        }
+        assert!(
+            hit_rate_limit,
+            "ENS-named identity must still trip the keyed governor \
+             after a burst — Sybil bypass is only for the reputation \
+             block branch (step 4), not the rate limiter (step 2)",
+        );
     }
 
     /// `persist_to_path` then `restore_from_path` round-trips the
