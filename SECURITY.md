@@ -13,8 +13,9 @@ ships.
 
 ## Scope
 
-In scope: code under `crates/`, `xtask/`, `tests/`, build configuration
-(`Cargo.toml`, `deny.toml`, `rust-toolchain.toml`, `.cargo/`, `.github/`).
+In scope: code under `crates/` (per-crate `tests/` directories are inside
+their owning crate), `xtask/`, build configuration (`Cargo.toml`,
+`deny.toml`, `rust-toolchain.toml`, `.cargo/`, `.github/`).
 
 Out of scope:
 
@@ -55,8 +56,14 @@ In summary, the working assumptions are:
 
 - TLS implementation is **rustls only** (R13 / ADR-0002). `openssl`,
   `openssl-sys`, `libssh2-sys`, `native-tls`, `tokio-native-tls`, `hyper-tls`
-  are banned by `deny.toml` direct + transitive. CI gate: `cargo tree
-  --workspace -i openssl` returns nothing.
+  are banned by `deny.toml` direct + transitive. The actual direct +
+  transitive ban enforcement runs via `cargo deny check bans`
+  (`bans.deny` array in `deny.toml`). A separate belt-and-suspenders
+  CI gate (`rustls-mandatory` workflow in `.github/workflows/ci.yml`)
+  asserts `cargo tree --workspace --no-default-features -i openssl`
+  returns nothing — this only inspects the no-default-features
+  feature subgraph; openssl pulled in by an optional feature would
+  not appear here, and is caught by the cargo-deny ban list instead.
 - License allowlist in `deny.toml` rejects copyleft licenses incompatible
   with the workspace MIT license.
 - Advisory database checked on every CI run (`cargo deny check advisories`,
