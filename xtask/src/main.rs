@@ -50,9 +50,15 @@ struct Cli {
 enum Commands {
     /// Fail when `docs/wire-protocol.md` drift comment lags `git log -1 -- crates/portal-wire`.
     WireDriftCheck,
-    /// Run fmt, clippy, nextest, deny, machete, coverage (mirrors CI intent; best-effort locally).
+    /// Run every CI workflow gate locally (fmt, taplo, clippy, nextest at
+    /// `PROPTEST_CASES=4096`, deny, vet warn-only, cargo-machete, msrv per
+    /// member, wire-drift, multi-key-return, dep-spawning-audit,
+    /// rustls-mandatory, utoipa-coverage). Source of truth:
+    /// `.github/workflows/ci.yml`; `run_ci` mirrors it gate-by-gate.
     Ci,
-    /// v0.2-backlog stub for the utoipa coverage CI gate (Phase 7 U8.8).
+    /// Phase 7 U8.8 v0.2-backlog stub: serialize `ApiDoc::openapi()` to
+    /// `docs/openapi.yaml` (snapshot test). v0.1 coverage is enforced by
+    /// the clippy + ast-grep `utoipa-coverage-gate` already wired in `Ci`.
     OpenapiExport,
     /// Validate `docs/dep-spawning-audit.md` carries every required dep contract section (Phase 7 U8.7).
     DepAudit,
