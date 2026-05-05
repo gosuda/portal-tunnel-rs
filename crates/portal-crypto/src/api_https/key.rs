@@ -149,4 +149,28 @@ mod tests {
             "expected PortalCryptoError::Io for missing path, got: {result:?}",
         );
     }
+
+    /// Invoke the loader on a path that exists but is a **directory**, not
+    /// a regular file. `File::open` succeeds for directory paths on Unix,
+    /// so without the `meta.is_file()` guard the call would fall through to
+    /// the `HttpsKey` arm with the wrong error category. This pins the
+    /// guard's contract: a directory key path surfaces as
+    /// [`PortalCryptoError::Io`] with the `InvalidInput` kind that the
+    /// guard's `io::Error::new` constructs.
+    #[test]
+    fn load_api_https_key_returns_error_for_directory_path() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let result = load_api_https_key(dir.path());
+        match result {
+            Err(PortalCryptoError::Io(e)) => {
+                assert_eq!(
+                    e.kind(),
+                    std::io::ErrorKind::InvalidInput,
+                    "expected ErrorKind::InvalidInput from is_file() guard, got: {e:?}",
+                );
+            }
+            other => panic!("expected PortalCryptoError::Io for directory path, got: {other:?}"),
+        }
+        Ok(())
+    }
 }
