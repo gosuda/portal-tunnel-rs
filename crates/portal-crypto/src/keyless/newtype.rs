@@ -17,9 +17,10 @@
 //!
 //! ## PEM loading
 //!
-//! [`load_keyless_signing_key`] is currently a **stub**.  `rustls-pemfile` is
-//! not yet pinned in `[workspace.dependencies]`.  Phase 6b will wire the real
-//! PEM → DER decoder and dispatch the concrete key type based on the detected
+//! [`load_keyless_signing_key`] is currently a **stub** for the
+//! file-path-based public API. The eventual implementation will use
+//! `rustls_pki_types::PrivateKeyDer::from_pem_slice` to decode PEM →
+//! DER and then dispatch the concrete key type based on the detected
 //! algorithm OID.
 
 use std::path::Path;
