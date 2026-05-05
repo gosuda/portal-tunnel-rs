@@ -90,20 +90,20 @@ struct ServeArgs {
     #[arg(long, default_value = "portal-relay-local")]
     name: String,
 
-    /// CA directory URL. Reserved for the Phase 4 B3-B5 ACME wiring;
-    /// rejected at parse time today because Phase 7 B1 only
-    /// materializes self-signed material via [`ProviderSelector::Local`].
+    /// CA directory URL. Reserved for ACME issuance; rejected at
+    /// parse time today because the binary currently only
+    /// materializes self-signed material via
+    /// [`ProviderSelector::Local`].
     #[arg(long)]
     acme_directory_url: Option<String>,
 
-    /// Operator email for ACME registration. Reserved for the
-    /// Phase 4 B3-B5 ACME wiring; rejected at parse time today.
+    /// Operator email for ACME registration. Reserved for ACME
+    /// issuance; rejected at parse time today.
     #[arg(long)]
     contact_email: Option<String>,
 
-    /// Domains the issued cert should cover. Reserved for the
-    /// Phase 4 B3-B5 ACME wiring; rejected at parse time today.
-    /// Repeatable.
+    /// Domains the issued cert should cover. Reserved for ACME
+    /// issuance; rejected at parse time today. Repeatable.
     #[arg(long = "domain")]
     domains: Vec<String>,
 }
@@ -132,10 +132,10 @@ fn main() -> eyre::Result<()> {
     })
 }
 
-/// Phase 7 B1 only wires [`ProviderSelector::Local`]. Refuse to boot if
-/// the operator passed any flag that implies real ACME issuance — we
-/// would otherwise silently produce self-signed material under a
-/// misleading configuration.
+/// The binary currently only wires [`ProviderSelector::Local`].
+/// Refuse to boot if the operator passed any flag that implies real
+/// ACME issuance — we would otherwise silently produce self-signed
+/// material under a misleading configuration.
 fn reject_acme_flags(matches: &ArgMatches) -> eyre::Result<()> {
     const FLAGS: &[(&str, &str)] = &[
         ("acme_directory_url", "--acme-directory-url"),
@@ -145,9 +145,9 @@ fn reject_acme_flags(matches: &ArgMatches) -> eyre::Result<()> {
     for (id, display) in FLAGS {
         if matches!(matches.value_source(id), Some(ValueSource::CommandLine)) {
             return Err(eyre!(
-                "{display} is reserved for the Phase 4 B3-B5 ACME wiring; \
-                 Phase 7 B1 only supports local self-signed mode. Re-run \
-                 without {display}.",
+                "{display} is reserved for ACME issuance; this binary \
+                 currently only supports local self-signed mode. \
+                 Re-run without {display}.",
             ));
         }
     }
