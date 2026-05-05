@@ -19,11 +19,22 @@
 //! the async [`load_bundle_if_present`] we build a current-thread
 //! tokio runtime inside the Jail closure and `.block_on(...)` the
 //! load. This is the same convention the iter-144 figment-integration
-//! tests use in `crates/portal-relay/src/config.rs`. Wrapping the
-//! whole test in `#[tokio::test]` would not work: Jail mutates
-//! process-global env state and CWD, and a tokio-driven test that
-//! runs concurrently would race on those globals. Jail's sync
-//! closure scopes the mutations.
+//! tests use in `crates/portal-relay/src/config.rs`.
+//!
+//! ## Env-var state guarantee
+//!
+//! `figment::Jail` restores env vars and CWD to their pre-closure
+//! values before its closure returns, so mutations do not persist
+//! into subsequent tests in the same process. This guards the
+//! sequential leak path only — it does NOT serialize against
+//! concurrent test threads that might read env vars during the
+//! closure window. The two tests below that set `PORTAL_RELAY_*`
+//! env vars rely on the fact that no other test in this binary
+//! reads `PORTAL_RELAY_*`, plus `cargo nextest`'s default
+//! one-process-per-test mode (which converts the in-process race
+//! into a cross-process non-issue). Under `cargo test` (single
+//! process, multi-threaded) the concurrency window is open in
+//! principle but unobserved in practice.
 
 #![expect(clippy::unwrap_used, reason = "test-only setup")]
 #![expect(clippy::expect_used, reason = "test-only setup")]
@@ -72,9 +83,11 @@ fn sample_runtime_json_zero_bps() -> &'static str {
 }
 
 /// JSON shape of a fully valid `runtime.json` (non-default values
-/// across both fields). Used by tests where the file shape is not
-/// the variable under observation — the env-layer failure mode is.
-fn sample_runtime_json_valid() -> &'static str {
+/// across both fields), distinct from `_zero_bps` so the file value
+/// vs env value is observable in assertions. The chosen value `1024`
+/// is arbitrary — both `0` (the `_zero_bps` helper) and `1024` are
+/// valid `u64` values; the suffix names the literal, not validity.
+fn sample_runtime_json_with_bps_1024() -> &'static str {
     r#"{"bps_per_identity": 1024, "ip_ban_list": []}"#
 }
 
@@ -138,7 +151,7 @@ fn load_bundle_returns_err_on_unknown_env_field() {
     // typo'd value ignored.
     figment::Jail::expect_with(|jail| {
         jail.create_file("bootstrap.json", sample_bootstrap_json())?;
-        jail.create_file("runtime.json", sample_runtime_json_valid())?;
+        jail.create_file("runtime.json", sample_runtime_json_with_bps_1024())?;
         jail.set_env("PORTAL_RELAY_UNKNOWN_FIELD", "value");
 
         let state_dir = std::env::current_dir().expect("jail sets CWD to tempdir");

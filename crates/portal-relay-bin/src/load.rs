@@ -2,13 +2,9 @@
 //!
 //! Wraps [`RelayConfigBundle::from_files_with_env`] with the binary's
 //! `Ok(None)`-on-missing-bootstrap convention so `serve` can boot
-//! without the operator having run `portal-relay init` first. The
-//! env-overlay layer (driven by [`crate::ENV_PREFIX`]) is applied to
-//! the runtime half only — `bootstrap.json` is loaded strict and
-//! cannot be env-overridden, preserving the trust-boundary asymmetry
-//! between immutable post-startup bootstrap material (key paths,
-//! state dir) and operator-tunable runtime fields (rate caps, IP
-//! bans).
+//! without the operator having run `portal-relay init` first. See
+//! [`crate::ENV_PREFIX`] for the trust-boundary rationale (bootstrap
+//! immutable, runtime env-overlaid).
 //!
 //! # Outcomes
 //!
