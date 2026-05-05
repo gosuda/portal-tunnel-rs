@@ -1015,7 +1015,7 @@ impl ReputationEngine {
 /// keys; the in-memory engine continues to use
 /// `HashMap<IdentityKey, ReputationScore>` and the conversion lives
 /// at the disk boundary.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct ReputationSnapshotEntry {
     /// 64-char lowercase hex encoding of the 32-byte
     /// [`IdentityKey`] — matches `hex_identity`'s output.
@@ -1023,6 +1023,33 @@ pub struct ReputationSnapshotEntry {
     /// The decay-tracked score paired with its `last_updated`
     /// timestamp.
     pub score: ReputationScore,
+}
+
+impl core::fmt::Debug for ReputationSnapshotEntry {
+    /// R-S5-2: per-row reputation data must not surface verbatim in
+    /// `Debug` output (logs, panic dumps, error messages). Expose a
+    /// short prefix of `identity_hex` so a leaked log row can be
+    /// located in diagnostics, but redact the score and the
+    /// `last_updated` timestamp so an attacker reading a
+    /// Debug-formatted snapshot row cannot reconstruct the score
+    /// table or its threshold-distance distribution, and cannot
+    /// infer the time-of-last-violation side channel from the
+    /// timestamp.
+    ///
+    /// Note: `Serialize` is unaffected — the JSON persistence shape
+    /// still carries the full row contents because the file is
+    /// gated by U5's 0600 mode + atomic-write helper, not by Debug.
+    /// Only the `Debug` text surface is redacted.
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let prefix = self
+            .identity_hex
+            .get(..8)
+            .unwrap_or(self.identity_hex.as_str());
+        f.debug_struct("ReputationSnapshotEntry")
+            .field("identity_hex_prefix", &format_args!("{prefix}…"))
+            .field("score", &format_args!("<redacted per R-S5-2>"))
+            .finish()
+    }
 }
 
 /// Parse a 64-char lowercase hex string back into an
@@ -1216,6 +1243,52 @@ mod tests {
     fn default_governor_quota_is_constructible() {
         let q = default_governor_quota();
         assert_eq!(q.burst_size().get(), REPUTATION_QUOTA_BURST);
+    }
+
+    /// R-S5-2: a Debug-formatted [`ReputationSnapshotEntry`] must
+    /// not leak the score value, the `last_updated` timestamp, nor
+    /// the full identity hex. Pins the redaction contract so a
+    /// future `#[derive(Debug)]` resurrection (e.g., during a
+    /// refactor) fails the test immediately rather than silently
+    /// exposing per-tenant reputation in logs.
+    ///
+    /// Uses the existing [`fixed_now`] fixture (2026-05-04T12:00:00Z)
+    /// so the timestamp-absence assertion names a deterministic
+    /// string rather than asserting the absence of "every
+    /// conceivable timestamp shape".
+    #[test]
+    fn snapshot_entry_debug_redacts_per_r_s5_2() {
+        let ts = fixed_now();
+        let entry = ReputationSnapshotEntry {
+            identity_hex: "abcdef0123456789".repeat(4),
+            score: ReputationScore {
+                value: 99.7,
+                last_updated: ts,
+            },
+        };
+        let ts_debug = format!("{ts:?}");
+        let formatted = format!("{entry:?}");
+
+        assert!(
+            !formatted.contains("99.7"),
+            "score value leaked in Debug: {formatted}"
+        );
+        assert!(
+            !formatted.contains(&ts_debug),
+            "timestamp Debug leaked in Debug: ts={ts_debug} entry={formatted}"
+        );
+        assert!(
+            formatted.contains("abcdef01"),
+            "identity prefix missing from Debug: {formatted}"
+        );
+        assert!(
+            !formatted.contains(&"abcdef0123456789".repeat(4)),
+            "full identity_hex leaked in Debug: {formatted}"
+        );
+        assert!(
+            formatted.contains("<redacted per R-S5-2>"),
+            "redaction sentinel missing from Debug: {formatted}"
+        );
     }
 
     #[test]
