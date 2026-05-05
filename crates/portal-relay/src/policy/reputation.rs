@@ -421,10 +421,15 @@ struct Inner {
     limiter: Limiter,
     /// Tunable thresholds + decay constant.
     ///
-    /// TODO(R10-followup): swap `Arc<ReputationConfig>` for
-    /// `Arc<arc_swap::ArcSwap<ReputationConfig>>` per U13 so a hot
-    /// `POST /v1/admin/config/reload` can mutate thresholds
-    /// without dropping in-flight scores.
+    /// TODO(R10-followup): hot-swap support lands with Phase 5 Batch
+    /// 8 (U13) where the limiter-rebuild path is specified alongside
+    /// the threshold swap. Doing it here would create a
+    /// quota-vs-config inconsistency footgun (the limiter's
+    /// burst/sustained is baked in at construction; a swap of
+    /// `ReputationConfig::governor_quota` wouldn't actually re-quota
+    /// the limiter, and `config()` would report a value the engine
+    /// isn't enforcing). U13 is the right place to wire `ArcSwap` +
+    /// limiter rebuild as one cohesive change.
     config: Arc<ReputationConfig>,
 }
 
