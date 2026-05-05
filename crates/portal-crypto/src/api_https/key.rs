@@ -12,10 +12,13 @@
 //!
 //! This mirrors the pattern used for [`KeylessSigningKeyHandle`][crate::KeylessSigningKeyHandle].
 
+use std::path::Path;
 use std::sync::Arc;
 
 use secrecy::SecretBox;
 use zeroize::Zeroize;
+
+use crate::error::PortalCryptoError;
 
 // ---------------------------------------------------------------------------
 // ApiHttpsKey
