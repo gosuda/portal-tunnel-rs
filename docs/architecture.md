@@ -98,10 +98,18 @@ axum, instant-acme, chosen WireGuard fork) is documented in
 
 Every private key, admin token, lease secret, ACME account key, DNS-provider
 credential, and keyless signing key lives inside `secrecy::SecretBox<T>` at
-type level. Bare `String` for secrets is rejected by clippy
-`disallowed_types`. The newtype `T` parameter encodes the role (R2 trust
-boundary), so the type system rejects cross-use even when both keys happen to
-be ed25519:
+type level. The newtype `T` parameter encodes the role (R2 trust boundary),
+so the type system rejects cross-use even when both keys happen to be
+ed25519. Each role has exactly one `load_*_key` constructor returning the
+typed `SecretBox<KeyType>`; consumers (ServerConfig assembly, signing
+adapters) accept only the role-typed newtype as their parameter. There is
+no public API that produces or consumes a bare `String` for secret material
+— a contributor introducing one would need to add a new public function with
+a `String` return or parameter, which is caught at code review (no
+silent-acceptance escape hatch from the typed surface). A workspace-wide
+clippy `disallowed_types` rule on `String` is impractical (`String` is used
+legitimately throughout) and is intentionally NOT a gate; the type-system +
+single-loader-per-role discipline is the load-bearing mechanism:
 
 ```rust
 pub struct ApiHttpsKey(SigningKey);
