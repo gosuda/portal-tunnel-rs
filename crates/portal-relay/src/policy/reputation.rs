@@ -531,9 +531,10 @@ struct Inner {
     /// `Arc<HoneypotMatcher>` so listener-pipeline call sites can
     /// invoke the engine without cloning the underlying pattern
     /// vectors. v0.1 stores this on `Inner` (not on `EngineState`):
-    /// [`Self::swap_config`] hot-swaps [`ReputationConfig`] only, and
-    /// non-default matcher patterns require constructing or rebuilding
-    /// the engine with [`Self::with_config_and_honeypot_matcher`].
+    /// [`ReputationEngine::swap_config`] hot-swaps [`ReputationConfig`]
+    /// only, and non-default matcher patterns require constructing or
+    /// rebuilding the engine with
+    /// [`ReputationEngine::with_config_and_honeypot_matcher`].
     honeypot_matcher: Arc<HoneypotMatcher>,
     /// Per-identity ENS-named presence cache. Populated by the
     /// (future) `/v1/sdk/register` handler after a successful
