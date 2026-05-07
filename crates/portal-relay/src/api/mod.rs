@@ -20,10 +20,11 @@ pub use state::{AdminState, DiscoveryState, SdkState};
 /// Build the SDK trust-boundary router.
 ///
 /// Mounts the [`sdk`] handlers landed so far — `GET /v1/sdk/domain`,
-/// `POST /v1/sdk/register-challenge`, and `POST /v1/sdk/register`.
-/// Additional `/v1/sdk/*` handlers (`renew`, `unregister`, `connect`)
-/// register in follow-up commits. See the [`sdk`] module rustdoc for
-/// the per-endpoint contracts (auth posture, CORS, etc.).
+/// `POST /v1/sdk/register-challenge`, `POST /v1/sdk/register`,
+/// `POST /v1/sdk/renew`, and `POST /v1/sdk/unregister`. The
+/// `/v1/sdk/connect` handler registers in a follow-up commit. See
+/// the [`sdk`] module rustdoc for the per-endpoint contracts (auth
+/// posture, CORS, etc.).
 #[must_use]
 #[expect(
     clippy::double_must_use,
@@ -61,6 +62,8 @@ pub fn build_sdk_router(state: SdkState) -> axum::Router {
         post(sdk::register_challenge_handler),
     );
     let r = r.route("/v1/sdk/register", post(sdk::register_handler));
+    let r = r.route("/v1/sdk/renew", post(sdk::renew_handler));
+    let r = r.route("/v1/sdk/unregister", post(sdk::unregister_handler));
     r.with_state(state)
 }
 

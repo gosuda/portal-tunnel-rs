@@ -32,9 +32,14 @@
 //! - `POST /v1/sdk/register` — finalize the SIWE handshake; mint a
 //!   lease and return [`RegisterResponseBody`] with a lease access
 //!   token. See the handler rustdoc for full semantics.
+//! - `POST /v1/sdk/renew` — verify the lease access token, refresh
+//!   the registry record, and rotate the access token. See
+//!   [`renew_handler`] for full semantics.
+//! - `POST /v1/sdk/unregister` — verify the lease access token and
+//!   remove the lease from the registry. See [`unregister_handler`]
+//!   for full semantics.
 //!
-//! Subsequent handlers (`/v1/sdk/renew`, `/v1/sdk/unregister`,
-//! `/v1/sdk/connect`) land in follow-up commits.
+//! The `/v1/sdk/connect` handler lands in a follow-up commit.
 
 use std::net::{IpAddr, SocketAddr};
 
@@ -131,7 +136,7 @@ pub async fn domain_handler() -> Result<(HeaderMap, Json<ApiDataEnvelope<DomainB
 ///    are flat fields rather than nested under an `identity` object.
 ///    Rationale: Go's `Identity.PublicKey` is `json:"-"` and is plumbed
 ///    out-of-band; the Rust port's
-///    [`portal_crypto::siwe::binding::canonical_statement`] requires
+///    `portal_crypto::siwe::binding::canonical_statement` requires
 ///    BOTH values at SIWE-build time. A flat shape avoids a redundant
 ///    nested object whose only `name` field is unused at the
 ///    challenge-issue step (S5 does not write to the lease record).
@@ -151,7 +156,7 @@ pub async fn domain_handler() -> Result<(HeaderMap, Json<ApiDataEnvelope<DomainB
 ///   (matches Go's `[]byte` JSON encoding default).
 /// - `metadata`: standard-base64 of the postcard-encoded blob.
 /// - `reported_ip`: optional self-reported IP (free-form string;
-///   parsed via [`IpAddr::from_str`]).
+///   parsed via `IpAddr::from_str`).
 ///
 /// `#[serde(deny_unknown_fields)]` is intentionally NOT applied:
 /// downstream wire evolution (e.g., a future `attestation` field) must
@@ -463,7 +468,7 @@ pub struct RegisterRequestBody {
     /// at challenge issue.
     pub siwe_message_text: String,
     /// 65-byte EIP-191 secp256k1 signature as `"0x" + 130 hex`
-    /// (case-insensitive). Decoded via [`decode_siwe_signature`].
+    /// (case-insensitive). Decoded via `decode_siwe_signature`.
     pub siwe_signature: String,
     /// Hostname the SDK wants to register.
     pub hostname: CompactString,
@@ -515,10 +520,10 @@ pub struct RegisterResponseBody {
 ///
 /// ## Lease TTL
 ///
-/// v0.1 hardcodes a 24h TTL ([`LEASE_DEFAULT_TTL`]) on the resulting
+/// v0.1 hardcodes a 24h TTL (`LEASE_DEFAULT_TTL`) on the resulting
 /// [`LeaseRecord`]. Honoring a per-request `ttl` override (Go
 /// `RegisterRequest.TTL`) requires plumbing the field through
-/// [`InnerRegisterChallengeRequest`] / [`PendingChallenge`] which is
+/// [`InnerRegisterChallengeRequest`] / [`crate::state::PendingChallenge`] which is
 /// out of scope for S6. The eventual `/v1/sdk/renew` handler is
 /// where TTL bumps live.
 ///
@@ -547,7 +552,7 @@ pub struct RegisterResponseBody {
 /// ## Hostname conflict envelope
 ///
 /// `LeaseRegistry::register` returns
-/// [`RelayError::HostnameConflict`] on a hostname-vs-different-
+/// [`crate::RelayError::HostnameConflict`] on a hostname-vs-different-
 /// identity collision; the envelope mapping renders 409
 /// `hostname_conflict`. The typed error variant carries
 /// `current_holder` for operator audit but the holder identity does
@@ -722,10 +727,251 @@ pub async fn register_handler(
     Ok((StatusCode::CREATED, ok(body)))
 }
 
+/// Wire body for `POST /v1/sdk/renew` and `POST /v1/sdk/unregister`.
+///
+/// Both endpoints carry the lease access token in the JSON body rather
+/// than the `Authorization` header. Rationale: the Go upstream accepts
+/// either shape (`portal-tunnel/portal/lease.go:378-385`), and a
+/// body-bearing surface is the simpler v0.1 wire — every existing SDK
+/// API path (`/v1/sdk/register`, `/v1/sdk/register-challenge`) already
+/// uses a JSON body, so this avoids a one-off auth-header carve-out.
+/// The `/v1/sdk/connect` endpoint (S8) WILL switch to an
+/// `X-Portal-Access-Token` header because it is a hijacked HTTP/1.1
+/// upgrade and has no JSON body to carry the token.
+///
+/// Header-only support for `renew`/`unregister` is a follow-up if SDK
+/// operators report friction; the change is additive at the wire
+/// boundary.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AccessTokenBody {
+    /// Lease access token (signed JWT-style compact string per
+    /// [`crate::state::lease_token`]) — minted by the
+    /// `/v1/sdk/register` handler and rotated on each successful
+    /// `/v1/sdk/renew` call.
+    pub access_token: CompactString,
+}
+
+/// Wire body for the `POST /v1/sdk/renew` 200 response.
+///
+/// Mirrors the lease-relevant fields of [`RegisterResponseBody`]:
+/// `access_token` carries the freshly-minted (rotated) token,
+/// `expires_at` is the post-renew expiry, and the version pair is
+/// pinned to the relay's build for SDK-side wire-version assertions
+/// across the renew call. The lease `identity` and `hostname` are NOT
+/// re-emitted — the SDK already has them from the prior register
+/// response and they do not change on renew.
+///
+/// `#[non_exhaustive]` blocks struct-literal construction from
+/// downstream Rust crates; it does NOT guarantee JSON-wire
+/// compatibility — a strict-decoder client that rejects unknown
+/// keys would still break on a field addition.
+#[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
+pub struct RenewResponseBody {
+    /// Freshly-minted lease access token. Replaces the prior token at
+    /// the SDK side; the prior token continues to validate cryptographically
+    /// until its embedded `expires_at` (no server-side revocation list
+    /// in v0.1), but operators SHOULD treat the rotated token as the
+    /// canonical credential.
+    pub access_token: CompactString,
+    /// Post-renew lease expiry (RFC 3339).
+    pub expires_at: Timestamp,
+    /// Wire-protocol version. v0.1 collapses to `CARGO_PKG_VERSION`.
+    pub protocol_version: &'static str,
+    /// Relay binary release version. v0.1 collapses to
+    /// `CARGO_PKG_VERSION`.
+    pub release_version: &'static str,
+}
+
+/// Empty success body for `POST /v1/sdk/unregister`.
+///
+/// Serializes to `{}`, producing the wire shape `{"data":{}}` once
+/// wrapped in [`ApiDataEnvelope`]. A bare `()` would serialize to
+/// `null` (yielding `{"data":null}`), which is a wire-shape regression
+/// against Go upstream's `{"data":{}}` empty-data convention.
+#[derive(Debug, Clone, Serialize)]
+pub struct EmptyBody {}
+
+/// `POST /v1/sdk/renew` — refresh a lease and rotate the access token.
+///
+/// ## Auth posture
+///
+/// The lease access token is the post-registration authority; the
+/// handler does NOT re-run SIWE+ENS gating. Re-verifying SIWE per
+/// request would defeat the purpose of the access token (Go upstream
+/// `auth.VerifyLeaseAccessToken` only). A caller that proves
+/// possession of a non-expired access token under the relay's
+/// signing key is the registered identity, full stop.
+///
+/// ## Mint-then-mutate ordering
+///
+/// Hoare invariant mirrors [`register_handler`]: mint the new token
+/// first, then call [`crate::state::LeaseRegistry::renew`] only if
+/// the mint succeeded. Reordering would let a token-mint fault leave
+/// the lease record advanced past its prior expiry while the SDK
+/// holds no usable token — a subtle inconsistency between server
+/// state and SDK-visible credential.
+///
+/// ## TTL semantics
+///
+/// Each successful renew bumps `expires_at` to `now + LEASE_DEFAULT_TTL`
+/// (24h), independent of the prior expiry. The Go upstream's
+/// per-request TTL override is not threaded in v0.1 — see
+/// [`register_handler`]'s rustdoc on the same point.
+///
+/// # Errors
+///
+/// - 400 `invalid_request` — malformed JSON body (missing
+///   `access_token` field, wrong content-type, etc).
+/// - 401 `unauthorized` — token is malformed (framing / claims /
+///   signature / unsupported version), expired, or its signature
+///   does not verify under the relay's lease-token signing key.
+/// - 404 `lease_not_found` — token verifies but the identity has no
+///   registered lease (the lease was unregistered, swept by the
+///   janitor past its TTL, or the token was issued against a
+///   never-registered identity by a malicious / racy caller).
+/// - 500 `internal` — token re-issue failed (postcard encode or
+///   signer fault). The lease record is unchanged in this branch
+///   because the registry mutation runs only after the mint.
+#[tracing::instrument(name = "sdk.renew", skip_all, fields(identity = tracing::field::Empty))]
+pub async fn renew_handler(
+    State(state): State<SdkState>,
+    body: Result<Json<AccessTokenBody>, JsonRejection>,
+) -> Result<Json<ApiDataEnvelope<RenewResponseBody>>, ApiError> {
+    // 1. Decode the body. JsonRejection covers malformed JSON, missing
+    //    `access_token`, and wrong content-type — surface them all as
+    //    `invalid_request` to mirror the rest of the SDK surface.
+    let Json(req) = body
+        .map_err(|err| ApiError::new(ApiErrorCode::InvalidRequest, format!("renew body: {err}")))?;
+
+    // 2. Verify the access token. `verify` runs the framing → claims
+    //    → signature → expiry pipeline; the envelope `From<RelayError>`
+    //    impl maps each `LeaseTokenError` variant to its 401 / 500
+    //    counterpart so the handler does not re-classify here.
+    let now = Timestamp::now();
+    let identity =
+        verify_access_token_identity(&req.access_token, &state.lease_token_verifier, now)?;
+    tracing::Span::current().record("identity", tracing::field::display(hex_lower(&identity.0)));
+
+    // 3. Compute the post-renew expiry and mint the rotated token
+    //    BEFORE touching the registry (mint-then-mutate ordering).
+    let new_expires = now.checked_add(LEASE_DEFAULT_TTL).unwrap_or(Timestamp::MAX);
+    let signer = portal_crypto::Ed25519Signer::new(&state.lease_token_signing_key);
+    let new_token = lease_token::issue(identity, new_expires, &signer)?;
+
+    // 4. Renew the registry record. `renew` returns `None` if the
+    //    identity is not registered — this is a 404 `lease_not_found`,
+    //    distinct from the 401 `unauthorized` that fires when the
+    //    token itself does not verify. A token may verify cryptographically
+    //    yet point at a lease that was swept by the janitor or
+    //    explicitly unregistered.
+    if state
+        .leases
+        .renew(identity, new_expires, now)
+        .await
+        .is_none()
+    {
+        return Err(ApiError::new(
+            ApiErrorCode::LeaseNotFound,
+            "lease not found for verified identity",
+        ));
+    }
+
+    Ok(ok(RenewResponseBody {
+        access_token: new_token,
+        expires_at: new_expires,
+        protocol_version: env!("CARGO_PKG_VERSION"),
+        release_version: env!("CARGO_PKG_VERSION"),
+    }))
+}
+
+/// `POST /v1/sdk/unregister` — remove a lease.
+///
+/// ## Auth posture
+///
+/// Identical to [`renew_handler`]: the lease access token is the
+/// post-registration authority; no SIWE re-verify. Mirrors Go upstream
+/// `auth.VerifyLeaseAccessToken`-only.
+///
+/// ## Idempotency
+///
+/// In spirit the operation is idempotent (a second unregister leaves
+/// the registry in the same state — lease absent), but on the wire a
+/// second call returns 404 `lease_not_found` because the second call
+/// has nothing to unregister. Callers that want to fire-and-forget
+/// MAY ignore the 404; callers that want strict semantics MAY treat
+/// the 404 as confirmation that the lease is gone.
+///
+/// ## ACME ENS deletion (deferred)
+///
+/// Go upstream calls `deleteENSGaslessHostname` here. The Rust port
+/// does NOT in v0.1 — ACME ENS deletion is a Phase 4 seam tracked as
+/// a follow-up. Operators who need the ENS hostname freed must
+/// currently delete it out-of-band.
+///
+/// # Errors
+///
+/// - 400 `invalid_request` — malformed JSON body.
+/// - 401 `unauthorized` — token is malformed, expired, or its
+///   signature does not verify (same envelope mapping as renew).
+/// - 404 `lease_not_found` — token verifies but no lease for the
+///   identity (already unregistered, swept past TTL, or token issued
+///   against a never-registered identity).
+#[tracing::instrument(
+    name = "sdk.unregister",
+    skip_all,
+    fields(identity = tracing::field::Empty),
+)]
+pub async fn unregister_handler(
+    State(state): State<SdkState>,
+    body: Result<Json<AccessTokenBody>, JsonRejection>,
+) -> Result<Json<ApiDataEnvelope<EmptyBody>>, ApiError> {
+    // 1. Decode the body.
+    let Json(req) = body.map_err(|err| {
+        ApiError::new(
+            ApiErrorCode::InvalidRequest,
+            format!("unregister body: {err}"),
+        )
+    })?;
+
+    // 2. Verify the access token.
+    let identity = verify_access_token_identity(
+        &req.access_token,
+        &state.lease_token_verifier,
+        Timestamp::now(),
+    )?;
+    tracing::Span::current().record("identity", tracing::field::display(hex_lower(&identity.0)));
+
+    // 3. Remove from the registry. `unregister` returns `Some(prior)`
+    //    on success and `None` if the identity was not present —
+    //    surface the latter as 404 (matches the renew handler).
+    if state.leases.unregister(identity).await.is_none() {
+        return Err(ApiError::new(
+            ApiErrorCode::LeaseNotFound,
+            "lease not found for verified identity",
+        ));
+    }
+
+    Ok(ok(EmptyBody {}))
+}
+
 /// Default lease TTL for v0.1 register flow (24 hours). Mirrors Go
 /// `defaultLeaseTTL`. The SDK's per-request `ttl` override is not
-/// honored at register time in v0.1 — it is consumed by `/v1/sdk/renew`.
-const LEASE_DEFAULT_TTL: jiff::SignedDuration = jiff::SignedDuration::from_hours(24);
+/// honored by register or renew in v0.1; both handlers use this fixed
+/// 24h default.
+///
+/// `pub(crate)` so the renew handler ([`renew_handler`]) shares the same
+/// constant; flipping the TTL in one place avoids drift between the
+/// register- and renew-side expiry math.
+pub(crate) const LEASE_DEFAULT_TTL: jiff::SignedDuration = jiff::SignedDuration::from_hours(24);
+
+fn verify_access_token_identity(
+    access_token: &str,
+    verifier: &portal_crypto::Ed25519Verifier,
+    now: Timestamp,
+) -> crate::error::RelayResult<IdentityKey> {
+    lease_token::verify(access_token, verifier, now).map(|claims| IdentityKey(claims.identity))
+}
 
 /// Render a 32-byte buffer as 64-char lowercase hex (no `0x` prefix).
 /// Used to surface the registered identity on the wire.
