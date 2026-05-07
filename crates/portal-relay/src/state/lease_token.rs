@@ -52,6 +52,14 @@ use thiserror::Error;
 use super::lease_registry::IdentityKey;
 use crate::error::RelayResult;
 
+/// HTTP header carrying a lease access token on hijack-style SDK
+/// endpoints.
+///
+/// Stored lower-case so callers use the canonical case-insensitive
+/// [`http::HeaderMap`] lookup path rather than doing string comparisons
+/// themselves.
+pub const ACCESS_TOKEN_HEADER: &str = "x-portal-access-token";
+
 /// Current on-the-wire claim-frame version. Bumping this is a
 /// breaking change to the lease-access-token format and MUST land
 /// alongside a parallel `verify` accept-list expansion.

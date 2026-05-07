@@ -38,21 +38,27 @@
 //! - `POST /v1/sdk/unregister` — verify the lease access token and
 //!   remove the lease from the registry. See [`unregister_handler`]
 //!   for full semantics.
-//!
-//! The `/v1/sdk/connect` handler lands in a follow-up commit.
+//! - `POST /v1/sdk/connect` — verify the lease access token from the
+//!   `X-Portal-Access-Token` header, assert a live lease and HTTP/1.1,
+//!   then hand the connection to hyper's upgrade path for the future
+//!   relay-stream bridge.
 
 use std::net::{IpAddr, SocketAddr};
 
 use axum::Json;
+use axum::body::Body;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{ConnectInfo, State};
 use axum::http::uri::Authority;
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, Request, StatusCode, Version, header};
+use axum::response::{IntoResponse, Response};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use compact_str::CompactString;
+use hyper_util::rt::TokioIo;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
+use tokio::io::AsyncWriteExt as _;
 
 use crate::api::envelope::{ApiDataEnvelope, ApiError, ApiErrorCode, ok};
 use crate::api::state::SdkState;
@@ -725,6 +731,119 @@ pub async fn register_handler(
         release_version: env!("CARGO_PKG_VERSION"),
     };
     Ok((StatusCode::CREATED, ok(body)))
+}
+
+/// `POST /v1/sdk/connect` — verify lease access and hijack HTTP/1.1.
+///
+/// ## Auth posture
+///
+/// The lease access token is carried in the `X-Portal-Access-Token`
+/// header because this endpoint has no JSON request body: on success it
+/// transitions from normal HTTP handling to the upgraded stream. The
+/// token is verified exactly like [`renew_handler`] and
+/// [`unregister_handler`]; no SIWE or ENS work is repeated on this
+/// hot path.
+///
+/// ## Hijack boundary
+///
+/// v0.1 only lands the admission and hijack contract. Once the
+/// underlying stream upgrades, the task writes the minimal HTTP/1.1
+/// success prelude and stops. The actual tenant bridge is intentionally
+/// deferred.
+///
+/// TODO(U16): wire the upgraded stream into `RelayStream::offer_conn`
+/// once the relay-stream bridge and throttling surface lands.
+///
+/// # Errors
+///
+/// - 400 `http11_only` — HTTP/2+ requests cannot use this HTTP/1.1
+///   hijack contract.
+/// - 401 `ip_banned` — source IP banned by policy.
+/// - 401 `unauthorized` — access-token header missing, not UTF-8, or
+///   token verification fails.
+/// - 404 `lease_not_found` — token verifies but the identity has no
+///   registered lease.
+#[tracing::instrument(
+    name = "sdk.connect",
+    skip_all,
+    fields(
+        client_ip = tracing::field::Empty,
+        identity = tracing::field::Empty,
+    ),
+)]
+pub async fn connect_handler(
+    State(state): State<SdkState>,
+    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
+    mut req: Request<Body>,
+) -> Result<Response, ApiError> {
+    let headers = req.headers();
+    let access_token = headers
+        .get(lease_token::ACCESS_TOKEN_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(ApiError::unauthorized)?;
+
+    let identity =
+        verify_access_token_identity(access_token, &state.lease_token_verifier, Timestamp::now())?;
+    tracing::Span::current().record("identity", tracing::field::display(hex_lower(&identity.0)));
+
+    let xff = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok());
+    let real_ip = headers.get("x-real-ip").and_then(|v| v.to_str().ok());
+    let client_ip: IpAddr = state
+        .policy
+        .proxy_trust
+        .extract_client_ip(remote_addr, xff, real_ip);
+    tracing::Span::current().record("client_ip", tracing::field::display(client_ip));
+    if state.policy.is_ip_banned(client_ip) {
+        return Err(ApiError::new(ApiErrorCode::IpBanned, "source ip is banned"));
+    }
+
+    let _lease = state.leases.lookup_by_identity(identity).ok_or_else(|| {
+        ApiError::new(
+            ApiErrorCode::LeaseNotFound,
+            "lease not found for verified identity",
+        )
+    })?;
+
+    if req.version() != Version::HTTP_11 {
+        return Err(ApiError::new(
+            ApiErrorCode::Http11Only,
+            "connect requires HTTP/1.1",
+        ));
+    }
+
+    let on_upgrade = hyper::upgrade::on(&mut req);
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "HTTP upgrade completion is owned by hyper after the handler returns; the task is bounded to the per-connection upgraded stream and logs then exits on upgrade failure or prelude write failure"
+    )]
+    tokio::spawn(async move {
+        match on_upgrade.await {
+            Ok(upgraded) => {
+                let mut upgraded = TokioIo::new(upgraded);
+                if let Err(err) = upgraded
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n",
+                    )
+                    .await
+                {
+                    tracing::warn!(?err, "sdk.connect failed to write hijack prelude");
+                }
+            }
+            Err(err) => {
+                tracing::debug!(
+                    ?err,
+                    "sdk.connect upgrade unavailable before bridge handoff"
+                );
+            }
+        }
+    });
+
+    Ok((
+        StatusCode::OK,
+        [(header::CONNECTION, HeaderValue::from_static("keep-alive"))],
+        Body::empty(),
+    )
+        .into_response())
 }
 
 /// Wire body for `POST /v1/sdk/renew` and `POST /v1/sdk/unregister`.

@@ -126,6 +126,7 @@ ed25519-dalek = { workspace = true }
 figment = { workspace = true }
 governor = { workspace = true }
 http = { workspace = true }
+hyper = { workspace = true }
 hyper-util = { workspace = true }
 jiff = { workspace = true }
 notify = { workspace = true, optional = true }

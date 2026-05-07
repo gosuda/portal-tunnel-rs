@@ -21,10 +21,9 @@ pub use state::{AdminState, DiscoveryState, SdkState};
 ///
 /// Mounts the [`sdk`] handlers landed so far — `GET /v1/sdk/domain`,
 /// `POST /v1/sdk/register-challenge`, `POST /v1/sdk/register`,
-/// `POST /v1/sdk/renew`, and `POST /v1/sdk/unregister`. The
-/// `/v1/sdk/connect` handler registers in a follow-up commit. See
-/// the [`sdk`] module rustdoc for the per-endpoint contracts (auth
-/// posture, CORS, etc.).
+/// `POST /v1/sdk/renew`, `POST /v1/sdk/unregister`, and
+/// `POST /v1/sdk/connect`. See the [`sdk`] module rustdoc for the
+/// per-endpoint contracts (auth posture, CORS, etc.).
 #[must_use]
 #[expect(
     clippy::double_must_use,
@@ -64,6 +63,7 @@ pub fn build_sdk_router(state: SdkState) -> axum::Router {
     let r = r.route("/v1/sdk/register", post(sdk::register_handler));
     let r = r.route("/v1/sdk/renew", post(sdk::renew_handler));
     let r = r.route("/v1/sdk/unregister", post(sdk::unregister_handler));
+    let r = r.route("/v1/sdk/connect", post(sdk::connect_handler));
     r.with_state(state)
 }
 
