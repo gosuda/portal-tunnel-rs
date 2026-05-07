@@ -172,10 +172,11 @@ pub const REPUTATION_RATE_LIMITED_WEIGHT: f64 = 1.0;
 /// misconfigured-probe hit decays well below threshold within hours.
 /// Plan U12 §Approach also names this exact value (25.0).
 ///
-/// The listener-pipeline wiring that drives `record_signal(_,
-/// HoneypotHit, _)` from a matched glob is a separate followup
-/// (`TODO(R10-followup)` markers below); the weight constant is
-/// independent of that wiring.
+/// SDK connect now feeds this via
+/// [`ReputationEngine::record_honeypot_if_match`]. Discovery request
+/// wiring remains a separate follow-up because the discovery router has
+/// no concrete request handlers yet; the weight constant is independent
+/// of that routing.
 pub const REPUTATION_HONEYPOT_HIT_WEIGHT: f64 = 25.0;
 
 /// Default per-signal weight for [`SignalKind::BlockedRequest`].
@@ -238,11 +239,10 @@ pub enum SignalKind {
     /// listener-pipeline call sites invoke a single one-liner per
     /// request — no extra plumbing needed.
     ///
-    /// TODO(R10-followup): wire the per-request invocation from the
-    /// SDK + discovery API request handlers so `record_honeypot_if_match`
-    /// fires on every inbound request URI before downstream
-    /// dispatch (the engine API exists today; the call site does
-    /// not yet).
+    /// SDK connect invokes `record_honeypot_if_match` once per verified
+    /// inbound request URI before downstream admission work. Discovery
+    /// remains TODO(R10-followup) because `build_discovery_router` has
+    /// no concrete request handlers to supply identity + path yet.
     HoneypotHit,
     /// A request was blocked by the engine itself (downstream
     /// handler observed [`ReputationDecision::Block`]) — the

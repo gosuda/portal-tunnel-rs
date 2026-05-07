@@ -791,6 +791,9 @@ pub async fn connect_handler(
     let identity =
         verify_access_token_identity(access_token, &state.lease_token_verifier, Timestamp::now())?;
     tracing::Span::current().record("identity", tracing::field::display(hex_lower(&identity.0)));
+    let _honeypot_recorded = state
+        .engine
+        .record_honeypot_if_match(identity, req.uri().path());
 
     let xff = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok());
     let real_ip = headers.get("x-real-ip").and_then(|v| v.to_str().ok());

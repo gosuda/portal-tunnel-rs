@@ -46,9 +46,11 @@
 //!
 //! - Hot-reload via `arc-swap<HoneypotMatcher>` lands with U13
 //!   alongside `arc-swap<ReputationConfig>`.
-//! - Listener-pipeline integration (the actual `record_signal` call
-//!   site) lands when the discovery / SDK API surfaces have their
-//!   request handlers wired through `PolicyRuntime`.
+//! - SDK connect records honeypot hits via
+//!   [`crate::policy::ReputationEngine::record_honeypot_if_match`].
+//!   Discovery listener-pipeline integration remains pending until the
+//!   discovery API surface has concrete request handlers with verified
+//!   identity + path inputs.
 
 use compact_str::CompactString;
 

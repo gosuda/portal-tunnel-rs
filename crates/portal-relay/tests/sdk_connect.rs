@@ -27,7 +27,9 @@ use axum::http::{Method, Request, StatusCode, Version, header};
 use jiff::{SignedDuration, Timestamp};
 use portal_crypto::{Ed25519Signer, Ed25519Verifier, ed25519_from_seed_for_test, verifying_key};
 use portal_relay::api::{SdkState, build_sdk_router};
-use portal_relay::policy::{IpFilter, PolicyRuntime, ProxyTrust, ReputationEngine};
+use portal_relay::policy::{
+    HoneypotMatcher, IpFilter, PolicyRuntime, ProxyTrust, ReputationConfig, ReputationEngine,
+};
 use portal_relay::state::LeaseRegistry;
 use portal_relay::state::lease_registry::{IdentityKey, LeaseRecord};
 use portal_relay::state::lease_token;
@@ -54,11 +56,19 @@ fn sdk_state(leases: LeaseRegistry) -> SdkState {
 }
 
 fn sdk_state_with_policy(leases: LeaseRegistry, policy: PolicyRuntime) -> SdkState {
+    sdk_state_with_policy_and_engine(leases, policy, ReputationEngine::new())
+}
+
+fn sdk_state_with_policy_and_engine(
+    leases: LeaseRegistry,
+    policy: PolicyRuntime,
+    engine: ReputationEngine,
+) -> SdkState {
     let (signing_key, verifier) = token_keys();
     SdkState {
         leases,
         policy: Arc::new(policy),
-        engine: ReputationEngine::new(),
+        engine,
         ens_resolver: None,
         lease_token_signing_key: signing_key,
         lease_token_verifier: verifier,
@@ -351,6 +361,32 @@ async fn connect_http11_valid_token_and_lease_reaches_hijack_boundary() {
     assert!(
         body.is_empty(),
         "oneshot admission response has no body; raw prelude requires a real upgraded stream"
+    );
+}
+
+#[tokio::test]
+async fn connect_honeypot_path_records_verified_identity_signal() {
+    let leases = LeaseRegistry::new();
+    let identity = fixture_identity();
+    let expires_at = register_fixture_lease(&leases, identity).await;
+    let token = issue_token(identity, expires_at);
+    let engine = ReputationEngine::with_config_and_honeypot_matcher(
+        ReputationConfig::default(),
+        HoneypotMatcher::from_patterns(["/v1/sdk/connect"]),
+    );
+    let router = build_router(sdk_state_with_policy_and_engine(
+        leases,
+        PolicyRuntime::new(),
+        engine.clone(),
+    ));
+
+    let (status, connection, body) = send_connect(router, Some(&token), Version::HTTP_11).await;
+
+    assert_eq!(status, StatusCode::SWITCHING_PROTOCOLS, "body={body:?}");
+    assert_eq!(connection.as_deref(), Some("upgrade"));
+    assert!(
+        engine.score(identity) > 0.0,
+        "honeypot hit should increase the verified identity score"
     );
 }
 
