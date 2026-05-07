@@ -29,6 +29,7 @@ use portal_crypto::{Ed25519Signer, Ed25519Verifier, ed25519_from_seed_for_test, 
 use portal_relay::api::{SdkState, build_sdk_router};
 use portal_relay::policy::{
     HoneypotMatcher, IpFilter, PolicyRuntime, ProxyTrust, ReputationConfig, ReputationEngine,
+    SignalKind,
 };
 use portal_relay::state::LeaseRegistry;
 use portal_relay::state::lease_registry::{IdentityKey, LeaseRecord};
@@ -384,9 +385,11 @@ async fn connect_honeypot_path_records_verified_identity_signal() {
 
     assert_eq!(status, StatusCode::SWITCHING_PROTOCOLS, "body={body:?}");
     assert_eq!(connection.as_deref(), Some("upgrade"));
+    let score = engine.score(identity);
+    let expected = ReputationConfig::default().weight_for(SignalKind::HoneypotHit);
     assert!(
-        engine.score(identity) > 0.0,
-        "honeypot hit should increase the verified identity score"
+        (score - expected).abs() < 1e-6,
+        "expected one HoneypotHit at configured weight, got score {score}"
     );
 }
 
