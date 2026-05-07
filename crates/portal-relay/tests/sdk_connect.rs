@@ -1,4 +1,4 @@
-//! Integration tests for `POST /v1/sdk/connect` (Phase 5 SDK-API S8).
+//! Integration tests for `GET /v1/sdk/connect` (Phase 5 SDK-API S8).
 //!
 //! The handler verifies a lease access token from the
 //! `X-Portal-Access-Token` header, checks registry state, rejects
@@ -100,7 +100,7 @@ async fn send_connect(
     version: Version,
 ) -> (StatusCode, Option<String>, Vec<u8>) {
     let mut builder = Request::builder()
-        .method(Method::POST)
+        .method(Method::GET)
         .uri("/v1/sdk/connect")
         .version(version);
     if let Some(token) = token {
@@ -127,6 +127,20 @@ fn error_code(body: &[u8]) -> String {
         .and_then(|v| v.as_str())
         .expect("error.code present")
         .to_owned()
+}
+
+async fn post_connect_status() -> StatusCode {
+    let router = build_router(sdk_state(LeaseRegistry::new()));
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/v1/sdk/connect")
+        .body(Body::empty())
+        .expect("request build");
+    router
+        .oneshot(request)
+        .await
+        .expect("oneshot service")
+        .status()
 }
 
 async fn post_hop(method: Method) -> StatusCode {
@@ -208,6 +222,11 @@ async fn connect_http11_valid_token_and_lease_reaches_hijack_boundary() {
         body.is_empty(),
         "oneshot admission response has no body; raw prelude requires a real upgraded stream"
     );
+}
+
+#[tokio::test]
+async fn connect_post_method_is_not_supported() {
+    assert_eq!(post_connect_status().await, StatusCode::METHOD_NOT_ALLOWED);
 }
 
 #[tokio::test]

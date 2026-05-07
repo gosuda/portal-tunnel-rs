@@ -38,7 +38,7 @@
 //! - `POST /v1/sdk/unregister` — verify the lease access token and
 //!   remove the lease from the registry. See [`unregister_handler`]
 //!   for full semantics.
-//! - `POST /v1/sdk/connect` — verify the lease access token from the
+//! - `GET /v1/sdk/connect` — verify the lease access token from the
 //!   `X-Portal-Access-Token` header, assert a live lease and HTTP/1.1,
 //!   then hand the connection to hyper's upgrade path for the future
 //!   relay-stream bridge.
@@ -733,7 +733,7 @@ pub async fn register_handler(
     Ok((StatusCode::CREATED, ok(body)))
 }
 
-/// `POST /v1/sdk/connect` — verify lease access and hijack HTTP/1.1.
+/// `GET /v1/sdk/connect` — verify lease access and hijack HTTP/1.1.
 ///
 /// ## Auth posture
 ///
@@ -751,8 +751,9 @@ pub async fn register_handler(
 /// success prelude and stops. The actual tenant bridge is intentionally
 /// deferred.
 ///
-/// TODO(U16): wire the upgraded stream into `RelayStream::offer_conn`
-/// once the relay-stream bridge and throttling surface lands.
+/// Bridge handoff is deferred to U16: wire the upgraded stream into
+/// `RelayStream::offer_conn` once the relay-stream bridge and
+/// throttling surface lands.
 ///
 /// # Errors
 ///
