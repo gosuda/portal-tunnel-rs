@@ -54,10 +54,12 @@ be updated to consolidate the dep into `libc.so.6`.
 
 ## Cross-compile matrix
 
-**Status: pending Phase 6b/B U7 (smoltcp + Overlay orchestrator).**
+**Status: landed.** `.github/workflows/release.yml` (Phase 7 U8.10)
+triggers on `v*` tags and builds the `portal` CLI binary for every
+cell in the matrix below.
 
 The plan ([`docs/plans/2026-05-04-008-feat-binaries-and-e2e-plan.md`](plans/2026-05-04-008-feat-binaries-and-e2e-plan.md))
-U8.10 names the matrix shape:
+U8.10 named the matrix shape:
 
 ```
 [
@@ -78,17 +80,13 @@ informs whether the matrix carries per-cell `--features` flags:
   review, defguard_boringtun on macOS, wiresock-derived on Windows)
   → per-cell `--features` flags.
 
-The current state (commit `f91b323` — single-commit land of plan
-unit U6 per its own commit subject `feat(portal-relay): U6
-overlay::wg_device sealed trait + DefguardAdapter`) ships the
-`WgDevice` adapter via `defguard_boringtun = 0.6.5` and is
-**symmetric** under the assumption that the same fork compiles on
-all five targets. ADR-0015 keeps the fork choice revisable until the
+The `WgDevice` adapter (`defguard_boringtun = 0.6.5`) is
+**symmetric** — the same fork compiles on all five targets.
+ADR-0015 keeps the fork choice revisable until the
 2026-08-04 fork-pick cliff; once that cliff passes the choice locks.
-`release.yml` is held back regardless until U7 (smoltcp + Overlay
-orchestrator, Phase 6b/B Batch 3, pending) lands, so the matrix
-shape settles cleanly with the real consumer of the WG device —
-see U7 status at the top of this section.
+The `aarch64-unknown-linux-gnu` cell uses `cross` for the
+C-toolchain cross-compilation that `ring` (pulled by
+`defguard_boringtun`) requires.
 
 ## Artifact surface (per release tag)
 

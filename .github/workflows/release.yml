@@ -1,0 +1,130 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build:
+    name: Build ${{ matrix.slug }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            slug: linux-amd64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            slug: linux-arm64
+            cross: true
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            slug: darwin-amd64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            slug: darwin-arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            slug: windows-amd64
+            suffix: .exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95"
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Build portal CLI (${{ matrix.target }})
+        shell: bash
+        run: |
+          if [[ "${{ matrix.cross }}" == "true" ]]; then
+            cross build --release --target ${{ matrix.target }} -p portal-cli
+          else
+            cargo build --release --target ${{ matrix.target }} -p portal-cli
+          fi
+
+      - name: Stage artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          src="target/${{ matrix.target }}/release/portal${{ matrix.suffix }}"
+          dst="dist/portal-${{ matrix.slug }}${{ matrix.suffix }}"
+          cp "$src" "$dst"
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            shasum -a 256 "$dst" > "$dst.sha256"
+          else
+            sha256sum "$dst" > "$dst.sha256"
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: portal-${{ matrix.slug }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: portal-*
+          merge-multiple: true
+
+      - name: Generate release notes header
+        run: |
+          printf '%s\n' \
+            '## Artifacts' '' \
+            '| Platform | Architecture | Binary | SHA256 |' \
+            '|----------|-------------|--------|--------|' \
+            '| Linux    | x86_64      | `portal-linux-amd64`     | [checksum](portal-linux-amd64.sha256)     |' \
+            '| Linux    | aarch64     | `portal-linux-arm64`     | [checksum](portal-linux-arm64.sha256)     |' \
+            '| macOS    | x86_64      | `portal-darwin-amd64`    | [checksum](portal-darwin-amd64.sha256)    |' \
+            '| macOS    | aarch64     | `portal-darwin-arm64`    | [checksum](portal-darwin-arm64.sha256)    |' \
+            '| Windows  | x86_64      | `portal-windows-amd64.exe` | [checksum](portal-windows-amd64.exe.sha256) |' \
+            '' \
+            'Install scripts (`install.sh` / `install.ps1`) verify the SHA256' \
+            'checksum fail-closed. See [`docs/release-engineering.md`](docs/release-engineering.md)' \
+            'for the runtime-link contract and distroless `cc` runtime requirements.' \
+            '' > RELEASE_NOTES.md
+
+      - name: Append git-cliff changelog
+        run: |
+          cargo install git-cliff --locked 2>/dev/null || true
+          git cliff --latest --strip header --strip footer >> RELEASE_NOTES.md
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: RELEASE_NOTES.md
+          files: dist/*
+          draft: true
