@@ -1,4 +1,11 @@
-//! Relay-side R15 v0.1 status TUI scaffold (`portal-relay tui`).
+//! Relay-side R15 v0.1 status TUI surfaces.
 //!
-//! Phase 5 U17 lands the ratatui Status view + status-snapshot pull
-//! from `Server`. This batch only declares the module path.
+//! Terminal setup and CLI wiring live in `portal-relay-bin`; this module owns
+//! library-renderable views and cancelable watch-loop helpers.
+
+pub mod status;
+
+pub use status::{
+    BpsAggregate, IdentityHealth, Lifecycle, RecentEvent, StatusSnapshot, StatusView, TuiError,
+    run, run_with_terminal,
+};

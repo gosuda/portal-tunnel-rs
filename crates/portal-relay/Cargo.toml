@@ -140,6 +140,7 @@ portal-net = { workspace = true }
 portal-wire = { workspace = true }
 postcard = { workspace = true }
 rand_core = { workspace = true }
+ratatui = { workspace = true }
 rustls = { workspace = true }
 rustls-pki-types = { workspace = true }
 sec1 = { workspace = true }
