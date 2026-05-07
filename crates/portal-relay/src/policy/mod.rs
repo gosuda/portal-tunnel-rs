@@ -7,16 +7,16 @@
 //! `BpsManager`; both were deferred to a follow-up commit and are
 //! not yet in tree. Phase 5 B7 (narrowed) lands the **core** R10
 //! v0.1 per-relay reputation engine in [`reputation`] plus the
-//! [`honeypot`] path-matcher struct. The U12 R10-engine follow-ups
-//! are flagged inline by `TODO(R10-followup)` markers in
-//! `reputation.rs` (ENS Sybil-gating exemption, honeypot call-site
-//! wiring). The per-signal-kind weight plumbing, the engine-side
-//! `reputation.json` persist/restore helpers, and the engine-side
-//! hot-swap surface ([`reputation::ReputationEngine::swap_config`])
-//! have all landed; the SIGHUP / admin-api reload run-loop trigger
-//! that calls `swap_config` on a config-file change remains Phase 5
-//! B8 territory. See this crate's `lib.rs` for current Phase 5
-//! status.
+//! [`honeypot`] path-matcher struct. The per-signal-kind weight
+//! plumbing, engine-side `reputation.json` persist/restore helpers,
+//! ENS-named block bypass, SDK connect honeypot recording, and the
+//! engine-side hot-swap surface
+//! ([`reputation::ReputationEngine::swap_config`]) have all landed;
+//! discovery listener-pipeline honeypot recording remains pending
+//! until discovery has concrete handlers with verified identity + path
+//! inputs. The SIGHUP / admin-api reload run-loop trigger that calls
+//! `swap_config` on a config-file change remains Phase 5 B8 territory.
+//! See this crate's `lib.rs` for current Phase 5 status.
 
 pub mod honeypot;
 pub mod ip_filter;

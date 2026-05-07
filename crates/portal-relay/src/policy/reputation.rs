@@ -78,14 +78,13 @@ use crate::policy::honeypot::HoneypotMatcher;
 use crate::state::persistence::{read_json, write_json_atomic};
 
 // ---------------------------------------------------------------------------
-// v0.1 defaults — provisional ADR-0007 values
+// v0.1 defaults — ADR-0007 accepted values
 // ---------------------------------------------------------------------------
 //
 // These are the operator-facing defaults used by
 // [`ReputationConfig::default`]. They are pinned as `pub const` so
-// the eventual ADR-0007 follow-up (which will justify each value
-// against threat-model + load-test data) can amend them without
-// breaking call sites.
+// ADR-0007 amendments can update the documented workspace defaults
+// without breaking call sites.
 
 /// Default decay half-life in seconds (24 hours).
 ///
@@ -137,8 +136,8 @@ pub const REPUTATION_QUOTA_BURST: u32 = 100;
 ///
 /// Matches the previously hardcoded `1.0` literal at the engine's
 /// internal rate-limit callsite, so behavior is bit-identical under
-/// the default [`ReputationConfig`]. Per-kind tuning is an
-/// ADR-0007 decision; this constant is the v0.1 placeholder.
+/// the default [`ReputationConfig`]. ADR-0007 pins this v0.1 default;
+/// operators can override it through [`ReputationConfig::signal_weights`].
 pub const REPUTATION_RATE_LIMITED_WEIGHT: f64 = 1.0;
 
 /// Default per-signal weight for [`SignalKind::HoneypotHit`].
@@ -161,8 +160,8 @@ pub const REPUTATION_HONEYPOT_HIT_WEIGHT: f64 = 25.0;
 /// Default per-signal weight for [`SignalKind::BlockedRequest`].
 ///
 /// Matches the previously hardcoded `1.0` literal at the engine's
-/// internal blocked-request callsite. Per-kind tuning is an
-/// ADR-0007 decision.
+/// internal blocked-request callsite. ADR-0007 pins this v0.1 default;
+/// operators can override it through [`ReputationConfig::signal_weights`].
 pub const REPUTATION_BLOCKED_REQUEST_WEIGHT: f64 = 1.0;
 
 /// Default cadence between [`reputation_persist_loop`] ticks.
@@ -207,7 +206,7 @@ pub type LeaseId = CompactString;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SignalKind {
     /// The keyed governor limiter rejected a request — pure
-    /// rate-limit feedback. Default weight per ADR-0007 follow-up;
+    /// rate-limit feedback. Default weight per ADR-0007;
     /// [`ReputationEngine::record_signal`] takes the weight as an
     /// argument so callers can override per call site.
     RateLimited,
@@ -220,8 +219,9 @@ pub enum SignalKind {
     ///
     /// SDK connect invokes `record_honeypot_if_match` once per verified
     /// inbound request URI before downstream admission work. Discovery
-    /// remains TODO(R10-followup) because `build_discovery_router` has
-    /// no concrete request handlers to supply identity + path yet.
+    /// listener-pipeline recording remains pending because
+    /// `build_discovery_router` has no concrete request handlers to supply
+    /// verified identity + path inputs yet.
     HoneypotHit,
     /// A request was blocked by the engine itself (downstream
     /// handler observed [`ReputationDecision::Block`]) — the
@@ -530,12 +530,10 @@ struct Inner {
     /// [`ReputationEngine::record_honeypot_if_match`]. Held as
     /// `Arc<HoneypotMatcher>` so listener-pipeline call sites can
     /// invoke the engine without cloning the underlying pattern
-    /// vectors. v0.1 stores this on `Inner` (not on `EngineState`)
-    /// because matcher hot-reload is a U13 deliverable that pairs
-    /// `arc-swap<HoneypotMatcher>` with `arc-swap<ReputationConfig>`
-    /// inside the same swap unit; landing it here today keeps the
-    /// listener-pipeline integration unblockable while leaving the
-    /// hot-reload story for U13.
+    /// vectors. v0.1 stores this on `Inner` (not on `EngineState`):
+    /// [`Self::swap_config`] hot-swaps [`ReputationConfig`] only, and
+    /// non-default matcher patterns require constructing or rebuilding
+    /// the engine with [`Self::with_config_and_honeypot_matcher`].
     honeypot_matcher: Arc<HoneypotMatcher>,
     /// Per-identity ENS-named presence cache. Populated by the
     /// (future) `/v1/sdk/register` handler after a successful
@@ -595,11 +593,10 @@ impl ReputationEngine {
     /// [`HoneypotMatcher::with_defaults`] (the workspace default
     /// of `/.env`, `/.git/*`, `/wp-admin/*` per Phase 5 plan U12).
     ///
-    /// The matcher hot-reload story (`arc-swap<HoneypotMatcher>`
-    /// alongside `arc-swap<ReputationConfig>`) is a U13 deliverable;
-    /// this constructor seeds the matcher once at engine-build
-    /// time so the listener-pipeline integration is unblockable
-    /// today, with the swap surface added later.
+    /// This constructor seeds the matcher at engine-build time.
+    /// [`Self::swap_config`] can hot-swap [`ReputationConfig`], but
+    /// runtime matcher hot-swap is not implemented in this pass; apply
+    /// new matcher patterns by constructing or rebuilding the engine.
     #[must_use]
     pub fn with_config_and_honeypot_matcher(
         config: ReputationConfig,
@@ -812,13 +809,14 @@ impl ReputationEngine {
     /// through the [`arc_swap::ArcSwap`] guard so a concurrent
     /// [`Self::swap_config`] is observed atomically with its paired
     /// limiter rebuild). Engine-internal callsites in
-    /// [`Self::decide`] use this so the previously hardcoded `1.0`
-    /// weight is now a config-driven knob; under the
-    /// [`ReputationConfig::default`] map every variant maps to
-    /// `1.0`, so behavior is bit-identical until an operator
-    /// overrides a weight or a future variant lands without a
-    /// default-map entry (in which case the [`ReputationConfig::
-    /// weight_for`] fallback to `1.0` keeps the path well-defined).
+    /// [`Self::decide`] use this so the previously hardcoded weights
+    /// are now a config-driven knob; under the
+    /// [`ReputationConfig::default`] map [`SignalKind::RateLimited`] and
+    /// [`SignalKind::BlockedRequest`] use `1.0`, while
+    /// [`SignalKind::HoneypotHit`] uses ADR-0007's `25.0` default. If a
+    /// future variant lands without a default-map entry,
+    /// [`ReputationConfig::weight_for`] falls back to `1.0` so the path
+    /// remains well-defined.
     pub fn record_signal_default(&self, identity: IdentityKey, signal_kind: SignalKind) {
         let weight = self.inner.state.load().config.weight_for(signal_kind);
         self.record_signal(identity, signal_kind, weight);
@@ -829,10 +827,10 @@ impl ReputationEngine {
     /// configured weight (default `25.0` per ADR-0007) and return
     /// `true`. Returns `false` (no signal recorded) on miss.
     ///
-    /// This is the listener-pipeline call site enumerated in
-    /// honeypot.rs §"Out-of-scope (TODO follow-up)" — the engine
-    /// owns the matcher and the recording so SDK/discovery handlers
-    /// invoke it as a one-liner per request:
+    /// The engine owns the matcher and the recording so SDK handlers
+    /// invoke it as a one-liner per request; discovery integration
+    /// remains pending until handlers can supply verified identity and
+    /// path inputs:
     ///
     /// ```text
     /// engine.record_honeypot_if_match(identity, request.uri().path());
@@ -1065,10 +1063,10 @@ impl ReputationEngine {
     /// `IdentityKey` serializes as a `[u8; 32]` array. Each entry
     /// carries the identity as a 64-char lowercase hex string + the
     /// `ReputationScore` pair. The helper owns the temp-file +
-    /// rename + parent-fsync contract; this method exists so the
-    /// eventual 60s-cadence persistence loop in Phase 5 B8 can call
-    /// a single async function rather than re-deriving the
-    /// snapshot/encode/serialize/write quadruple at the call site.
+    /// rename + parent-fsync contract; the 60s-cadence
+    /// [`reputation_persist_loop`] calls this async function rather
+    /// than re-deriving the snapshot/encode/serialize/write quadruple
+    /// at the call site.
     ///
     /// Iteration order over the snapshot map is unspecified; tests
     /// that compare on-disk bytes verbatim must therefore restore

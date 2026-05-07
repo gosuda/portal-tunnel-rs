@@ -2,14 +2,13 @@
 //!
 //! Production tenants do not request `/.env`, `/.git/config`, or
 //! `/wp-admin/setup-config.php` — those are well-known scanning
-//! signatures.  When a request path matches a configured honeypot
-//! pattern, the listener pipeline calls
-//! [`crate::policy::ReputationEngine::record_signal`] with
-//! [`crate::policy::SignalKind::HoneypotHit`] and the per-signal weight from
-//! ADR-0007 (default 25.0).  Four honeypot hits in a 24 h decay window
-//! cross [`crate::policy::REPUTATION_BLOCK_THRESHOLD`] and any
-//! subsequent request from that identity returns
-//! [`crate::policy::ReputationDecision::Block`].
+//! signatures.  SDK connect passes verified request paths through
+//! [`crate::policy::ReputationEngine::record_honeypot_if_match`], which
+//! records [`crate::policy::SignalKind::HoneypotHit`] at the per-signal
+//! weight from ADR-0007 (default 25.0) on a match.  Four honeypot hits
+//! in a 24 h decay window cross
+//! [`crate::policy::REPUTATION_BLOCK_THRESHOLD`]; discovery integration
+//! remains pending until that surface has concrete identity + path inputs.
 //!
 //! ## Match semantics
 //!
@@ -26,8 +25,8 @@
 //! per-signal weight is high enough (25.0 = block-threshold / 4) that
 //! a small set of high-precision patterns catches the noisy adversarial
 //! shapes; broader matching invites false positives that the v0.1
-//! reputation engine has no operator-tuneable bypass for (the ENS-
-//! Sybil-gating bypass is itself a TODO(R10-followup)).
+//! reputation engine handles via the ENS-named block bypass rather
+//! than a broader default matcher.
 //!
 //! ## Construction
 //!
@@ -37,15 +36,17 @@
 //! (`/phpmyadmin/*`, `/wp-login.php`, `/server-status`, etc.) is
 //! intentionally opt-in: those paths can be legitimate tenant traffic
 //! (a tenant running phpMyAdmin or exposing an admin landing page)
-//! and a 25.0-weighted signal at the v0.1 ENS-Sybil-bypass-pending
-//! state would block them after four hits.  Operators tune via
-//! [`HoneypotMatcher::from_patterns`] at config-load time (consumed
-//! by U13 hot-reload alongside `arc-swap<HoneypotMatcher>`).
+//! and a 25.0-weighted signal can still force backpressure or block
+//! depending on ENS-named status.  Operators tune via
+//! [`HoneypotMatcher::from_patterns`] and pass the compiled matcher to
+//! [`crate::policy::ReputationEngine::with_config_and_honeypot_matcher`]
+//! when constructing or rebuilding the engine.
 //!
-//! ## Out-of-scope (TODO follow-up)
+//! ## Integration status
 //!
-//! - Hot-reload via `arc-swap<HoneypotMatcher>` lands with U13
-//!   alongside `arc-swap<ReputationConfig>`.
+//! - Runtime config hot-swap is implemented for
+//!   [`crate::policy::ReputationConfig`]; runtime matcher hot-swap is
+//!   not implemented in this pass.
 //! - SDK connect records honeypot hits via
 //!   [`crate::policy::ReputationEngine::record_honeypot_if_match`].
 //!   Discovery listener-pipeline integration remains pending until the
@@ -60,9 +61,8 @@ use compact_str::CompactString;
 /// other scanner-target pattern is operator-configurable rather than a
 /// workspace default.  The 25.0 per-signal weight (ADR-0007) means a
 /// single false-positive default pattern blocks a cooperating tenant
-/// after four hits in a 24h window; v0.1's defaults stay narrow until
-/// the ENS-Sybil-gating bypass lands and gives blocked tenants an
-/// escape hatch.
+/// after four hits in a 24h window; v0.1's defaults stay narrow even
+/// with the ENS-named block bypass available.
 pub const HONEYPOT_DEFAULT_PATTERNS: &[&str] = &["/.env", "/.git/*", "/wp-admin/*"];
 
 /// Compiled honeypot pattern matcher.

@@ -18,25 +18,22 @@
 //!   ([`policy::reputation`] — governor-keyed rate limit on
 //!   `(identity, ip, lease)`, per-identity exponential-decay score,
 //!   signal infra) plus the [`policy::honeypot`] matcher are
-//!   committed; `TODO(R10-followup)` markers in `reputation.rs` carve
-//!   out the remaining deferrals — ENS Sybil-gating exemption
-//!   (waits on `Arc<dyn EnsResolver>` from B6's API surface) and
-//!   honeypot call-site wiring. The per-signal-kind weight
-//!   plumbing landed via
+//!   committed. Per-signal-kind weight plumbing landed via
 //!   [`policy::reputation::ReputationConfig::signal_weights`] +
-//!   [`policy::reputation::ReputationEngine::record_signal_default`];
-//!   per-kind tuning values remain an ADR-0007 decision. Engine-side
-//!   `reputation.json` persistence helpers (`persist_to_path` /
-//!   `restore_from_path`) over a
+//!   [`policy::reputation::ReputationEngine::record_signal_default`].
+//!   Engine-side `reputation.json` persistence helpers
+//!   (`persist_to_path` / `restore_from_path`) over a
 //!   [`policy::reputation::ReputationSnapshotEntry`] DTO list also
 //!   landed; the 60s-cadence task that drives them — exposed as
 //!   the free [`policy::reputation_persist_loop`] alongside the
 //!   tunable [`policy::REPUTATION_PERSIST_INTERVAL`] — also
 //!   landed and is wired into [`server::Server::start`] when the
 //!   operator opts in via [`server::Server::with_reputation_persistence`].
-//!   The listener-pipeline honeypot call site that drives
-//!   [`policy::reputation::ReputationEngine::record_honeypot_if_match`]
-//!   remains pending. Engine-side hot-swap also landed via
+//!   SDK connect records honeypot hits through
+//!   [`policy::reputation::ReputationEngine::record_honeypot_if_match`];
+//!   discovery listener-pipeline honeypot recording remains pending
+//!   until discovery has concrete handlers with verified identity + path
+//!   inputs. Engine-side hot-swap also landed via
 //!   [`policy::reputation::ReputationEngine::swap_config`] (atomic
 //!   `(config, limiter)` pair behind [`arc_swap::ArcSwap`]); the
 //!   SIGHUP / admin-api reload run-loop **trigger** that calls

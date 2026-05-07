@@ -36,8 +36,10 @@ default, and the per-relay defense posture is auditable.
 The engine ships with the constants below as workspace defaults. Each is a
 `pub const` in `crates/portal-relay/src/policy/reputation.rs` so call sites
 import the same source of truth. Operator overrides land via
-`ReputationConfig` (consumed at engine construction time; hot-reload via
-`arc-swap<ReputationConfig>` is a separate U13 follow-up).
+`ReputationConfig`; engines consume it at construction time and can hot-swap the
+`(ReputationConfig, limiter)` pair via `ReputationEngine::swap_config`. Runtime
+matcher hot-swap is not implemented in this pass; non-default honeypot matcher
+patterns are supplied when constructing or rebuilding the engine.
 
 ### Decay parameters
 
@@ -50,7 +52,7 @@ import the same source of truth. Operator overrides land via
 
 | Constant | Value | Rationale |
 |---|---|---|
-| `REPUTATION_BLOCK_THRESHOLD` | `100.0` | Round-number ceiling. With the per-signal weights below, a tenant that produces 4 honeypot hits in a 24 h window crosses the threshold; a tenant generating only rate-limit pressure takes ~20 separate hits. Both shapes name plausible adversarial behaviour, not legitimate traffic. |
+| `REPUTATION_BLOCK_THRESHOLD` | `100.0` | Round-number ceiling. With the per-signal weights below, a tenant that produces 4 honeypot hits in a 24 h window crosses the threshold; a tenant generating only rate-limit pressure takes ~100 separate hits. Both shapes name plausible adversarial behaviour, not legitimate traffic. |
 | `REPUTATION_BACKPRESSURE_THRESHOLD` | `50.0` | Half the block threshold. Tenants in the 50-100 band experience yield-before-forward — a soft signal that protects relay capacity without an explicit refusal. |
 | `REPUTATION_BACKPRESSURE_YIELD_MS` | `50` ms | Conservative — enough to feel adversarial-noticeable jitter without stalling a single legitimate burst behind a rate-limit hit. The 50 ms upper bound keeps p99 request latency for cooperating tenants well under typical TLS handshake budgets. |
 
@@ -71,9 +73,9 @@ re-signing step.
 
 | Signal kind | Weight | Rationale |
 |---|---|---|
-| `SignalKind::RateLimited` | `5.0` | A rate-limit hit is signal but not strong proof of abuse — legitimate bursty tenants can trip it. ~20 hits in a 24 h window are needed to cross the block threshold. |
+| `SignalKind::RateLimited` | `1.0` | A rate-limit hit is signal but not strong proof of abuse — legitimate bursty tenants can trip it. ~100 hits in a 24 h window are needed to cross the block threshold. |
 | `SignalKind::HoneypotHit` | `25.0` | A honeypot path match is high-signal — production tenants do not request `/.env` or `/.git/config`. The plan U12 explicit value of 25.0 is preserved here (4 hits across a 24 h decay window cross the block threshold). |
-| `SignalKind::BlockedRequest` | `10.0` | A previously-blocked request retried is moderate signal — the tenant has already seen one refusal and is re-trying. ~10 retries in a 24 h window cross the threshold. |
+| `SignalKind::BlockedRequest` | `1.0` | A previously-blocked request retried is moderate signal; repeated retries keep the score from decaying away. ~100 retries in a 24 h window cross the threshold. |
 
 These weights interact with the decay constant: any individual signal halves
 in 24 h, so an attacker accumulating exactly the threshold-equivalent each
@@ -94,9 +96,9 @@ identities on a single misstep.
 ### Negative — accepted
 
 - **Per-relay scope only.** Cross-relay coordination (b — coordinated cross-relay abuse; e — hop-mux laundering) defers to v0.2. The defaults above are tuned for single-relay traffic; an attacker splitting load across N relays sees `N × block_threshold` headroom before any defense fires. v0.2 trigger criterion: ≥1 operator with >2 relays reports false-positive rate-limiting at single-relay scope (see `PLAN.md` §"v0.2 Backlog freeze trigger").
-- **Honeypot path matcher not yet wired.** The `HoneypotHit` signal weight is set; the matcher lives behind a TODO(R10-followup) marker in `reputation.rs`. Until the matcher lands, this signal is recorded only by code paths that explicitly identify a honeypot match.
-- **No ENS Sybil-gating bypass yet.** The plan U12's "ENS-named identity bypasses block_threshold" carve-out is a TODO(R10-followup) marker. Without ENS gating, a high-reputation cooperating tenant who issues many leases under one identity is treated identically to a low-reputation attacker — a known v0.1 false-positive shape that the bypass is designed to address.
-- **Persistence to `reputation.json` is partially landed.** Engine-side `persist_to_path` / `restore_from_path` helpers over a `Vec<ReputationSnapshotEntry>` DTO consume the U5 atomic-write helpers; the 60s-cadence run-loop task that calls them remains a Phase 5/B8 follow-up. Until that task lands, process restart still loses accumulated reputation, and an attacker can wash by triggering a relay restart. Operators who care can pin restart cadence as part of the deployment posture.
+- **Honeypot recording is not universal yet.** SDK connect records `HoneypotHit` signals via the configured matcher, but discovery listener-pipeline recording remains pending until discovery has concrete handlers with verified identity + path inputs.
+- **ENS Sybil-gating bypass is present.** The plan U12 "ENS-named identity bypasses block_threshold" carve-out now lets marked identities skip the hard reputation block and fall through to backpressure. This limits, but does not erase, the known false-positive shape for high-reputation cooperating tenants who issue many leases under one identity.
+- **Persistence to `reputation.json` is opt-in.** Engine-side `persist_to_path` / `restore_from_path` helpers over a `Vec<ReputationSnapshotEntry>` DTO consume the U5 atomic-write helpers, and the 60s-cadence run-loop is wired when operators configure a persistence path. Without that opt-in, process restart still loses accumulated reputation, and an attacker can wash by triggering a relay restart. Operators who care can pin restart cadence as part of the deployment posture.
 
 ## Considered alternatives
 
