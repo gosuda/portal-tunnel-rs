@@ -3,11 +3,9 @@
 //! The handler verifies a lease access token from the
 //! `X-Portal-Access-Token` header, checks registry state, rejects
 //! HTTP/2+ before hijack, and starts the HTTP/1.1 upgrade contract. The
-//! positive-path test intentionally stops at the reachable Axum
-//! `oneshot` boundary: `oneshot` does not provide a real underlying TCP
-//! stream to complete `hyper::upgrade::on`, so the test asserts the
-//! admission response and avoids pretending to exercise the future
-//! bridge.
+//! oneshot positive-path test pins the Axum admission response; the real
+//! TCP positive-path test sends an HTTP/1.1 upgrade request through
+//! hyper and observes the raw hijack prelude on the upgraded stream.
 //!
 //! Plan drift: the slice text mentions 403 for unauthorized in one
 //! place. The crate-wide envelope maps `ApiErrorCode::Unauthorized` to
@@ -29,10 +27,13 @@ use axum::http::{Method, Request, StatusCode, Version, header};
 use jiff::{SignedDuration, Timestamp};
 use portal_crypto::{Ed25519Signer, Ed25519Verifier, ed25519_from_seed_for_test, verifying_key};
 use portal_relay::api::{SdkState, build_sdk_router};
-use portal_relay::policy::{PolicyRuntime, ReputationEngine};
+use portal_relay::policy::{IpFilter, PolicyRuntime, ProxyTrust, ReputationEngine};
 use portal_relay::state::LeaseRegistry;
 use portal_relay::state::lease_registry::{IdentityKey, LeaseRecord};
 use portal_relay::state::lease_token;
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::task::JoinSet;
 use tower::ServiceExt as _;
 
 const TEST_PEER: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), 50000);
@@ -49,10 +50,14 @@ fn token_keys() -> (
 }
 
 fn sdk_state(leases: LeaseRegistry) -> SdkState {
+    sdk_state_with_policy(leases, PolicyRuntime::new())
+}
+
+fn sdk_state_with_policy(leases: LeaseRegistry, policy: PolicyRuntime) -> SdkState {
     let (signing_key, verifier) = token_keys();
     SdkState {
         leases,
-        policy: Arc::new(PolicyRuntime::new()),
+        policy: Arc::new(policy),
         engine: ReputationEngine::new(),
         ens_resolver: None,
         lease_token_signing_key: signing_key,
@@ -99,12 +104,26 @@ async fn send_connect(
     token: Option<&str>,
     version: Version,
 ) -> (StatusCode, Option<String>, Vec<u8>) {
+    send_connect_with_xff(router, token, version, None).await
+}
+
+async fn send_connect_with_xff(
+    router: Router,
+    token: Option<&str>,
+    version: Version,
+    xff: Option<&str>,
+) -> (StatusCode, Option<String>, Vec<u8>) {
     let mut builder = Request::builder()
         .method(Method::GET)
         .uri("/v1/sdk/connect")
-        .version(version);
+        .version(version)
+        .header(header::CONNECTION, "upgrade")
+        .header(header::UPGRADE, "portal-tunnel");
     if let Some(token) = token {
         builder = builder.header(lease_token::ACCESS_TOKEN_HEADER, token);
+    }
+    if let Some(xff) = xff {
+        builder = builder.header("x-forwarded-for", xff);
     }
     let request = builder.body(Body::empty()).expect("request build");
     let response = router.oneshot(request).await.expect("oneshot service");
@@ -127,6 +146,40 @@ fn error_code(body: &[u8]) -> String {
         .and_then(|v| v.as_str())
         .expect("error.code present")
         .to_owned()
+}
+
+async fn read_admission_headers(stream: &mut TcpStream) -> (Vec<u8>, Vec<u8>) {
+    let mut response = Vec::new();
+    let mut buf = [0u8; 128];
+    loop {
+        let n = stream.read(&mut buf).await.expect("read response");
+        assert_ne!(n, 0, "connection closed before admission headers");
+        response.extend_from_slice(&buf[..n]);
+        if let Some(pos) = response.windows(4).position(|window| window == b"\r\n\r\n") {
+            let split = pos + 4;
+            let remainder = response.split_off(split);
+            return (response, remainder);
+        }
+    }
+}
+
+async fn read_raw_prelude(stream: &mut TcpStream, mut buffered: Vec<u8>) -> (Vec<u8>, Vec<u8>) {
+    let expected = b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n";
+    assert!(
+        expected.starts_with(&buffered) || buffered.starts_with(expected),
+        "bytes after admission headers did not start the raw prelude: {buffered:?}"
+    );
+    if buffered.len() < expected.len() {
+        let already_buffered = buffered.len();
+        buffered.resize(expected.len(), 0);
+        stream
+            .read_exact(&mut buffered[already_buffered..])
+            .await
+            .expect("read raw hijack prelude");
+    }
+    let tail = buffered.split_off(expected.len());
+    assert_eq!(buffered, expected);
+    (buffered, tail)
 }
 
 async fn post_connect_status() -> StatusCode {
@@ -216,12 +269,139 @@ async fn connect_http11_valid_token_and_lease_reaches_hijack_boundary() {
 
     let (status, connection, body) = send_connect(router, Some(&token), Version::HTTP_11).await;
 
-    assert_eq!(status, StatusCode::OK, "body={body:?}");
-    assert_eq!(connection.as_deref(), Some("keep-alive"));
+    assert_eq!(status, StatusCode::SWITCHING_PROTOCOLS, "body={body:?}");
+    assert_eq!(connection.as_deref(), Some("upgrade"));
     assert!(
         body.is_empty(),
         "oneshot admission response has no body; raw prelude requires a real upgraded stream"
     );
+}
+
+#[tokio::test]
+async fn connect_http11_real_tcp_upgrade_writes_raw_prelude() {
+    let leases = LeaseRegistry::new();
+    let identity = fixture_identity();
+    let expires_at = register_fixture_lease(&leases, identity).await;
+    let token = issue_token(identity, expires_at);
+    let router = build_sdk_router(sdk_state(leases));
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("listener local addr");
+
+    let mut server = JoinSet::new();
+    server.spawn(async move {
+        axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        .expect("serve sdk router");
+    });
+
+    let mut stream = TcpStream::connect(addr)
+        .await
+        .expect("connect to test server");
+    let request = format!(
+        "GET /v1/sdk/connect HTTP/1.1\r\n\
+         Host: {addr}\r\n\
+         Connection: upgrade\r\n\
+         Upgrade: portal-tunnel\r\n\
+         {}: {token}\r\n\
+         \r\n",
+        lease_token::ACCESS_TOKEN_HEADER,
+    );
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .expect("write sdk connect request");
+
+    let (admission, buffered) = read_admission_headers(&mut stream).await;
+    let admission = String::from_utf8(admission).expect("admission response utf8");
+    assert!(
+        admission.starts_with("HTTP/1.1 101 Switching Protocols\r\n"),
+        "admission response was {admission:?}"
+    );
+    assert!(
+        admission
+            .to_ascii_lowercase()
+            .contains("connection: upgrade\r\n"),
+        "admission response was {admission:?}"
+    );
+    assert!(
+        admission
+            .to_ascii_lowercase()
+            .contains("upgrade: portal-tunnel\r\n"),
+        "admission response was {admission:?}"
+    );
+
+    let (prelude, tail) = read_raw_prelude(&mut stream, buffered).await;
+    assert_eq!(
+        prelude,
+        b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n"
+    );
+    assert!(tail.is_empty(), "no bridge bytes are emitted in S8");
+
+    server.abort_all();
+}
+
+#[tokio::test]
+async fn connect_trusted_proxy_xff_banned_client_returns_401_ip_banned() {
+    let banned_client: IpAddr = "203.0.113.10".parse().expect("banned client ip");
+    let filter = IpFilter::new();
+    filter.ban(banned_client);
+    let policy = PolicyRuntime::new()
+        .with_ip_filter(filter)
+        .with_proxy_trust(ProxyTrust::from_trusted_ips(vec![TEST_PEER.ip()]));
+    let leases = LeaseRegistry::new();
+    let identity = fixture_identity();
+    let expires_at = register_fixture_lease(&leases, identity).await;
+    let token = issue_token(identity, expires_at);
+    let router = build_router(sdk_state_with_policy(leases, policy));
+
+    let (status, _, body) =
+        send_connect_with_xff(router, Some(&token), Version::HTTP_11, Some("203.0.113.10")).await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "body={body:?}");
+    assert_eq!(error_code(&body), "ip_banned");
+}
+
+#[tokio::test]
+async fn connect_untrusted_proxy_spoofed_xff_ban_uses_remote_ip_only() {
+    let banned_client: IpAddr = "203.0.113.10".parse().expect("banned client ip");
+    let filter = IpFilter::new();
+    filter.ban(banned_client);
+    let leases = LeaseRegistry::new();
+    let identity = fixture_identity();
+    let expires_at = register_fixture_lease(&leases, identity).await;
+    let token = issue_token(identity, expires_at);
+    let router = build_router(sdk_state_with_policy(
+        leases,
+        PolicyRuntime::new().with_ip_filter(filter),
+    ));
+
+    let (status, connection, body) =
+        send_connect_with_xff(router, Some(&token), Version::HTTP_11, Some("203.0.113.10")).await;
+
+    assert_eq!(status, StatusCode::SWITCHING_PROTOCOLS, "body={body:?}");
+    assert_eq!(connection.as_deref(), Some("upgrade"));
+    assert!(body.is_empty());
+
+    let filter = IpFilter::new();
+    filter.ban(TEST_PEER.ip());
+    let leases = LeaseRegistry::new();
+    let expires_at = register_fixture_lease(&leases, identity).await;
+    let token = issue_token(identity, expires_at);
+    let router = build_router(sdk_state_with_policy(
+        leases,
+        PolicyRuntime::new().with_ip_filter(filter),
+    ));
+
+    let (status, _, body) =
+        send_connect_with_xff(router, Some(&token), Version::HTTP_11, Some("203.0.113.10")).await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "body={body:?}");
+    assert_eq!(error_code(&body), "ip_banned");
 }
 
 #[tokio::test]

@@ -65,10 +65,10 @@ repository.workspace = true
 # - hyper-util + http + tower (axum's Service primitive plumbed onto a
 #   `tokio_rustls::TlsAcceptor` so the keyless ServerConfig is
 #   constructed locally to this module — never aliased into state/ or
-#   listeners/, per R2 trust-boundary discipline). The `hyper` crate
-#   itself is reached through hyper-util's re-exports
-#   (`hyper_util::server::conn::auto::Builder`,
-#   `hyper_util::service::TowerToHyperService`) — no direct `hyper` dep.
+#   listeners/, per R2 trust-boundary discipline). S8 adds direct
+#   `hyper` for `hyper::upgrade::on` in the SDK connect hijack path;
+#   hyper-util remains used for `hyper_util::server::conn::auto::Builder`,
+#   `hyper_util::service::TowerToHyperService`, and `hyper_util::rt::TokioIo`.
 # - tokio-rustls (TlsAcceptor over a TcpListener for the mTLS endpoint
 #   bind in `keyless::api`).
 # - rcgen + tokio-rustls + http-body-util (dev-only; integration test

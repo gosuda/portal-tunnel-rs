@@ -840,8 +840,11 @@ pub async fn connect_handler(
     });
 
     Ok((
-        StatusCode::OK,
-        [(header::CONNECTION, HeaderValue::from_static("keep-alive"))],
+        StatusCode::SWITCHING_PROTOCOLS,
+        [
+            (header::CONNECTION, HeaderValue::from_static("upgrade")),
+            (header::UPGRADE, HeaderValue::from_static("portal-tunnel")),
+        ],
         Body::empty(),
     )
         .into_response())
