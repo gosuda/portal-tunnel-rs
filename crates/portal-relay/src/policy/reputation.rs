@@ -5,9 +5,9 @@
 //! `(identity, ip, lease)` triple plus a per-identity
 //! exponential-decay reputation score. Decisions surface as
 //! [`ReputationDecision`] (`Allow` / `Backpressure(Duration)` /
-//! `Block(BlockReason)`), and signals (rate-limit hits, future
-//! honeypot fingerprinting, blocked-request feedback) feed back
-//! into the score via [`ReputationEngine::record_signal`].
+//! `Block(BlockReason)`), and signals (rate-limit hits, honeypot
+//! fingerprinting, blocked-request feedback) feed back into the score via
+//! [`ReputationEngine::record_signal`].
 //!
 //! ## Decay math
 //!
@@ -34,50 +34,29 @@
 //!   internal [`std::collections::HashMap`] under a mutex (per the
 //!   `governor 0.10` `DefaultKeyedStateStore` shape).
 //!
-//! ## What this module **does NOT** ship in this iteration
+//! ## Current integration status
 //!
-//! Each deferral is annotated with a `TODO(R10-followup): …`
-//! comment at the relevant call site so the next batch can wire
-//! them in without re-discovering the contract:
-//!
-//! - **ENS Sybil-gating bypass.** Plan U12 step 4 carves out a
-//!   "score >= `block_threshold` AND identity is not ENS-named"
-//!   condition. The minimum-engine apex is "score >=
-//!   `block_threshold` → Block" unconditionally; the bypass branch
-//!   that consults `Arc<dyn EnsResolver>` lands in a follow-up
-//!   commit alongside the resolver-wiring work.
-//! - **Honeypot path matcher.** `Arc<HoneypotMatcher>` (compile-
-//!   time path glob set against `/.env`, `/wp-admin/*`, `/.git/*`)
-//!   feeds [`SignalKind::HoneypotHit`] from the listener pipeline;
-//!   the signal variant exists already so call sites can stub
-//!   today.
-//! - **Persistence.** Engine-side `reputation.json` round-trip
-//!   helpers ([`ReputationEngine::persist_to_path`] +
-//!   [`ReputationEngine::restore_from_path`]) consume U5
-//!   [`crate::state::persistence::write_json_atomic`] +
-//!   [`crate::state::persistence::read_json`] over a
-//!   `Vec<ReputationSnapshotEntry>` DTO (see
-//!   [`ReputationSnapshotEntry`]) with hex-encoded identities. The
-//!   60s-cadence task that drives the helpers from the relay's run
-//!   loop is plan U12 step 6's remaining persistence requirement
-//!   and lands with Phase 5 B8.
-//! - **ADR-0007.** Decay / threshold / weight defaults are set to
-//!   reasonable v0.1 values and pinned as `pub const`; the formal
-//!   ADR justifying those choices is a separate decision artifact
-//!   commit.
-//! - **Hot-reload (engine-side).** Landed:
-//!   [`ReputationEngine::swap_config`] atomic-swaps the
+//! - [`ReputationEngine::decide`] enforces the keyed limiter,
+//!   threshold block/backpressure decisions, blocked-request feedback,
+//!   and the ENS-named block bypass backed by the engine's presence
+//!   cache.
+//! - [`ReputationEngine::record_honeypot_if_match`] owns the
+//!   configured [`HoneypotMatcher`] and records
+//!   [`SignalKind::HoneypotHit`] at the configured weight on a match.
+//!   SDK connect wires verified inbound request URIs through this helper;
+//!   discovery listener-pipeline wiring remains pending because the
+//!   discovery router has no concrete request handlers to supply identity
+//!   plus path yet.
+//! - Engine persistence helpers and the 60s cadence loop are present in
+//!   this module. Runtime orchestration decides when to spawn the cadence
+//!   task and where the snapshot path lives.
+//! - Engine-side config hot-swap is present via
+//!   [`ReputationEngine::swap_config`], which atomically replaces the
 //!   `(ReputationConfig, RateLimiter)` pair behind
-//!   [`arc_swap::ArcSwap`] so concurrent
-//!   [`ReputationEngine::decide`] / [`ReputationEngine::record_signal`]
-//!   calls observe either the old pair or the new pair, never a mix.
-//!   The SIGHUP / admin-api reload **run-loop trigger** that calls
-//!   `swap_config` from a config-file change is Phase 5 B8 territory
-//!   — engine-side carve-out only here.
-//! - **Per-signal tracing.** Only [`ReputationEngine::decide`]
-//!   carries `#[tracing::instrument]` this iteration; emitting a
-//!   per-signal-kind audit span on every [`ReputationEngine::
-//!   record_signal`] lands in a follow-up commit.
+//!   [`arc_swap::ArcSwap`]. External reload triggers call that surface.
+//! - [`ReputationEngine::decide`] and [`ReputationEngine::record_signal`]
+//!   both emit tracing spans with the decision or signal fields needed for
+//!   request-level audit trails.
 
 use std::collections::HashMap as StdHashMap;
 use std::net::IpAddr;

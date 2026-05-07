@@ -371,8 +371,13 @@ async fn connect_honeypot_path_records_verified_identity_signal() {
     let identity = fixture_identity();
     let expires_at = register_fixture_lease(&leases, identity).await;
     let token = issue_token(identity, expires_at);
+    let cfg = ReputationConfig {
+        decay_constant: 0.0,
+        ..ReputationConfig::default()
+    };
+    let expected = cfg.weight_for(SignalKind::HoneypotHit);
     let engine = ReputationEngine::with_config_and_honeypot_matcher(
-        ReputationConfig::default(),
+        cfg,
         HoneypotMatcher::from_patterns(["/v1/sdk/connect"]),
     );
     let router = build_router(sdk_state_with_policy_and_engine(
@@ -386,7 +391,6 @@ async fn connect_honeypot_path_records_verified_identity_signal() {
     assert_eq!(status, StatusCode::SWITCHING_PROTOCOLS, "body={body:?}");
     assert_eq!(connection.as_deref(), Some("upgrade"));
     let score = engine.score(identity);
-    let expected = ReputationConfig::default().weight_for(SignalKind::HoneypotHit);
     assert!(
         (score - expected).abs() < 1e-6,
         "expected one HoneypotHit at configured weight, got score {score}"
