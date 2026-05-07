@@ -18,8 +18,9 @@
 //! TLS routing path (Phase 5 B9, landed), the QUIC backhaul
 //! `Endpoint` (Phase 3 B2, landed), the embedded frontend bundle
 //! (Phase 7 B1, landed), and the TUI subcommand (Phase 5 B10,
-//! pending). The library pieces exist; the binary still needs the
-//! HTTPS-listener mount that hands off TLS streams to the admin
+//! wired as a stopped/default status view until runtime status
+//! plumbing lands). The library pieces exist; the binary still needs
+//! the HTTPS-listener mount that hands off TLS streams to the admin
 //! router (Phase 5 B8 follow-up).
 //!
 //! ## Local-only argument policy
@@ -56,6 +57,7 @@
 )]
 mod installer;
 
+use std::io::stdout;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -66,9 +68,15 @@ use portal_acme::{AcmeConfig, DirectoryUrl, KeyDir, Manager as AcmeManager, Prov
 use portal_relay::Server;
 use portal_relay::policy::PolicyRuntime;
 use portal_relay::state::LeaseRegistry;
+use portal_relay::tui::run_with_terminal;
 use portal_relay_bin::ENV_PREFIX;
 use portal_relay_bin::init::{InitArgs, run_init};
 use portal_relay_bin::load::load_bundle_if_present;
+use portal_relay_bin::tui::initial_tui_snapshot;
+use ratatui_crossterm::CrosstermBackend;
+use ratatui_crossterm::crossterm::ExecutableCommand;
+use ratatui_crossterm::crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
+use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 /// Top-level CLI.
@@ -85,12 +93,18 @@ struct Cli {
 enum Command {
     /// Run the relay server until SIGINT/SIGTERM.
     Serve(ServeArgs),
+    /// Launch the read-only relay status TUI.
+    Tui(TuiArgs),
     /// Scaffold default `bootstrap.json` + `runtime.json` config files
     /// in the supplied state directory. The files use placeholder key
     /// paths that the operator must replace with real PEM-encoded key
     /// files before running `serve`.
     Init(InitArgs),
 }
+
+/// Args for `portal-relay tui`.
+#[derive(Debug, Parser)]
+struct TuiArgs {}
 
 /// Args for `portal-relay serve`.
 #[derive(Debug, Parser)]
@@ -142,6 +156,7 @@ fn main() -> eyre::Result<()> {
                 reject_acme_flags(serve_matches)?;
                 serve(args).await
             }
+            Command::Tui(args) => tui(args).await,
             Command::Init(args) => run_init(&args).await,
         }
     })
@@ -177,6 +192,39 @@ fn init_tracing() {
         .with(filter)
         .with(fmt::layer())
         .try_init();
+}
+
+async fn tui(_args: TuiArgs) -> eyre::Result<()> {
+    // Runtime status watch plumbing is intentionally future server wiring; the
+    // v0.1 binary TUI renders a stopped/default snapshot from the committed TUI
+    // library surface and exits on the normal process shutdown signal.
+    let (_snapshot_tx, snapshot_rx) = watch::channel(initial_tui_snapshot());
+    let cancel = CancellationToken::new();
+    install_signal_handler(cancel.clone());
+
+    let mut stdout_handle = stdout();
+    stdout_handle
+        .execute(EnterAlternateScreen)
+        .context("enter terminal alternate screen")?;
+
+    let result = async {
+        let backend = CrosstermBackend::new(stdout_handle);
+        let mut terminal = ratatui::Terminal::new(backend).context("initialize TUI terminal")?;
+        terminal.clear().context("clear TUI terminal")?;
+        run_with_terminal(&mut terminal, snapshot_rx, cancel)
+            .await
+            .context("run status TUI")
+    }
+    .await;
+
+    let teardown_result = if let Err(err) = stdout().execute(LeaveAlternateScreen) {
+        Err(err).context("leave terminal alternate screen")
+    } else {
+        Ok(())
+    };
+
+    teardown_result?;
+    result
 }
 
 #[tracing::instrument(skip_all, fields(state_dir = %args.state_dir.display(), name = %args.name))]
@@ -404,5 +452,28 @@ async fn wait_for_shutdown_signal() {
         } else {
             tracing::info!("Ctrl+C received");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clap_exposes_tui_subcommand() {
+        assert!(
+            Cli::command().find_subcommand("tui").is_some(),
+            "portal-relay tui should be present in the CLI shape",
+        );
+    }
+
+    #[test]
+    fn clap_parses_tui_subcommand() {
+        let cli = Cli::parse_from(["portal-relay", "tui"]);
+
+        assert!(
+            matches!(cli.command, Command::Tui(_)),
+            "portal-relay tui should dispatch to Command::Tui",
+        );
     }
 }

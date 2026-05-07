@@ -27,6 +27,7 @@ pub const ENV_PREFIX: &str = "PORTAL_RELAY_";
 
 pub mod init;
 pub mod load;
+pub mod tui;
 
 #[cfg(test)]
 mod tests {

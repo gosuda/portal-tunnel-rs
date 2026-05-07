@@ -36,8 +36,12 @@ portal-relay = { workspace = true }
 # CLI parsing
 clap = { workspace = true, features = ["derive"] }
 
+# Terminal UI
+ratatui = { workspace = true }
+ratatui-crossterm = { workspace = true }
+
 # Async runtime
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "time"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-util = { workspace = true, features = ["rt"] }
 
 # Errors + tracing
