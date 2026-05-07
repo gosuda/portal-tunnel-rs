@@ -113,12 +113,35 @@ async fn send_connect_with_xff(
     version: Version,
     xff: Option<&str>,
 ) -> (StatusCode, Option<String>, Vec<u8>) {
+    send_connect_with_upgrade_headers(
+        router,
+        token,
+        version,
+        xff,
+        Some("upgrade"),
+        Some("portal-tunnel"),
+    )
+    .await
+}
+
+async fn send_connect_with_upgrade_headers(
+    router: Router,
+    token: Option<&str>,
+    version: Version,
+    xff: Option<&str>,
+    connection: Option<&str>,
+    upgrade: Option<&str>,
+) -> (StatusCode, Option<String>, Vec<u8>) {
     let mut builder = Request::builder()
         .method(Method::GET)
         .uri("/v1/sdk/connect")
-        .version(version)
-        .header(header::CONNECTION, "upgrade")
-        .header(header::UPGRADE, "portal-tunnel");
+        .version(version);
+    if let Some(connection) = connection {
+        builder = builder.header(header::CONNECTION, connection);
+    }
+    if let Some(upgrade) = upgrade {
+        builder = builder.header(header::UPGRADE, upgrade);
+    }
     if let Some(token) = token {
         builder = builder.header(lease_token::ACCESS_TOKEN_HEADER, token);
     }
@@ -145,6 +168,14 @@ fn error_code(body: &[u8]) -> String {
     json.pointer("/error/code")
         .and_then(|v| v.as_str())
         .expect("error.code present")
+        .to_owned()
+}
+
+fn error_message(body: &[u8]) -> String {
+    let json: serde_json::Value = serde_json::from_slice(body).expect("response is JSON");
+    json.pointer("/error/message")
+        .and_then(|v| v.as_str())
+        .expect("error.message present")
         .to_owned()
 }
 
@@ -257,6 +288,52 @@ async fn connect_http2_returns_400_http11_only() {
 
     assert_eq!(status, StatusCode::BAD_REQUEST, "body={body:?}");
     assert_eq!(error_code(&body), "http11_only");
+}
+
+#[tokio::test]
+async fn connect_missing_upgrade_headers_returns_400_invalid_request() {
+    let leases = LeaseRegistry::new();
+    let identity = fixture_identity();
+    let expires_at = register_fixture_lease(&leases, identity).await;
+    let token = issue_token(identity, expires_at);
+    let router = build_router(sdk_state(leases));
+
+    let (status, _, body) =
+        send_connect_with_upgrade_headers(router, Some(&token), Version::HTTP_11, None, None, None)
+            .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body={body:?}");
+    assert_eq!(error_code(&body), "invalid_request");
+    assert_eq!(
+        error_message(&body),
+        "connect requires Connection: upgrade and Upgrade: portal-tunnel"
+    );
+}
+
+#[tokio::test]
+async fn connect_wrong_upgrade_protocol_returns_400_invalid_request() {
+    let leases = LeaseRegistry::new();
+    let identity = fixture_identity();
+    let expires_at = register_fixture_lease(&leases, identity).await;
+    let token = issue_token(identity, expires_at);
+    let router = build_router(sdk_state(leases));
+
+    let (status, _, body) = send_connect_with_upgrade_headers(
+        router,
+        Some(&token),
+        Version::HTTP_11,
+        None,
+        Some("keep-alive, Upgrade"),
+        Some("websocket"),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body={body:?}");
+    assert_eq!(error_code(&body), "invalid_request");
+    assert_eq!(
+        error_message(&body),
+        "connect requires Connection: upgrade and Upgrade: portal-tunnel"
+    );
 }
 
 #[tokio::test]

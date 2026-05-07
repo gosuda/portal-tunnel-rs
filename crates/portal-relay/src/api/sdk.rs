@@ -746,10 +746,13 @@ pub async fn register_handler(
 ///
 /// ## Hijack boundary
 ///
-/// v0.1 only lands the admission and hijack contract. Once the
-/// underlying stream upgrades, the task writes the minimal HTTP/1.1
-/// success prelude and stops. The actual tenant bridge is intentionally
-/// deferred.
+/// v0.1 only lands the admission and hijack contract. Clients must send
+/// the HTTP/1.1 upgrade handshake headers `Connection: upgrade` (the
+/// `upgrade` token may appear among comma-separated values,
+/// case-insensitively) and `Upgrade: portal-tunnel` (case-insensitive).
+/// Once the underlying stream upgrades, the task writes the minimal
+/// HTTP/1.1 success prelude and stops. The actual tenant bridge is
+/// intentionally deferred.
 ///
 /// Bridge handoff is deferred to U16: wire the upgraded stream into
 /// `RelayStream::offer_conn` once the relay-stream bridge and
@@ -757,6 +760,8 @@ pub async fn register_handler(
 ///
 /// # Errors
 ///
+/// - 400 `invalid_request` — missing or wrong HTTP/1.1 upgrade
+///   handshake headers.
 /// - 400 `http11_only` — HTTP/2+ requests cannot use this HTTP/1.1
 ///   hijack contract.
 /// - 401 `ip_banned` — source IP banned by policy.
@@ -809,6 +814,13 @@ pub async fn connect_handler(
         return Err(ApiError::new(
             ApiErrorCode::Http11Only,
             "connect requires HTTP/1.1",
+        ));
+    }
+
+    if !has_connection_upgrade(headers) || !has_portal_tunnel_upgrade(headers) {
+        return Err(ApiError::new(
+            ApiErrorCode::InvalidRequest,
+            "connect requires Connection: upgrade and Upgrade: portal-tunnel",
         ));
     }
 
@@ -1094,6 +1106,24 @@ fn verify_access_token_identity(
     now: Timestamp,
 ) -> crate::error::RelayResult<IdentityKey> {
     lease_token::verify(access_token, verifier, now).map(|claims| IdentityKey(claims.identity))
+}
+
+fn has_connection_upgrade(headers: &HeaderMap) -> bool {
+    headers
+        .get_all(header::CONNECTION)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .any(|token| token.trim().eq_ignore_ascii_case("upgrade"))
+}
+
+fn has_portal_tunnel_upgrade(headers: &HeaderMap) -> bool {
+    headers
+        .get_all(header::UPGRADE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .any(|token| token.trim().eq_ignore_ascii_case("portal-tunnel"))
 }
 
 /// Render a 32-byte buffer as 64-char lowercase hex (no `0x` prefix).
