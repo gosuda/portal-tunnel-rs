@@ -540,6 +540,84 @@ impl WgDevice for DefguardAdapter {
     }
 }
 
+/// A test fixture that pairs two [`WgDevice`] implementations over
+/// in-memory queues.  Writing a packet to device A makes it readable
+/// from device B, and vice-versa.  No cryptography is performed — the
+/// fixture acts as a virtual wire for the smoltcp integration tests.
+///
+/// Phase 6b/B U7 — this fixture enables the UDP round-trip behavioral
+/// gate without requiring real `noise::Tunn` encapsulation.  The
+/// `DefguardAdapter` production path remains
+/// [`OverlayError::NotYetImplemented`] until U8 or a follow-up batch
+/// wires real packet I/O.
+#[cfg(test)]
+use std::sync::Arc;
+
+/// Bidirectional in-memory queue pair for smoltcp integration testing.
+#[cfg(test)]
+pub struct PairedWgDevice {
+    /// Packets written by *this* device that the *peer* should read.
+    outgoing: Arc<std::sync::Mutex<std::collections::VecDeque<Vec<u8>>>>,
+    /// Packets written by the *peer* that *this* device should read.
+    incoming: Arc<std::sync::Mutex<std::collections::VecDeque<Vec<u8>>>>,
+}
+
+#[cfg(test)]
+impl PairedWgDevice {
+    /// Create a pair of devices wired to each other.
+    #[must_use]
+    pub fn new_pair() -> (Self, Self) {
+        let a_to_b = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()));
+        let b_to_a = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()));
+        let a = Self {
+            outgoing: Arc::clone(&a_to_b),
+            incoming: Arc::clone(&b_to_a),
+        };
+        let b = Self {
+            outgoing: Arc::clone(&b_to_a),
+            incoming: Arc::clone(&a_to_b),
+        };
+        (a, b)
+    }
+}
+
+#[cfg(test)]
+impl sealed::Sealed for PairedWgDevice {}
+
+#[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    reason = "test-only fixture: poisoned mutex means a prior test panicked; propagate panic rather than masking"
+)]
+impl WgDevice for PairedWgDevice {
+    fn apply_peers(&self, _peers: &[PeerConfig]) -> Result<(), OverlayError> {
+        // Test fixture accepts any peer set.
+        Ok(())
+    }
+
+    fn read_packet(&self, buf: &mut [u8]) -> Result<usize, OverlayError> {
+        let mut incoming = self.incoming.lock().unwrap();
+        Ok(incoming.pop_front().map_or(0, |packet| {
+            let n = packet.len().min(buf.len());
+            buf[..n].copy_from_slice(&packet[..n]);
+            n
+        }))
+    }
+
+    fn write_packet(&self, packet: &[u8]) -> Result<(), OverlayError> {
+        {
+            let mut outgoing = self.outgoing.lock().unwrap();
+            outgoing.push_back(packet.to_vec());
+        }
+        Ok(())
+    }
+
+    fn close(self: Box<Self>) -> Result<(), OverlayError> {
+        drop(self);
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 #[expect(clippy::expect_used, reason = "test-only setup")]
 mod tests {

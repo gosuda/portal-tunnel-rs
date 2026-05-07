@@ -210,6 +210,12 @@ notify = "8"
 notify-debouncer-full = "0.6"
 
 # Overlay (Phase 6b)
+# `smoltcp` 0.13 depends on `managed` with `default-features = false,
+# features = ["map"]`, which disables `From<Vec<T>>` for `ManagedSlice`.
+# Member crates that need `ManagedSlice::Owned` (e.g. `SocketSet::new`)
+# enable the `"alloc"` feature on `smoltcp`; that feature turns on
+# `managed/alloc` *and* compiles smoltcp's own `Owned` arm in
+# `socket_set.rs`. No separate `managed` workspace dep is required.
 smoltcp = { version = "0.13", default-features = false }
 brotli = "8"
 # Userspace WireGuard data plane — primary pick per ADR-0015 (Apache-2.0

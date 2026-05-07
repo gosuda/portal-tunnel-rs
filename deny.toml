@@ -52,6 +52,9 @@ allow = [
     "CC0-1.0",
     "BSL-1.0",
     "OpenSSL",
+    # 0BSD — BSD Zero Clause License. Pulled transitively via `managed`
+    # (smoltcp 0.13 dependency). Permissive public-domain-equivalent.
+    "0BSD",
     # CDLA-Permissive-2.0 — Community Data License Agreement Permissive 2.0.
     # Pulled transitively via `webpki-roots` (rustls trust-store snapshot).
     # Permissive — terms allow redistribution and binary distribution
