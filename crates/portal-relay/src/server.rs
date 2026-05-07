@@ -532,7 +532,7 @@ impl Server {
     /// The (future) `POST /v1/sdk/register` and `POST /v1/sdk/renew`
     /// handlers consume [`SdkState::lease_token_signing_key`] to mint
     /// lease-access tokens via [`crate::state::lease_token::issue`];
-    /// `POST /v1/sdk/connect` consumes
+    /// `GET /v1/sdk/connect` consumes
     /// [`SdkState::lease_token_verifier`] to verify them.
     ///
     /// # Coupling discipline
