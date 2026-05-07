@@ -855,9 +855,9 @@ pub async fn connect_handler(
 /// body-bearing surface is the simpler v0.1 wire — every existing SDK
 /// API path (`/v1/sdk/register`, `/v1/sdk/register-challenge`) already
 /// uses a JSON body, so this avoids a one-off auth-header carve-out.
-/// The `/v1/sdk/connect` endpoint (S8) WILL switch to an
-/// `X-Portal-Access-Token` header because it is a hijacked HTTP/1.1
-/// upgrade and has no JSON body to carry the token.
+/// The `/v1/sdk/connect` endpoint uses an `X-Portal-Access-Token`
+/// header because it is a hijacked HTTP/1.1 upgrade and has no JSON
+/// body to carry the token.
 ///
 /// Header-only support for `renew`/`unregister` is a follow-up if SDK
 /// operators report friction; the change is additive at the wire
