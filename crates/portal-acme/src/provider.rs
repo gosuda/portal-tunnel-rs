@@ -27,9 +27,11 @@ pub struct DnsRecord {
 /// DNS provider interface for ACME DNS-01 challenges.
 ///
 /// All methods are async because the underlying cloud APIs are HTTP
-/// REST clients. The trait uses explicit `impl Future` return types
-/// (Rust 2024 RPIT in traits) rather than `async fn` so impls can
-/// name the return type when needed.
+/// REST clients. The trait uses explicit `impl Future + Send` return
+/// types (Rust 2024 RPIT in traits) rather than `async fn` so the
+/// `Send` bound is part of the trait contract — callers and impls
+/// both see the same guaranteed-auto-trait shape, avoiding the
+/// inference-dependent leakage that `async fn` in traits can produce.
 pub trait DnsProvider: Send + Sync + 'static {
     /// Provider name for tracing / metrics (`"local"`, `"cloudflare"`,
     /// `"route53"`, `"gcloud"`).
