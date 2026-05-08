@@ -38,27 +38,6 @@ impl HopRoute {
     }
 }
 
-/// Wire response shape for [`HopRoute`] queries.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HopRouteResponse {
-    /// Opaque route id for logging / correlation.
-    pub route_id: u64,
-    /// Next relay identity (raw pubkey).
-    pub next_hop: [u8; 32],
-    /// Public hostname advertised for this route.
-    pub public_hostname: CompactString,
-    /// Route-specific hostname (may differ from public).
-    pub route_hostname: CompactString,
-    /// Hash of the hostname for deterministic lookup.
-    pub hostname_hash: String,
-    /// ECH config list bytes derived from the relay's ECH seed.
-    pub ech_config_list: Vec<u8>,
-    /// Token used to match incoming requests against this route.
-    pub match_token: String,
-    /// When the route was first observed (epoch millis).
-    pub first_seen_at: Option<Timestamp>,
-}
-
 #[cfg(test)]
 mod tests {
     #![expect(clippy::expect_used, reason = "test-only assertions")]
@@ -89,29 +68,5 @@ mod tests {
             postcard::from_bytes(&input1).expect("decode tuple");
         assert_eq!(sep, domain_separators::HOP_ROUTE);
         assert_eq!(decoded_hop, hop);
-    }
-
-    #[test]
-    fn hop_route_response_roundtrips_via_postcard() {
-        let original = HopRouteResponse {
-            route_id: 7,
-            next_hop: [1u8; 32],
-            public_hostname: CompactString::from("public.host"),
-            route_hostname: CompactString::from("route.host"),
-            hostname_hash: "hash789".to_owned(),
-            ech_config_list: vec![0xAB, 0xCD],
-            match_token: "match_123".to_owned(),
-            first_seen_at: Some(Timestamp::UNIX_EPOCH),
-        };
-        let encoded = postcard::to_stdvec(&original).expect("encode");
-        let decoded: HopRouteResponse = postcard::from_bytes(&encoded).expect("decode");
-        assert_eq!(decoded.route_id, original.route_id);
-        assert_eq!(decoded.next_hop, original.next_hop);
-        assert_eq!(decoded.public_hostname, original.public_hostname);
-        assert_eq!(decoded.route_hostname, original.route_hostname);
-        assert_eq!(decoded.hostname_hash, original.hostname_hash);
-        assert_eq!(decoded.ech_config_list, original.ech_config_list);
-        assert_eq!(decoded.match_token, original.match_token);
-        assert_eq!(decoded.first_seen_at, original.first_seen_at);
     }
 }
