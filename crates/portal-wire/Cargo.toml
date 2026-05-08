@@ -18,8 +18,10 @@ thiserror = { workspace = true }
 tokio-util = { workspace = true }
 
 [dev-dependencies]
+base64 = { workspace = true }
 postcard = { workspace = true }
 proptest = { workspace = true }
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

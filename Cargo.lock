@@ -4665,6 +4665,7 @@ dependencies = [
 name = "portal-wire"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "bytes",
  "compact_str",
  "jiff",
@@ -4672,6 +4673,7 @@ dependencies = [
  "proptest",
  "serde",
  "serde-big-array",
+ "serde_json",
  "thiserror 2.0.18",
  "tokio-util",
 ]

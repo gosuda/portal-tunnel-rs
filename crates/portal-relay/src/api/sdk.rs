@@ -164,74 +164,8 @@ pub async fn domain_handler() -> Result<(HeaderMap, Json<ApiDataEnvelope<DomainB
 /// - `reported_ip`: optional self-reported IP (free-form string;
 ///   parsed via `IpAddr::from_str`).
 ///
-/// `#[serde(deny_unknown_fields)]` is intentionally NOT applied:
-/// downstream wire evolution (e.g., a future `attestation` field) must
-/// be backward-compatible at the wire boundary even when older relays
-/// see it.
-#[derive(Debug, Clone, Deserialize)]
-pub struct RegisterChallengeBody {
-    /// 20-byte EVM address as `"0x" + 40 hex` (case-insensitive).
-    pub eth_address: String,
-    /// 32-byte raw ed25519 protocol pubkey, standard-base64 encoded.
-    pub ed25519_pk: String,
-    /// Optional SDK-self-reported IP (carried into the eventual
-    /// lease's R10 reputation signals). `None` / `""` = decline to
-    /// report; the relay falls back to the transport-observed IP.
-    #[serde(default)]
-    pub reported_ip: Option<String>,
-    /// Whether the SDK is requesting the UDP datagram surface. Mutually
-    /// exclusive with a non-empty `hop_token`.
-    #[serde(default)]
-    pub udp_enabled: bool,
-    /// Whether the SDK is requesting the TCP port surface. Mutually
-    /// exclusive with a non-empty `hop_token`.
-    #[serde(default)]
-    pub tcp_enabled: bool,
-    /// Optional multi-hop forwarding token. v0.1 does NOT implement
-    /// hop routing; a non-empty token returns 503 `feature_unavailable`.
-    #[serde(default)]
-    pub hop_token: String,
-    /// Hostname the SDK wants to register. Pinned at challenge-issue
-    /// for traceability but not validated until the consume step (S6).
-    #[serde(default)]
-    pub hostname: String,
-    /// Free-form per-lease metadata blob (base64 of postcard-encoded
-    /// bytes; opaque to the relay).
-    #[serde(default)]
-    pub metadata: String,
-    /// Requested lease TTL in seconds. v0.1 does NOT honor this on
-    /// the challenge-issue path — the challenge TTL is a fixed
-    /// 2-minute constant — but the field is captured here so the
-    /// consume step (S6) can apply it to the eventual `LeaseRecord`.
-    #[serde(default)]
-    pub ttl: u32,
-}
-
-/// Wire body for the `POST /v1/sdk/register-challenge` 201 response.
-///
-/// Mirrors Go's `types.RegisterChallengeResponse`. The wire field
-/// `siwe_message` corresponds to the internal struct field
-/// `siwe_message_text` — the rename is documented here so a reader
-/// of either side can trace the wire boundary.
-///
-/// `#[non_exhaustive]` blocks struct-literal construction from
-/// downstream Rust crates; it does NOT guarantee JSON-wire
-/// compatibility — a strict-decoder client that rejects unknown
-/// keys would still break on a field addition.
-#[derive(Debug, Clone, Serialize)]
-#[non_exhaustive]
-pub struct RegisterChallengeResponseBody {
-    /// `UUIDv4` (32 lowercase-hex chars, no hyphens) — primary key
-    /// into the relay's pending-challenge table.
-    pub challenge_id: CompactString,
-    /// Absolute expiry as RFC 3339 timestamp.
-    pub expires_at: Timestamp,
-    /// The EIP-4361 SIWE message text the SDK signs with its
-    /// secp256k1 EOA key (EIP-191 personal-sign). Renamed from
-    /// the internal `siwe_message_text` for wire-shape parity with
-    /// Go's `types.RegisterChallengeResponse.SIWEMessage`.
-    pub siwe_message: String,
-}
+pub use portal_wire::api::RegisterChallengeRequest as RegisterChallengeBody;
+pub use portal_wire::api::RegisterChallengeResponse as RegisterChallengeResponseBody;
 
 /// `POST /v1/sdk/register-challenge` — issue a one-shot SIWE
 /// register challenge.
@@ -446,11 +380,11 @@ pub async fn register_challenge_handler(
 
     Ok((
         StatusCode::CREATED,
-        ok(RegisterChallengeResponseBody {
-            challenge_id: resp.challenge_id,
-            expires_at: resp.expires_at,
-            siwe_message: resp.siwe_message_text,
-        }),
+        ok(RegisterChallengeResponseBody::new(
+            resp.challenge_id,
+            resp.expires_at,
+            resp.siwe_message_text,
+        )),
     ))
 }
 
@@ -464,62 +398,8 @@ pub async fn register_challenge_handler(
 /// the SDK-side opaque per-lease blob as a standard-base64 string —
 /// the same convention as `RegisterChallengeBody::metadata`. Empty
 /// `metadata` (`""`) decodes as a zero-byte blob.
-#[derive(Debug, Clone, Deserialize)]
-pub struct RegisterRequestBody {
-    /// Echoes the issued challenge id (32 lowercase-hex chars, no
-    /// hyphens — `UUIDv4::simple`).
-    pub challenge_id: CompactString,
-    /// EIP-4361 SIWE message text the SDK signed. The relay
-    /// re-parses this and asserts it byte-equals the text it pinned
-    /// at challenge issue.
-    pub siwe_message_text: String,
-    /// 65-byte EIP-191 secp256k1 signature as `"0x" + 130 hex`
-    /// (case-insensitive). Decoded via `decode_siwe_signature`.
-    pub siwe_signature: String,
-    /// Hostname the SDK wants to register.
-    pub hostname: CompactString,
-    /// Free-form per-lease metadata blob, standard-base64 of the
-    /// postcard-encoded bytes. Empty string = zero-byte blob.
-    #[serde(default)]
-    pub metadata: String,
-}
-
-/// Wire body for the `POST /v1/sdk/register` 201 response.
-///
-/// Mirrors Go's `types.RegisterResponse` field set, minus the v0.2
-/// transport-allocation fields (`udp_addr`, `tcp_addr`, `sni_port`,
-/// `keyless_url`) and Go's nested `Identity { name, address }`
-/// shape — Phase 5 v0.1 collapses identity to its 32-byte raw
-/// ed25519 protocol pubkey rendered as 64-char lowercase hex, which
-/// is the value the lease-access-token verifier matches on. The
-/// `protocol_version` / `release_version` pair mirrors
-/// [`DomainBody`] for SDK-side wire-version pinning across the
-/// register call.
-///
-/// `#[non_exhaustive]` blocks struct-literal construction from
-/// downstream Rust crates; it does NOT guarantee JSON-wire
-/// compatibility — a strict-decoder client that rejects unknown
-/// keys would still break on a field addition.
-#[derive(Debug, Clone, Serialize)]
-#[non_exhaustive]
-pub struct RegisterResponseBody {
-    /// 32-byte raw ed25519 protocol pubkey as 64-char lowercase hex
-    /// (no `0x` prefix). Bound to the lease-access-token claims.
-    pub identity: String,
-    /// Hostname the lease holds.
-    pub hostname: CompactString,
-    /// Lease expiry timestamp (RFC 3339).
-    pub expires_at: Timestamp,
-    /// Lease access token (signed JWT-style compact string per
-    /// [`crate::state::lease_token`]). The SDK echoes this on
-    /// `/v1/sdk/renew` and `/v1/sdk/connect`.
-    pub access_token: CompactString,
-    /// Wire-protocol version. v0.1 collapses to `CARGO_PKG_VERSION`.
-    pub protocol_version: &'static str,
-    /// Relay binary release version. v0.1 collapses to
-    /// `CARGO_PKG_VERSION`.
-    pub release_version: &'static str,
-}
+pub use portal_wire::api::RegisterRequest as RegisterRequestBody;
+pub use portal_wire::api::RegisterResponse as RegisterResponseBody;
 
 /// `POST /v1/sdk/register` — finalize the SIWE handshake, mint a
 /// lease, and return a lease access token.
@@ -722,14 +602,17 @@ pub async fn register_handler(
     tracing::Span::current().record("ens_named", ens_named);
 
     // 11. Respond.
-    let body = RegisterResponseBody {
-        identity: hex_lower(&identity.0),
-        hostname: verified.hostname,
+    let body = RegisterResponseBody::new(
+        hex_lower(&identity.0),
+        verified.hostname,
         expires_at,
         access_token,
-        protocol_version: env!("CARGO_PKG_VERSION"),
-        release_version: env!("CARGO_PKG_VERSION"),
-    };
+        env!("CARGO_PKG_VERSION").to_owned(),
+        env!("CARGO_PKG_VERSION").to_owned(),
+        req.route_hostname,
+        req.hostname_hash,
+        Vec::new(), // dummy ECH config list until key rotation lands
+    );
     Ok((StatusCode::CREATED, ok(body)))
 }
 
