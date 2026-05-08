@@ -47,6 +47,7 @@ Thumbs.db
 
 # Repo specific files
 portal-tunnel/
+duration_test
 
 # Code coverage reports
 coverage/
