@@ -55,7 +55,12 @@ compact_str = { workspace = true }
 # JSON serialization for the `init` subcommand scaffolds bootstrap.json
 # + runtime.json via the serde derives on the portal-relay config types
 # (RelayServerConfig + RuntimeConfig).
+serde = { workspace = true }
 serde_json = { workspace = true }
+
+# Runtime manifest parsing: the upstream `config.toml` is embedded via
+# `include_str!` and parsed lazily at program start via `OnceLock`.
+toml = { workspace = true }
 
 [dev-dependencies]
 # Phase 5 B8 follow-up (`tests/load_bundle_with_env.rs`): the binary-

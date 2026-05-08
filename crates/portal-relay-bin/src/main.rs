@@ -72,6 +72,7 @@ use portal_relay::tui::run_with_terminal;
 use portal_relay_bin::ENV_PREFIX;
 use portal_relay_bin::init::{InitArgs, run_init};
 use portal_relay_bin::load::load_bundle_if_present;
+use portal_relay_bin::manifest::embedded_manifest;
 use portal_relay_bin::tui::initial_tui_snapshot;
 use ratatui_crossterm::CrosstermBackend;
 use ratatui_crossterm::crossterm::ExecutableCommand;
@@ -236,7 +237,14 @@ async fn tui(_args: TuiArgs) -> eyre::Result<()> {
               load-bearing for shutdown correctness"
 )]
 async fn serve(args: ServeArgs) -> eyre::Result<()> {
-    tracing::info!("starting portal-relay");
+    let manifest = embedded_manifest();
+    tracing::info!(
+        version = %manifest.release.version,
+        tunnel_protocol = %manifest.protocol.tunnel,
+        discovery_protocol = %manifest.protocol.discovery,
+        bootstrap_relays = manifest.bootstrap.relays.len(),
+        "starting portal-relay",
+    );
 
     // 1. Build the ACME config + manager (local-mode only — see
     //    `reject_acme_flags`). The directory URL + contact email

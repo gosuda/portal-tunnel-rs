@@ -123,6 +123,7 @@ arc-swap = "1"
 parking_lot = "0.12"
 governor = "0.10"
 figment = { version = "0.10", features = ["env", "json", "toml"] }
+toml = "0.8"
 
 # Observability + errors
 metrics = "0.24"
