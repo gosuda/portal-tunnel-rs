@@ -28,4 +28,49 @@ pub enum Error {
     /// I/O while framing (codec buffer).
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
+    /// Requested resource was not found.
+    #[error("not found")]
+    NotFound,
+    /// TCP port pool is exhausted.
+    #[error("tcp port exhausted")]
+    TcpPortExhausted,
+    /// TCP proxy surface is disabled by policy.
+    #[error("tcp port disabled")]
+    TcpPortDisabled,
+    /// TCP capacity limit exceeded.
+    #[error("tcp port capacity exceeded")]
+    TcpPortCapacityExceeded,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_display_messages_are_non_empty() {
+        let cases: Vec<(Error, &'static str)> = vec![
+            (Error::LegacyKeepaliveByte, "legacy keepalive"),
+            (Error::UnknownChannelTag(7), "unknown channel"),
+            (Error::UnknownTcpProxyKind(3), "unknown tcp-proxy"),
+            (Error::FrameTooLarge, "frame exceeds"),
+            (Error::NotFound, "not found"),
+            (Error::TcpPortExhausted, "tcp port exhausted"),
+            (Error::TcpPortDisabled, "tcp port disabled"),
+            (
+                Error::TcpPortCapacityExceeded,
+                "tcp port capacity exceeded",
+            ),
+        ];
+        for (err, expected_substring) in cases {
+            let msg = err.to_string();
+            assert!(
+                !msg.is_empty(),
+                "error variant must produce a non-empty display message"
+            );
+            assert!(
+                msg.to_ascii_lowercase().contains(expected_substring),
+                "display message '{msg}' should contain '{expected_substring}'"
+            );
+        }
+    }
 }
