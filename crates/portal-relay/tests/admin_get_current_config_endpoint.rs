@@ -54,8 +54,17 @@ async fn get_current_config_returns_bootstrap_default_when_no_swap_yet() {
     let json: serde_json::Value = serde_json::from_slice(&bytes).expect("response is JSON");
     assert_eq!(
         json,
-        serde_json::json!({"data": {"bps_per_identity": 0, "ip_ban_list": []}}),
-        "default snapshot envelope must be {{data: {{bps_per_identity: 0, ip_ban_list: []}}}}",
+        serde_json::json!({
+            "data": {
+                "bps_per_identity": 0,
+                "ip_ban_list": [],
+                "tcp_enabled": true,
+                "tcp_min_port": 10000,
+                "tcp_max_port": 20000,
+                "tcp_max_leases": 100,
+            }
+        }),
+        "default snapshot envelope must include TCP defaults",
     );
 }
 
@@ -84,7 +93,16 @@ async fn get_current_config_returns_post_swap_runtime() {
     let json: serde_json::Value = serde_json::from_slice(&bytes).expect("response is JSON");
     assert_eq!(
         json,
-        serde_json::json!({"data": {"bps_per_identity": 2048, "ip_ban_list": ["10.0.0.1"]}}),
+        serde_json::json!({
+            "data": {
+                "bps_per_identity": 2048,
+                "ip_ban_list": ["10.0.0.1"],
+                "tcp_enabled": true,
+                "tcp_min_port": 10000,
+                "tcp_max_port": 20000,
+                "tcp_max_leases": 100,
+            }
+        }),
         "post-swap envelope must reflect the swapped runtime fields",
     );
 }

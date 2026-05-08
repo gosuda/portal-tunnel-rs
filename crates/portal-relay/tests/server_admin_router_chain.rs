@@ -91,7 +91,16 @@ async fn admin_router_built_from_server_handles_current_get() {
         serde_json::from_slice(&bytes).expect("response is JSON envelope");
     assert_eq!(
         body,
-        serde_json::json!({"data": {"bps_per_identity": 1024, "ip_ban_list": []}}),
+        serde_json::json!({
+            "data": {
+                "bps_per_identity": 1024,
+                "ip_ban_list": [],
+                "tcp_enabled": true,
+                "tcp_min_port": 10000,
+                "tcp_max_port": 20000,
+                "tcp_max_leases": 100,
+            }
+        }),
         "GET via Server::admin_state() must surface the swapped runtime",
     );
 }

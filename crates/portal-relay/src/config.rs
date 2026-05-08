@@ -149,6 +149,17 @@ pub struct RuntimeConfig {
     /// IP addresses on the operator-managed ban list. Consumed by
     /// (future) `IpFilter::replace_bans` on reload. Empty by default.
     pub ip_ban_list: Vec<std::net::IpAddr>,
+    /// TCP relay enabled flag. When `false`, the relay does not
+    /// allocate TCP ports for leases. Hot-reloadable.
+    pub tcp_enabled: bool,
+    /// Minimum TCP port in the allocator pool (inclusive).
+    /// Hot-reloadable.
+    pub tcp_min_port: u16,
+    /// Maximum TCP port in the allocator pool (inclusive).
+    /// Hot-reloadable.
+    pub tcp_max_port: u16,
+    /// Maximum number of concurrent TCP leases. Hot-reloadable.
+    pub tcp_max_leases: usize,
 }
 
 impl RuntimeConfig {
@@ -158,6 +169,10 @@ impl RuntimeConfig {
         Self {
             bps_per_identity: 0,
             ip_ban_list: Vec::new(),
+            tcp_enabled: true,
+            tcp_min_port: 10_000,
+            tcp_max_port: 20_000,
+            tcp_max_leases: 100,
         }
     }
 }
@@ -450,6 +465,10 @@ mod tests {
         let original = RuntimeConfig {
             bps_per_identity: 4096,
             ip_ban_list: vec!["10.0.0.1".parse().unwrap()],
+            tcp_enabled: true,
+            tcp_min_port: 10_000,
+            tcp_max_port: 20_000,
+            tcp_max_leases: 100,
         };
         let encoded = serde_json::to_string(&original).unwrap();
         let decoded: RuntimeConfig = serde_json::from_str(&encoded).unwrap();
@@ -462,6 +481,10 @@ mod tests {
         assert_eq!(decoded, RuntimeConfig::default());
         assert_eq!(decoded.bps_per_identity, 0);
         assert!(decoded.ip_ban_list.is_empty());
+        assert!(decoded.tcp_enabled);
+        assert_eq!(decoded.tcp_min_port, 10_000);
+        assert_eq!(decoded.tcp_max_port, 20_000);
+        assert_eq!(decoded.tcp_max_leases, 100);
     }
 
     #[test]
@@ -469,6 +492,10 @@ mod tests {
         let decoded: RuntimeConfig = serde_json::from_str(r#"{"bps_per_identity": 1024}"#).unwrap();
         assert_eq!(decoded.bps_per_identity, 1024);
         assert!(decoded.ip_ban_list.is_empty());
+        assert!(decoded.tcp_enabled);
+        assert_eq!(decoded.tcp_min_port, 10_000);
+        assert_eq!(decoded.tcp_max_port, 20_000);
+        assert_eq!(decoded.tcp_max_leases, 100);
     }
 
     #[test]
@@ -559,6 +586,10 @@ mod tests {
         RuntimeConfig {
             bps_per_identity: 4096,
             ip_ban_list: vec!["10.0.0.1".parse().unwrap()],
+            tcp_enabled: true,
+            tcp_min_port: 10_000,
+            tcp_max_port: 20_000,
+            tcp_max_leases: 100,
         }
     }
 

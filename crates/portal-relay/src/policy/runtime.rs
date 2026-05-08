@@ -216,6 +216,10 @@ mod tests {
         let handle = sample_reload_handle(RuntimeConfig {
             bps_per_identity: 0,
             ip_ban_list: vec!["10.0.0.1".parse().unwrap()],
+            tcp_enabled: true,
+            tcp_min_port: 10_000,
+            tcp_max_port: 20_000,
+            tcp_max_leases: 100,
         });
         let runtime = PolicyRuntime::new().with_reload_handle(handle);
 
@@ -252,6 +256,10 @@ mod tests {
         let handle = sample_reload_handle(RuntimeConfig {
             bps_per_identity: 0,
             ip_ban_list: vec!["10.0.0.1".parse().unwrap()],
+            tcp_enabled: true,
+            tcp_min_port: 10_000,
+            tcp_max_port: 20_000,
+            tcp_max_leases: 100,
         });
         let runtime = PolicyRuntime::new()
             .with_ip_filter(filter)

@@ -70,6 +70,7 @@ use std::time::Duration;
 
 use jiff::Timestamp;
 use portal_crypto::{BoxedEnsResolver, Ed25519Verifier, RelayEd25519Key};
+use portal_net::PortAllocator;
 use secrecy::SecretBox;
 use tokio::sync::{Mutex, watch};
 use tokio::task::JoinSet;
@@ -166,6 +167,16 @@ struct ServerInner {
     /// [`SdkState::lease_token_verifier`] when
     /// [`Server::sdk_state`] is called.
     relay_protocol: Option<RelayProtocolPair>,
+    /// Optional TCP port allocator. `Some` after
+    /// [`Server::with_reload_handle`] when the attached
+    /// [`RuntimeConfig`](crate::config::RuntimeConfig) has
+    /// `tcp_enabled == true`; constructed from the config's
+    /// `tcp_min_port` and `tcp_max_port` with a fixed grace
+    /// period. `None` when `tcp_enabled` is false, when no reload
+    /// handle is attached, or when the port range is empty.
+    /// Wrapped in `Arc` because `PortAllocator` does not (yet)
+    /// derive `Clone`.
+    port_allocator: Option<Arc<PortAllocator>>,
     /// Lifecycle guard. The mutex is held for short critical
     /// sections only — never across `JoinSet::join_next` awaits
     /// or other long-lived operations.
@@ -234,6 +245,7 @@ impl ServerInner {
                 .relay_protocol
                 .as_ref()
                 .map(RelayProtocolPair::arc_clone),
+            port_allocator: self.port_allocator.as_ref().map(Arc::clone),
             lifecycle: Mutex::new(Lifecycle::Stopped),
         }
     }
@@ -344,6 +356,7 @@ impl Server {
                 reputation_engine: None,
                 ens_resolver: None,
                 relay_protocol: None,
+                port_allocator: None,
                 lifecycle: Mutex::new(Lifecycle::Stopped),
             }),
         }
@@ -386,9 +399,20 @@ impl Server {
         // is overridden, and `lifecycle` is reset to a fresh
         // `Stopped` so misuse-after-start cannot share state with
         // the orphaned `Arc<ServerInner>`.
+        let runtime = handle.current();
+        let port_allocator = if runtime.tcp_enabled {
+            Some(Arc::new(PortAllocator::new(
+                runtime.tcp_min_port,
+                runtime.tcp_max_port,
+                Duration::from_secs(60),
+            )))
+        } else {
+            None
+        };
         Self {
             inner: Arc::new(ServerInner {
                 reload_handle: Some(handle),
+                port_allocator,
                 ..self.inner.clone_for_rebuild()
             }),
         }

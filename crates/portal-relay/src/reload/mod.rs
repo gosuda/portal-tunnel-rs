@@ -169,6 +169,18 @@ impl ReloadHandle {
         if prev.ip_ban_list != runtime_candidate.ip_ban_list {
             swapped_fields.push("ip_ban_list");
         }
+        if prev.tcp_enabled != runtime_candidate.tcp_enabled {
+            swapped_fields.push("tcp_enabled");
+        }
+        if prev.tcp_min_port != runtime_candidate.tcp_min_port {
+            swapped_fields.push("tcp_min_port");
+        }
+        if prev.tcp_max_port != runtime_candidate.tcp_max_port {
+            swapped_fields.push("tcp_max_port");
+        }
+        if prev.tcp_max_leases != runtime_candidate.tcp_max_leases {
+            swapped_fields.push("tcp_max_leases");
+        }
 
         self.runtime.store(Arc::new(runtime_candidate));
 
