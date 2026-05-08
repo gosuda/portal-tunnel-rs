@@ -61,6 +61,8 @@ pub struct HopRouteResponse {
 
 #[cfg(test)]
 mod tests {
+    #![expect(clippy::expect_used, reason = "test-only assertions")]
+
     use super::*;
 
     #[test]
@@ -75,11 +77,18 @@ mod tests {
             match_token: "token_xyz".to_owned(),
             first_seen_at: None,
         };
-        let input = hop.canonical_signing_input().expect("serialize");
-        assert!(
-            input.starts_with(domain_separators::HOP_ROUTE),
-            "signing input must start with domain separator"
+        let input1 = hop.canonical_signing_input().expect("serialize");
+        let input2 = hop.canonical_signing_input().expect("serialize");
+        assert_eq!(
+            input1, input2,
+            "canonical signing input must be deterministic"
         );
+
+        // Verify the tuple encoding includes the domain separator as the first element.
+        let (sep, decoded_hop): (&[u8], HopRoute) =
+            postcard::from_bytes(&input1).expect("decode tuple");
+        assert_eq!(sep, domain_separators::HOP_ROUTE);
+        assert_eq!(decoded_hop, hop);
     }
 
     #[test]

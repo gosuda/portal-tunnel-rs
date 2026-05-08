@@ -51,6 +51,11 @@ pub struct Bootstrap {
 /// Panics if the embedded `config.toml` is malformed. This is a
 /// compile-time/bundle correctness invariant, not a runtime failure
 /// mode.
+#[expect(
+    clippy::expect_used,
+    reason = "embedded config.toml is a compile-time invariant; \
+              malformed TOML is a build/bundle correctness bug, not a runtime failure"
+)]
 pub fn embedded_manifest() -> &'static Manifest {
     use std::sync::OnceLock;
     static MANIFEST: OnceLock<Manifest> = OnceLock::new();

@@ -84,7 +84,10 @@ pub struct RegisterChallengeResponse {
 impl RegisterChallengeResponse {
     /// Constructor for downstream crates blocked by `#[non_exhaustive]`.
     #[must_use]
-    #[expect(clippy::missing_const_for_fn, reason = "CompactString::new is not stable const")]
+    #[expect(
+        clippy::missing_const_for_fn,
+        reason = "CompactString::new is not stable const"
+    )]
     pub fn new(challenge_id: CompactString, expires_at: Timestamp, siwe_message: String) -> Self {
         Self {
             challenge_id,
@@ -155,8 +158,14 @@ pub struct RegisterResponse {
 impl RegisterResponse {
     /// Constructor for downstream crates blocked by `#[non_exhaustive]`.
     #[must_use]
-    #[expect(clippy::too_many_arguments, reason = "wire response mirrors struct fields")]
-    #[expect(clippy::missing_const_for_fn, reason = "String/CompactString not stable const")]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "wire response mirrors struct fields"
+    )]
+    #[expect(
+        clippy::missing_const_for_fn,
+        reason = "String/CompactString not stable const"
+    )]
     pub fn new(
         identity: String,
         hostname: CompactString,
@@ -181,7 +190,6 @@ impl RegisterResponse {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {

@@ -386,6 +386,7 @@ impl Server {
     /// builds trust the caller per the doc-only contract.
     #[must_use]
     pub fn with_reload_handle(self, handle: Arc<ReloadHandle>) -> Self {
+        const TCP_PORT_GRACE: Duration = Duration::from_mins(1);
         debug_assert!(
             self.inner
                 .lifecycle
@@ -404,7 +405,7 @@ impl Server {
             Some(Arc::new(PortAllocator::new(
                 runtime.tcp_min_port,
                 runtime.tcp_max_port,
-                Duration::from_secs(60),
+                TCP_PORT_GRACE,
             )))
         } else {
             None

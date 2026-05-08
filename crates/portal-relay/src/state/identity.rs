@@ -124,7 +124,7 @@ pub fn save_ech_seed(
                 .write(true)
                 .mode(0o600)
                 .open(&tmp_path)?;
-            f.write_all(&bytes)?;
+            f.write_all(bytes)?;
             f.sync_all()?;
         }
         #[cfg(not(unix))]
@@ -376,6 +376,7 @@ pub async fn load_ech_seed_only(paths: &IdentityPaths) -> RelayResult<SecretBox<
 
 #[cfg(test)]
 #[expect(clippy::unwrap_used, reason = "test-only setup")]
+#[expect(clippy::expect_used, reason = "test-only assertions")]
 mod tests {
     use super::*;
     use tempfile::tempdir;
@@ -521,8 +522,12 @@ mod tests {
     async fn load_ech_seed_only_generates_then_round_trips() {
         let dir = tempdir().unwrap();
         let paths = IdentityPaths::new(dir.path().to_path_buf());
-        let seed1 = load_ech_seed_only(&paths).await.expect("first load should generate");
-        let seed2 = load_ech_seed_only(&paths).await.expect("second load should round-trip");
+        let seed1 = load_ech_seed_only(&paths)
+            .await
+            .expect("first load should generate");
+        let seed2 = load_ech_seed_only(&paths)
+            .await
+            .expect("second load should round-trip");
         assert_eq!(
             seed1.expose_secret().0.as_slice(),
             seed2.expose_secret().0.as_slice(),
@@ -536,7 +541,9 @@ mod tests {
         let paths = IdentityPaths::new(dir.path().to_path_buf());
         let seed1 = generate_ech_seed();
         save_ech_seed(&seed1, &paths.ech_seed()).expect("save preexisting seed");
-        let seed2 = load_ech_seed_only(&paths).await.expect("load preexisting seed");
+        let seed2 = load_ech_seed_only(&paths)
+            .await
+            .expect("load preexisting seed");
         assert_eq!(
             seed1.expose_secret().0.as_slice(),
             seed2.expose_secret().0.as_slice(),

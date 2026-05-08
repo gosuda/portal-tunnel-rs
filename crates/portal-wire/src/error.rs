@@ -56,10 +56,7 @@ mod tests {
             (Error::NotFound, "not found"),
             (Error::TcpPortExhausted, "tcp port exhausted"),
             (Error::TcpPortDisabled, "tcp port disabled"),
-            (
-                Error::TcpPortCapacityExceeded,
-                "tcp port capacity exceeded",
-            ),
+            (Error::TcpPortCapacityExceeded, "tcp port capacity exceeded"),
         ];
         for (err, expected_substring) in cases {
             let msg = err.to_string();
