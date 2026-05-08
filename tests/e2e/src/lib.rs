@@ -188,7 +188,12 @@ pub async fn http_get(addr: &str, path: &str) -> std::io::Result<(u16, String)> 
         .split_whitespace()
         .nth(1)
         .and_then(|s| s.parse::<u16>().ok())
-        .unwrap_or(0);
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "malformed HTTP status line",
+            )
+        })?;
 
     let mut content_length = None;
     loop {
