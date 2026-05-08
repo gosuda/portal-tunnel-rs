@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+bon = { workspace = true }
 bytes = { workspace = true }
 compact_str = { workspace = true }
 jiff = { workspace = true }

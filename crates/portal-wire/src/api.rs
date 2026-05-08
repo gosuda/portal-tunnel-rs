@@ -68,7 +68,7 @@ pub struct RegisterChallengeRequest {
 /// Wire response body for `POST /v1/sdk/register-challenge` 201.
 ///
 /// Mirrors Go v2.2.1 `types.RegisterChallengeResponse`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, bon::Builder)]
 #[non_exhaustive]
 pub struct RegisterChallengeResponse {
     /// `UUIDv4` (32 lowercase-hex chars, no hyphens) — primary key
@@ -130,7 +130,7 @@ pub struct RegisterRequest {
 ///
 /// Mirrors Go v2.2.1 `types.RegisterResponse`, extended with
 /// `route_hostname`, `hostname_hash`, and a dummy `ech_config_list`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, bon::Builder)]
 #[non_exhaustive]
 pub struct RegisterResponse {
     /// 32-byte raw ed25519 protocol pubkey as 64-char lowercase hex

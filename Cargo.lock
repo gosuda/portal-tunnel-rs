@@ -4697,6 +4697,7 @@ name = "portal-wire"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "bon",
  "bytes",
  "compact_str",
  "jiff",
