@@ -12,7 +12,6 @@ portal-relay = { workspace = true }
 portal-crypto = { workspace = true, features = ["insecure-test-constructors"] }
 tokio = { workspace = true, features = ["full"] }
 axum = { workspace = true }
-serde_json = { workspace = true }
 
 [lints]
 workspace = true

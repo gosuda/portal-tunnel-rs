@@ -1413,13 +1413,6 @@ dependencies = [
 [[package]]
 name = "behavioral-trace"
 version = "0.1.0"
-dependencies = [
- "portal-crypto",
- "portal-relay",
- "serde",
- "serde_json",
- "tokio",
-]
 
 [[package]]
 name = "bit-set"
@@ -2374,7 +2367,6 @@ dependencies = [
  "axum",
  "portal-crypto",
  "portal-relay",
- "serde_json",
  "tokio",
 ]
 
