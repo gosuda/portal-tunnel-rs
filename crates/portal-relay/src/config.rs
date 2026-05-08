@@ -175,6 +175,22 @@ impl RuntimeConfig {
             tcp_max_leases: 100,
         }
     }
+
+    /// Validate semantic invariants that serde cannot express.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` with a human-readable message when:
+    /// - `tcp_enabled` is true but `tcp_min_port > tcp_max_port`.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.tcp_enabled && self.tcp_min_port > self.tcp_max_port {
+            return Err(format!(
+                "tcp_min_port ({}) must be <= tcp_max_port ({})",
+                self.tcp_min_port, self.tcp_max_port
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl Default for RuntimeConfig {
@@ -279,6 +295,12 @@ impl RelayConfigBundle {
                 source: Box::new(source),
             }
         })?;
+        runtime
+            .validate()
+            .map_err(|message| ConfigLoadError::Validation {
+                path: runtime_path.to_path_buf(),
+                message,
+            })?;
 
         Ok(Self { server, runtime })
     }
@@ -349,6 +371,12 @@ impl RelayConfigBundle {
             .map_err(|source| ConfigLoadError::Figment {
                 path: runtime_path.to_path_buf(),
                 source: Box::new(source),
+            })?;
+        runtime
+            .validate()
+            .map_err(|message| ConfigLoadError::Validation {
+                path: runtime_path.to_path_buf(),
+                message,
             })?;
 
         Ok(Self { server, runtime })
@@ -437,6 +465,15 @@ pub enum ConfigLoadError {
         /// Underlying [`figment::Error`], boxed.
         #[source]
         source: Box<figment::Error>,
+    },
+    /// Semantic validation error — the config deserialized successfully
+    /// but violates a runtime invariant (e.g. `tcp_min_port > tcp_max_port`).
+    #[error("config validation error at {path:?}: {message}")]
+    Validation {
+        /// The config file whose contents failed validation.
+        path: PathBuf,
+        /// Human-readable description of the invariant violation.
+        message: String,
     },
 }
 
@@ -886,5 +923,83 @@ mod tests {
             }
             Ok(())
         });
+    }
+
+    #[test]
+    fn runtime_config_validate_passes_for_defaults() {
+        let cfg = RuntimeConfig::default();
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn runtime_config_validate_passes_for_valid_custom_range() {
+        let cfg = RuntimeConfig {
+            tcp_enabled: true,
+            tcp_min_port: 5_000,
+            tcp_max_port: 6_000,
+            ..RuntimeConfig::default()
+        };
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn runtime_config_validate_fails_when_tcp_min_greater_than_max() {
+        let cfg = RuntimeConfig {
+            tcp_enabled: true,
+            tcp_min_port: 20_000,
+            tcp_max_port: 10_000,
+            ..RuntimeConfig::default()
+        };
+        let err = cfg.validate().unwrap_err();
+        assert!(
+            err.contains("tcp_min_port"),
+            "expected error to mention tcp_min_port, got: {err}"
+        );
+        assert!(
+            err.contains("tcp_max_port"),
+            "expected error to mention tcp_max_port, got: {err}"
+        );
+    }
+
+    #[test]
+    fn runtime_config_validate_passes_when_tcp_disabled_even_if_range_inverted() {
+        let cfg = RuntimeConfig {
+            tcp_enabled: false,
+            tcp_min_port: 20_000,
+            tcp_max_port: 10_000,
+            ..RuntimeConfig::default()
+        };
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[tokio::test]
+    async fn relay_config_bundle_validation_error_for_inverted_tcp_range() {
+        let dir = tempfile::tempdir().unwrap();
+        let server_path = dir.path().join("bootstrap.json");
+        let runtime_path = dir.path().join("runtime.json");
+        tokio::fs::write(&server_path, sample_bootstrap_json())
+            .await
+            .unwrap();
+        tokio::fs::write(
+            &runtime_path,
+            r#"{"tcp_enabled": true, "tcp_min_port": 20000, "tcp_max_port": 10000}"#,
+        )
+        .await
+        .unwrap();
+
+        let err = RelayConfigBundle::from_files(&server_path, &runtime_path)
+            .await
+            .unwrap_err();
+
+        match err {
+            ConfigLoadError::Validation { path, message } => {
+                assert_eq!(path, runtime_path);
+                assert!(
+                    message.contains("tcp_min_port"),
+                    "expected validation message to mention tcp_min_port, got: {message}"
+                );
+            }
+            other => panic!("expected ConfigLoadError::Validation, got: {other:?}"),
+        }
     }
 }
