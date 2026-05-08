@@ -15,9 +15,9 @@
 //! time. The workspace clippy `disallowed_methods` rule
 //! (`portal_crypto::load_all_keys`) prohibits any function returning
 //! more than one signing key from a single load call. The current
-//! `RelayIdentity` shape carries **three** of the five anticipated
-//! key surfaces — `ApiHttpsKey`, `QuicIdentityKey`, and
-//! `RelayEd25519Key`. The remaining two follow on as their consuming
+//! `RelayIdentity` shape carries **four** of the six anticipated
+//! key surfaces — `ApiHttpsKey`, `QuicIdentityKey`, `RelayEd25519Key`,
+//! and `EchSeed`. The remaining two follow on as their consuming
 //! surfaces wire the keys onto this bundle:
 //!
 //! - `KeylessSigningKey` (consumed by the keyless mTLS endpoint).
@@ -29,14 +29,16 @@ use std::path::PathBuf;
 use compact_str::CompactString;
 use portal_crypto::{ApiHttpsKey, RelayEd25519Key};
 use portal_net::QuicIdentityKey;
-use secrecy::SecretBox;
+use rand_core::{OsRng, RngCore};
+use secrecy::{ExposeSecret, SecretBox};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::error::RelayResult;
 
 /// Relay identity bundle.
 ///
-/// Currently carries the three-key shape (`api_https` + `quic` +
-/// `relay_protocol`); follow-up commits extend it with
+/// Currently carries the four-key shape (`api_https` + `quic` +
+/// `relay_protocol` + `ech_seed`); follow-up commits extend it with
 /// `KeylessSigningKey` and `SiweKey` as their consuming surfaces
 /// wire those keys onto the bundle.
 pub struct RelayIdentity {
@@ -52,6 +54,11 @@ pub struct RelayIdentity {
     /// debug-print or copy is rejected by the secrecy crate's
     /// trust-boundary discipline.
     pub relay_protocol: SecretBox<RelayEd25519Key>,
+    /// ECH (Encrypted Client Hello) seed for the relay's HTTPS
+    /// fronting surface. 32 bytes of uniform random material used to
+    /// derive ECH key material. Wrapped in [`SecretBox`] so it is
+    /// redacted in logs and zeroized on drop.
+    pub ech_seed: SecretBox<EchSeed>,
     /// Operator-friendly relay name (used in tracing + audit log).
     /// Read from disk alongside the keys; not a secret.
     pub name: CompactString,
@@ -63,9 +70,111 @@ impl core::fmt::Debug for RelayIdentity {
             .field("api_https", &"[REDACTED]")
             .field("quic", &"[REDACTED]")
             .field("relay_protocol", &"[REDACTED]")
+            .field("ech_seed", &"[REDACTED]")
             .field("name", &self.name)
             .finish()
     }
+}
+
+/// Newtype wrapper around the 32-byte ECH seed.
+///
+/// The inner `[u8; 32]` is stored in [`Zeroizing`] so it is wiped
+/// from memory when the value is dropped.  This type is consumed
+/// exclusively through [`secrecy::SecretBox<EchSeed>`].
+pub struct EchSeed(Zeroizing<[u8; 32]>);
+
+impl Zeroize for EchSeed {
+    fn zeroize(&mut self) {
+        self.0.zeroize();
+    }
+}
+
+/// Generate a fresh 32-byte ECH seed from the OS RNG.
+#[must_use]
+pub fn generate_ech_seed() -> SecretBox<EchSeed> {
+    let mut seed = Zeroizing::new([0u8; 32]);
+    OsRng.fill_bytes(&mut *seed);
+    SecretBox::new(Box::new(EchSeed(seed)))
+}
+
+/// Save an ECH seed to disk as raw bytes with 0o600 perms (Unix).
+///
+/// Uses atomic write: creates a uniquely-named sibling temp file with
+/// `create_new(true)`, fsyncs, then renames atomically over `path`.
+///
+/// # Errors
+///
+/// Returns [`crate::error::RelayError::Io`] on filesystem failure.
+pub fn save_ech_seed(
+    seed: &SecretBox<EchSeed>,
+    path: &std::path::Path,
+) -> Result<(), crate::error::RelayError> {
+    use std::io::Write as _;
+
+    let bytes: &[u8] = seed.expose_secret().0.as_slice();
+    let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let tmp_path = unique_sibling_tmp(parent);
+
+    let write_result = (|| -> io::Result<()> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            let mut f = std::fs::OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .mode(0o600)
+                .open(&tmp_path)?;
+            f.write_all(&bytes)?;
+            f.sync_all()?;
+        }
+        #[cfg(not(unix))]
+        {
+            let mut f = std::fs::OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(&tmp_path)?;
+            f.write_all(&bytes)?;
+            f.sync_all()?;
+        }
+        std::fs::rename(&tmp_path, path)?;
+        Ok(())
+    })();
+
+    if write_result.is_err() {
+        let _ = std::fs::remove_file(&tmp_path);
+    }
+    write_result.map_err(crate::error::RelayError::Io)
+}
+
+/// Load an ECH seed from a raw 32-byte file.
+///
+/// # Errors
+///
+/// Returns [`crate::error::RelayError::Io`] on filesystem failure.
+/// Returns [`crate::error::RelayError::Crypto`] if the file length
+/// is not exactly 32 bytes.
+pub fn load_ech_seed(
+    path: &std::path::Path,
+) -> Result<SecretBox<EchSeed>, crate::error::RelayError> {
+    let data = std::fs::read(path).map_err(crate::error::RelayError::Io)?;
+    if data.len() != 32 {
+        return Err(crate::error::RelayError::Crypto(format!(
+            "ECH seed file must be exactly 32 bytes, got {}",
+            data.len()
+        )));
+    }
+    let mut seed = Zeroizing::new([0u8; 32]);
+    seed.copy_from_slice(&data);
+    Ok(SecretBox::new(Box::new(EchSeed(seed))))
+}
+
+/// Return a path like `<dir>/.portal-relay-tmp-<16-hex-chars>` that does not
+/// yet exist. The caller must open it with `create_new(true)`.
+fn unique_sibling_tmp(dir: &std::path::Path) -> std::path::PathBuf {
+    let mut nonce = [0u8; 8];
+    OsRng.fill_bytes(&mut nonce);
+    let hex = format!("{:016x}", u64::from_ne_bytes(nonce));
+    dir.join(format!(".portal-relay-tmp-{hex}"))
 }
 
 /// Standard layout of the on-disk identity directory:
@@ -74,6 +183,7 @@ impl core::fmt::Debug for RelayIdentity {
 /// - `<dir>/relay_protocol.json` (single-field JSON, mode 0o600 —
 ///   `{ "ed25519_secret_key": "<64 lowercase hex chars>" }` per
 ///   [`portal_crypto::load_relay_ed25519_key`])
+/// - `<dir>/ech_seed.bin` (raw 32-byte seed, mode 0o600)
 /// - `<dir>/name.txt` (operator-friendly relay name)
 #[derive(Debug, Clone)]
 pub struct IdentityPaths {
@@ -116,6 +226,12 @@ impl IdentityPaths {
     #[must_use]
     pub fn name(&self) -> PathBuf {
         self.dir.join("name.txt")
+    }
+
+    /// Path to the ECH seed file (`<dir>/ech_seed.bin`).
+    #[must_use]
+    pub fn ech_seed(&self) -> PathBuf {
+        self.dir.join("ech_seed.bin")
     }
 }
 
@@ -223,6 +339,41 @@ pub async fn load_relay_protocol_only(
     })
 }
 
+/// Load the ECH seed, generating + persisting if absent.
+///
+/// Follows the exact same race-safe pattern as [`load_quic_only`]:
+///
+/// 1. `metadata(ech_seed_path)` — only [`io::ErrorKind::NotFound`] is
+///    treated as "missing".
+/// 2. If present, load and return.
+/// 3. If absent, generate via [`generate_ech_seed`], persist atomically
+///    via [`save_ech_seed`], then re-load from disk so concurrent
+///    writers converge to the same on-disk identity regardless of which
+///    generation "wins" the rename race.
+///
+/// # Errors
+///
+/// Returns [`crate::error::RelayError::Io`] on filesystem failure and
+/// [`crate::error::RelayError::Crypto`] on malformed seed file.
+pub async fn load_ech_seed_only(paths: &IdentityPaths) -> RelayResult<SecretBox<EchSeed>> {
+    tokio::fs::create_dir_all(&paths.dir).await?;
+    let ech_path = paths.ech_seed();
+
+    match tokio::fs::metadata(&ech_path).await {
+        Ok(_) => Ok(load_ech_seed(&ech_path)?),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            let seed = generate_ech_seed();
+            save_ech_seed(&seed, &ech_path)?;
+            // Drop the locally-generated seed in favor of the on-disk
+            // truth, guaranteeing convergence under concurrent
+            // first-start.
+            drop(seed);
+            Ok(load_ech_seed(&ech_path)?)
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
 #[cfg(test)]
 #[expect(clippy::unwrap_used, reason = "test-only setup")]
 mod tests {
@@ -250,6 +401,7 @@ mod tests {
         assert!(paths.api_https().ends_with("api_https.der"));
         assert!(paths.quic().ends_with("quic.der"));
         assert!(paths.relay_protocol().ends_with("relay_protocol.json"));
+        assert!(paths.ech_seed().ends_with("ech_seed.bin"));
         assert!(paths.name().ends_with("name.txt"));
     }
 
@@ -358,6 +510,77 @@ mod tests {
         );
 
         let result = load_quic_only(&paths).await;
+        assert!(
+            matches!(result, Err(RelayError::Io(_))),
+            "non-NotFound metadata error must surface as \
+             RelayError::Io (got {result:?})"
+        );
+    }
+
+    #[tokio::test]
+    async fn load_ech_seed_only_generates_then_round_trips() {
+        let dir = tempdir().unwrap();
+        let paths = IdentityPaths::new(dir.path().to_path_buf());
+        let seed1 = load_ech_seed_only(&paths).await.expect("first load should generate");
+        let seed2 = load_ech_seed_only(&paths).await.expect("second load should round-trip");
+        assert_eq!(
+            seed1.expose_secret().0.as_slice(),
+            seed2.expose_secret().0.as_slice(),
+            "round-trip ECH seed"
+        );
+    }
+
+    #[tokio::test]
+    async fn load_ech_seed_only_preexisting_file_round_trips() {
+        let dir = tempdir().unwrap();
+        let paths = IdentityPaths::new(dir.path().to_path_buf());
+        let seed1 = generate_ech_seed();
+        save_ech_seed(&seed1, &paths.ech_seed()).expect("save preexisting seed");
+        let seed2 = load_ech_seed_only(&paths).await.expect("load preexisting seed");
+        assert_eq!(
+            seed1.expose_secret().0.as_slice(),
+            seed2.expose_secret().0.as_slice(),
+            "preexisting ECH seed must round-trip"
+        );
+    }
+
+    #[tokio::test]
+    async fn load_ech_seed_only_short_file_surfaces_crypto_error() {
+        use crate::error::RelayError;
+
+        let dir = tempdir().unwrap();
+        let paths = IdentityPaths::new(dir.path().to_path_buf());
+        std::fs::create_dir_all(&paths.dir).expect("create dir");
+        {
+            use std::io::Write as _;
+            let mut f = std::fs::File::create(paths.ech_seed()).expect("create short file");
+            f.write_all(b"short").expect("write short bytes");
+        }
+        let result = load_ech_seed_only(&paths).await;
+        assert!(
+            matches!(result, Err(RelayError::Crypto(_))),
+            "short ECH seed file must surface as RelayError::Crypto, got {result:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn metadata_non_notfound_error_propagates_as_io_for_ech_seed() {
+        use crate::error::RelayError;
+
+        let dir = tempdir().unwrap();
+        let paths = IdentityPaths::new(dir.path().to_path_buf());
+        let ech_path = paths.ech_seed();
+        std::os::unix::fs::symlink(&ech_path, &ech_path).unwrap();
+        let probe = std::fs::metadata(&ech_path);
+        assert!(probe.is_err(), "symlink-loop fixture must error");
+        assert_ne!(
+            probe.unwrap_err().kind(),
+            io::ErrorKind::NotFound,
+            "fixture must produce a non-NotFound error"
+        );
+
+        let result = load_ech_seed_only(&paths).await;
         assert!(
             matches!(result, Err(RelayError::Io(_))),
             "non-NotFound metadata error must surface as \
