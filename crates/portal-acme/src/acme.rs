@@ -149,8 +149,7 @@ impl AcmeClient {
                 .challenge(ChallengeType::Dns01)
                 .ok_or_else(|| AcmeError::Acme("missing DNS-01 challenge".to_owned()))?;
 
-            let key_auth = challenge
-                .key_authorization();
+            let key_auth = challenge.key_authorization();
             let dns_value = key_auth.dns_value();
             let identifier = challenge.identifier().to_owned();
 
@@ -239,13 +238,17 @@ impl AcmeClient {
             .ok()
             .flatten()
             .map(|ext| {
-                ext.value.general_names.iter().filter_map(|gn| {
-                    if let x509_parser::extensions::GeneralName::DNSName(d) = gn {
-                        Some(d.to_string())
-                    } else {
-                        None
-                    }
-                }).collect::<std::collections::HashSet<_>>()
+                ext.value
+                    .general_names
+                    .iter()
+                    .filter_map(|gn| {
+                        if let x509_parser::extensions::GeneralName::DNSName(d) = gn {
+                            Some(d.to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<std::collections::HashSet<_>>()
             })
             .unwrap_or_default();
 
@@ -347,8 +350,9 @@ mod tests {
     use super::*;
 
     fn write_self_signed_cert(dir: &std::path::Path, san: &[&str], not_after_days: i64) {
-        let mut params = rcgen::CertificateParams::new(san.iter().map(|s| s.to_string()).collect::<Vec<_>>())
-            .expect("params");
+        let mut params =
+            rcgen::CertificateParams::new(san.iter().map(|s| s.to_string()).collect::<Vec<_>>())
+                .expect("params");
 
         let now = jiff::Timestamp::now().to_zoned(jiff::tz::TimeZone::UTC);
         let not_before = now
@@ -381,7 +385,10 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let key_dir = KeyDir::new(dir.path().to_path_buf());
         let domains = vec![CompactString::from("example.com")];
-        assert!(AcmeClient::should_renew(&key_dir, &domains), "missing cert => renew");
+        assert!(
+            AcmeClient::should_renew(&key_dir, &domains),
+            "missing cert => renew"
+        );
     }
 
     #[test]
@@ -404,7 +411,10 @@ mod tests {
         write_self_signed_cert(dir.path(), &["example.com"], 7);
 
         let domains = vec![CompactString::from("example.com")];
-        assert!(AcmeClient::should_renew(&key_dir, &domains), "expiring cert => renew");
+        assert!(
+            AcmeClient::should_renew(&key_dir, &domains),
+            "expiring cert => renew"
+        );
     }
 
     #[test]
