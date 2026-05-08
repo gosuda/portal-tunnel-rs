@@ -23,7 +23,6 @@ pub struct Harness {
     admin_addr: SocketAddr,
     sdk_addr: SocketAddr,
     demo_addr: SocketAddr,
-    #[allow(dead_code)]
     demo_child: Child,
     admin_handle: tokio::task::JoinHandle<()>,
     sdk_handle: tokio::task::JoinHandle<()>,

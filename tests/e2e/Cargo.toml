@@ -8,8 +8,8 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-portal-relay = { path = "../../crates/portal-relay" }
-portal-crypto = { path = "../../crates/portal-crypto", features = ["insecure-test-constructors"] }
+portal-relay = { workspace = true }
+portal-crypto = { workspace = true, features = ["insecure-test-constructors"] }
 tokio = { workspace = true, features = ["full"] }
 axum = { workspace = true }
 serde_json = { workspace = true }
