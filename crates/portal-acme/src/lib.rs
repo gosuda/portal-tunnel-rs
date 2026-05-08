@@ -60,3 +60,6 @@ pub use config::{
 pub use error::{AcmeError, AcmeResult};
 pub use manager::{CertificateHandoff, Manager, Mode, ProviderSelector};
 pub use provider::{DnsProvider, DnsRecord};
+
+mod acme;
+pub use acme::AcmeClient;

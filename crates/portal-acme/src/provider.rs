@@ -27,8 +27,9 @@ pub struct DnsRecord {
 /// DNS provider interface for ACME DNS-01 challenges.
 ///
 /// All methods are async because the underlying cloud APIs are HTTP
-/// REST clients. `trait_variant::make` is used in the impls (not
-/// here) when an explicit `Send` bound is needed.
+/// REST clients. The trait uses explicit `impl Future` return types
+/// (Rust 2024 RPIT in traits) rather than `async fn` so impls can
+/// name the return type when needed.
 pub trait DnsProvider: Send + Sync + 'static {
     /// Provider name for tracing / metrics (`"local"`, `"cloudflare"`,
     /// `"route53"`, `"gcloud"`).

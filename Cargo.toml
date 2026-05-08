@@ -149,6 +149,7 @@ alloy = { version = "2.0", default-features = false, features = ["provider-http"
 # `provider` feature is required for `ProviderEnsExt::resolve_name`; it must be
 # declared as a direct workspace dependency. Consumed by portal-crypto U11.
 alloy-ens = { version = "2.0", features = ["provider"] }
+x509-parser = "0.18"
 
 # Crypto + traits
 k256 = { version = "0.13", features = ["ecdsa"] }

@@ -19,16 +19,21 @@ bon = { workspace = true }
 compact_str = { workspace = true }
 jiff = { workspace = true }
 rand_core = { workspace = true }
+rcgen = { workspace = true, optional = true }
+rustls = { workspace = true }
 secrecy = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "fs", "io-util", "time", "sync"] }
 tokio-util = { workspace = true, features = ["rt"] }
 tracing = { workspace = true }
+x509-parser = { workspace = true }
 zeroize = { workspace = true }
 
+# Core ACME client:
+instant-acme = { workspace = true, features = ["rcgen", "x509-parser"] }
+
 # Per-feature deps:
-rcgen = { workspace = true, optional = true }
 cloudflare = { workspace = true, optional = true }
 aws-sdk-route53 = { workspace = true, optional = true }
 google-cloud-dns-v1 = { workspace = true, optional = true }

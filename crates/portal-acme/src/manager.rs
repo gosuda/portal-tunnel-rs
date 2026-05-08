@@ -1,23 +1,23 @@
 //! `Manager` — top-level lifecycle façade for portal-acme.
 //!
-//! Composes the chosen [`crate::provider::DnsProvider`] with the on-disk persistence
-//! layer ([`crate::persist`]) and the (forthcoming) `instant-acme`
-//! client. Phase 4 Batch 6 ships **only the local-self-signed path**
-//! end-to-end. The DNS providers landed in B3 (Cloudflare), B4
-//! (Route53), and B5 (Google Cloud DNS); the `instant-acme` client
-//! wrapper that wires those providers under
-//! [`Manager::ensure_certificate`] for the three ACME modes is still
-//! pending.
+//! Composes the chosen [`crate::provider::DnsProvider`] with the on-disk
+//! persistence layer ([`crate::persist`]) and the [`crate::acme::AcmeClient`]
+//! wrapper. All four modes — local self-signed and the three ACME cloud
+//! providers (Cloudflare, Route53, Google Cloud DNS) — are wired through
+//! [`Manager::ensure_certificate`].
 //!
 //! Lifecycle (Go reference parity):
-//! - `Manager::new(cfg)` validates config + selects the provider.
+//! - `Manager::new(cfg)` validates config + credentials + selects the mode.
 //! - `Manager::ensure_certificate()` materializes `(fullchain.pem,
 //!   privatekey.pem)` on disk. Local mode generates a self-signed cert;
-//!   ACME mode is deferred.
-//! - `Manager::start(cancel)` spawns the maintenance loop (renew tick
+//!   ACME modes drive the full RFC 8555 order → authz → DNS-01 → finalize
+//!   → certificate flow.
+//! - `Manager::start()` spawns the maintenance loop (renew tick
 //!   24h, DNS resync tick 10m). Local mode loops are a no-op — the
 //!   self-signed cert has 10y validity and the local provider does not
-//!   touch DNS.
+//!   touch DNS. ACME mode renewal and DNS resync are TODO follow-ups.
+//!   The loop owns its `CancellationToken`; callers shut down via
+//!   `Manager::shutdown()`.
 //! - `Manager::shutdown()` cancels and joins.
 //!
 //! Phase 5 (`portal-relay`) consumes this façade by calling
@@ -28,9 +28,8 @@
 //! mode-specific plumbing.
 //!
 //! `PublicIpResolver` is intentionally **not** introduced in this
-//! batch — per R8 minimalism it is deferred until the live ACME flow
-//! (the pending instant-acme client wrapper) needs to publish A
-//! records before solving DNS-01.
+//! batch — per R8 minimalism it is deferred until a later batch needs
+//! to publish A records before solving DNS-01.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -47,24 +46,16 @@ use crate::providers::local::LocalProvider;
 
 /// Mode the manager is configured for.
 ///
-/// Selected at `Manager::new` time from the [`AcmeConfig`]. The
-/// [`Mode::LocalSelfSigned`] path is fully wired end-to-end. The
-/// three ACME modes select between landed DNS providers, but the
-/// dispatch wrapper that drives the instant-acme client through the
-/// chosen provider is still pending — those arms return
-/// [`AcmeError::Config`] until that wrapper lands.
+/// Selected at `Manager::new` time from the [`AcmeConfig`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     /// Local self-signed dev mode (no DNS, no CA contact).
     LocalSelfSigned,
-    /// ACME via Cloudflare DNS-01 (provider landed in B3; awaits
-    /// instant-acme dispatch wrapper).
+    /// ACME via Cloudflare DNS-01.
     AcmeCloudflare,
-    /// ACME via Route53 DNS-01 (provider landed in B4; awaits
-    /// instant-acme dispatch wrapper).
+    /// ACME via Route53 DNS-01.
     AcmeRoute53,
-    /// ACME via Google Cloud DNS-01 (provider landed in B5; awaits
-    /// instant-acme dispatch wrapper).
+    /// ACME via Google Cloud DNS-01.
     AcmeGcloud,
 }
 
@@ -118,7 +109,7 @@ impl Manager {
     /// # Errors
     /// Returns [`AcmeError::Config`] if the config + selector
     /// combination is incompatible (e.g., empty `domains` list for an
-    /// ACME selector).
+    /// ACME selector, or missing credentials for the chosen ACME mode).
     pub fn new(cfg: AcmeConfig, selector: ProviderSelector) -> AcmeResult<Self> {
         if cfg.domains.is_empty() && !matches!(selector, ProviderSelector::Local) {
             return Err(AcmeError::Config(
@@ -127,9 +118,30 @@ impl Manager {
         }
         let mode = match selector {
             ProviderSelector::Local => Mode::LocalSelfSigned,
-            ProviderSelector::Cloudflare => Mode::AcmeCloudflare,
-            ProviderSelector::Route53 => Mode::AcmeRoute53,
-            ProviderSelector::Gcloud => Mode::AcmeGcloud,
+            ProviderSelector::Cloudflare => {
+                if cfg.cloudflare_token.is_none() {
+                    return Err(AcmeError::Config(
+                        "Cloudflare mode requires cloudflare_token".to_owned(),
+                    ));
+                }
+                Mode::AcmeCloudflare
+            }
+            ProviderSelector::Route53 => {
+                if cfg.route53_credentials.is_none() {
+                    return Err(AcmeError::Config(
+                        "Route53 mode requires route53_credentials".to_owned(),
+                    ));
+                }
+                Mode::AcmeRoute53
+            }
+            ProviderSelector::Gcloud => {
+                if cfg.gcloud_service_account.is_none() {
+                    return Err(AcmeError::Config(
+                        "Gcloud mode requires gcloud_service_account".to_owned(),
+                    ));
+                }
+                Mode::AcmeGcloud
+            }
         };
         Ok(Self {
             cfg,
@@ -150,23 +162,19 @@ impl Manager {
     /// Local mode: generate a fresh self-signed cert via
     /// [`LocalProvider`].
     ///
-    /// ACME modes: not yet implemented; returns
-    /// [`AcmeError::Config`] until the instant-acme client wrapper
-    /// lands.
+    /// ACME modes: drive the full RFC 8555 order → authorization →
+    /// DNS-01 → finalize → certificate flow via [`crate::acme::AcmeClient`].
     ///
     /// # Errors
     /// Returns [`AcmeError::Cert`] / [`AcmeError::Io`] on cert
-    /// generation or write failure, or [`AcmeError::Config`] for any
-    /// ACME mode in this batch.
+    /// generation or write failure, or [`AcmeError::Config`] if the
+    /// requested mode is unavailable (missing feature or credential).
     pub async fn ensure_certificate(&self) -> AcmeResult<CertificateHandoff> {
         match self.mode {
             Mode::LocalSelfSigned => self.ensure_certificate_local().await,
-            Mode::AcmeCloudflare | Mode::AcmeRoute53 | Mode::AcmeGcloud => {
-                Err(AcmeError::Config(format!(
-                    "{:?} not implemented; waits on the instant-acme client wrapper",
-                    self.mode,
-                )))
-            }
+            Mode::AcmeCloudflare => self.ensure_certificate_acme_cloudflare().await,
+            Mode::AcmeRoute53 => self.ensure_certificate_acme_route53().await,
+            Mode::AcmeGcloud => self.ensure_certificate_acme_gcloud().await,
         }
     }
 
@@ -200,6 +208,94 @@ impl Manager {
         Err(AcmeError::Config(
             "local-self-signed mode requires the `local` feature".to_owned(),
         ))
+    }
+
+    /// ACME Cloudflare dispatch.
+    #[cfg(feature = "cloudflare")]
+    async fn ensure_certificate_acme_cloudflare(&self) -> AcmeResult<CertificateHandoff> {
+        use crate::providers::cloudflare::CloudflareProvider;
+
+        let Some(token) = self.cfg.cloudflare_token.clone() else {
+            return Err(AcmeError::Config(
+                "Cloudflare mode requires cloudflare_token".to_owned(),
+            ));
+        };
+        let provider = CloudflareProvider::new(token)?;
+        self.ensure_certificate_acme_inner(&provider).await
+    }
+
+    #[cfg(not(feature = "cloudflare"))]
+    async fn ensure_certificate_acme_cloudflare(&self) -> AcmeResult<CertificateHandoff> {
+        Err(AcmeError::Config(
+            "Cloudflare ACME requires the `cloudflare` feature".to_owned(),
+        ))
+    }
+
+    /// ACME Route53 dispatch.
+    #[cfg(feature = "route53")]
+    async fn ensure_certificate_acme_route53(&self) -> AcmeResult<CertificateHandoff> {
+        use crate::providers::route53::Route53Provider;
+
+        let Some(creds) = self.cfg.route53_credentials.clone() else {
+            return Err(AcmeError::Config(
+                "Route53 mode requires route53_credentials".to_owned(),
+            ));
+        };
+        let provider = Route53Provider::new(creds)?;
+        self.ensure_certificate_acme_inner(&provider).await
+    }
+
+    #[cfg(not(feature = "route53"))]
+    async fn ensure_certificate_acme_route53(&self) -> AcmeResult<CertificateHandoff> {
+        Err(AcmeError::Config(
+            "Route53 ACME requires the `route53` feature".to_owned(),
+        ))
+    }
+
+    /// ACME Google Cloud DNS dispatch.
+    #[cfg(feature = "gcloud")]
+    async fn ensure_certificate_acme_gcloud(&self) -> AcmeResult<CertificateHandoff> {
+        use crate::providers::gcloud::GcloudProvider;
+
+        let Some(sa) = self.cfg.gcloud_service_account.clone() else {
+            return Err(AcmeError::Config(
+                "Gcloud mode requires gcloud_service_account".to_owned(),
+            ));
+        };
+        let provider = GcloudProvider::new(sa).await?;
+        self.ensure_certificate_acme_inner(&provider).await
+    }
+
+    #[cfg(not(feature = "gcloud"))]
+    async fn ensure_certificate_acme_gcloud(&self) -> AcmeResult<CertificateHandoff> {
+        Err(AcmeError::Config(
+            "Gcloud ACME requires the `gcloud` feature".to_owned(),
+        ))
+    }
+
+    /// Shared ACME flow for all three cloud providers.
+    async fn ensure_certificate_acme_inner<P: crate::provider::DnsProvider>(
+        &self,
+        provider: &P,
+    ) -> AcmeResult<CertificateHandoff> {
+        use crate::acme::AcmeClient;
+
+        let client = AcmeClient::load_or_register(
+            self.cfg.directory_url.clone(),
+            self.cfg.contact_email.clone(),
+            &self.cfg.key_dir,
+        )
+        .await?;
+
+        client
+            .obtain(&self.cfg.domains, provider, &self.cfg.key_dir)
+            .await?;
+
+        Ok(CertificateHandoff {
+            fullchain: self.cfg.key_dir.0.join("fullchain.pem"),
+            private_key: self.cfg.key_dir.0.join("privatekey.pem"),
+            mode: self.mode,
+        })
     }
 
     /// Spawn the maintenance loop (renew tick 24h + DNS resync 10m).
@@ -267,38 +363,28 @@ impl Manager {
 // `Duration::from_hours` / `Duration::from_mins` are nightly-only
 // (`duration_constructors`) at the workspace's MSRV (1.95). We keep
 // the explicit `from_secs` arithmetic and silence the clippy
-// readability lint inline rather than rewriting around an unstable
-// API. Once the constructors stabilize, drop the allow + switch.
-#[expect(
-    clippy::duration_suboptimal_units,
-    reason = "from_hours/from_mins are nightly-only at MSRV 1.95"
-)]
+// lint via clippy.toml rather than per-call-site allows.
 async fn maintenance_loop(mode: Mode, _key_dir: KeyDir, cancel: CancellationToken) {
-    let mut renew_tick = tokio::time::interval(Duration::from_secs(24 * 60 * 60));
-    let mut dns_tick = tokio::time::interval(Duration::from_secs(10 * 60));
-    // First-tick semantics: skip the immediate fire so the loop only
-    // does work on cadence boundaries, not on spawn.
-    renew_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    dns_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let _ = renew_tick.tick().await;
-    let _ = dns_tick.tick().await;
+    let renew_interval = Duration::from_secs(24 * 60 * 60);
+    let dns_resync_interval = Duration::from_secs(10 * 60);
+
+    let mut renew_tick = tokio::time::interval(renew_interval);
+    let mut dns_tick = tokio::time::interval(dns_resync_interval);
 
     loop {
         tokio::select! {
-            biased;
-            () = cancel.cancelled() => {
-                tracing::debug!(?mode, "acme manager loop cancelled");
-                break;
-            }
+            _ = cancel.cancelled() => break,
             _ = renew_tick.tick() => {
-                tracing::debug!(?mode, "acme manager renew tick");
-                // Local mode: cert has 10y validity; nothing to do.
-                // ACME modes (deferred): inspect cert expiry, re-issue.
+                if matches!(mode, Mode::LocalSelfSigned) {
+                    continue; // 10y validity, no-op
+                }
+                // TODO: renewal check (Phase 4 follow-up)
             }
             _ = dns_tick.tick() => {
-                tracing::debug!(?mode, "acme manager dns tick");
-                // Local mode: provider does not touch DNS.
-                // ACME modes (deferred): re-sync A records.
+                if matches!(mode, Mode::LocalSelfSigned) {
+                    continue; // local provider does not touch DNS
+                }
+                // TODO: DNS resync (Phase 4 follow-up)
             }
         }
     }
@@ -343,7 +429,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ensure_certificate_acme_modes_return_config_error() {
+    async fn acme_modes_rejected_without_credentials() {
         let dir = tempdir().unwrap();
         for selector in [
             ProviderSelector::Cloudflare,
@@ -351,12 +437,13 @@ mod tests {
             ProviderSelector::Gcloud,
         ] {
             let cfg = local_config(dir.path().to_path_buf());
-            let mgr = Manager::new(cfg, selector).unwrap();
-            let result = mgr.ensure_certificate().await;
-            assert!(
-                matches!(result, Err(AcmeError::Config(_))),
-                "{selector:?} must return Config error in B6: {result:?}",
-            );
+            match Manager::new(cfg, selector) {
+                Err(err) => assert!(
+                    matches!(err, AcmeError::Config(_)),
+                    "{selector:?} must reject missing credentials at new()"
+                ),
+                Ok(_) => panic!("{selector:?} must reject missing credentials at new()"),
+            }
         }
     }
 

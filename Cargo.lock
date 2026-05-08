@@ -3289,6 +3289,7 @@ dependencies = [
  "hyper-util",
  "rustls",
  "rustls-native-certs",
+ "rustls-platform-verifier 0.7.0",
  "tokio",
  "tokio-rustls",
  "tower-service",
@@ -3574,6 +3575,33 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "instant-acme"
+version = "0.8.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f05ad37c421b962354c358d347d4a6130151df9407978372d3ad7f0c8f71a64"
+dependencies = [
+ "async-trait",
+ "aws-lc-rs",
+ "base64",
+ "bytes",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "httpdate",
+ "hyper",
+ "hyper-rustls",
+ "hyper-util",
+ "rcgen",
+ "rustls",
+ "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "x509-parser",
 ]
 
 [[package]]
@@ -4480,9 +4508,11 @@ dependencies = [
  "google-cloud-auth",
  "google-cloud-dns-v1",
  "google-cloud-gax",
+ "instant-acme",
  "jiff",
  "rand_core 0.6.4",
  "rcgen",
+ "rustls",
  "secrecy",
  "serde_json",
  "tempfile",
@@ -4492,6 +4522,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "wiremock",
+ "x509-parser",
  "zeroize",
 ]
 

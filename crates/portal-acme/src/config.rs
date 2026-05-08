@@ -14,17 +14,19 @@ use zeroize::Zeroize;
 
 /// Cloudflare API token. Wraps a `SecretBox<String>`-equivalent so an
 /// accidental `{:?}` formatting redacts the token at compile time.
+#[derive(Clone)]
 pub struct CloudflareToken(SecretBox<CloudflareTokenInner>);
 
-#[derive(Default)]
-#[doc(hidden)]
-pub struct CloudflareTokenInner(pub String);
+#[derive(Default, Clone)]
+struct CloudflareTokenInner(String);
 
 impl Zeroize for CloudflareTokenInner {
     fn zeroize(&mut self) {
         self.0.zeroize();
     }
 }
+
+impl secrecy::CloneableSecret for CloudflareTokenInner {}
 
 impl CloudflareToken {
     /// Wrap a token string. The original is moved into a zeroizing
@@ -44,16 +46,13 @@ impl CloudflareToken {
 }
 
 /// Route53 credential pair (access key id + secret access key).
+#[derive(Clone)]
 pub struct Route53Credentials(SecretBox<Route53Inner>);
 
-#[derive(Default)]
-#[doc(hidden)]
-pub struct Route53Inner {
-    /// AWS access key id (public-ish but kept in the same secret box
-    /// so a single newtype carries both halves of the credential pair).
-    pub access_key_id: String,
-    /// AWS secret access key.
-    pub secret_access_key: String,
+#[derive(Default, Clone)]
+struct Route53Inner {
+    access_key_id: String,
+    secret_access_key: String,
 }
 
 impl Zeroize for Route53Inner {
@@ -62,6 +61,8 @@ impl Zeroize for Route53Inner {
         self.secret_access_key.zeroize();
     }
 }
+
+impl secrecy::CloneableSecret for Route53Inner {}
 
 impl Route53Credentials {
     /// Wrap a Route53 access-key pair.
@@ -90,17 +91,19 @@ impl Route53Credentials {
 }
 
 /// Google Cloud service-account JSON, as raw bytes.
+#[derive(Clone)]
 pub struct GcloudServiceAccount(SecretBox<GcloudInner>);
 
-#[derive(Default)]
-#[doc(hidden)]
-pub struct GcloudInner(pub Vec<u8>);
+#[derive(Default, Clone)]
+struct GcloudInner(Vec<u8>);
 
 impl Zeroize for GcloudInner {
     fn zeroize(&mut self) {
         self.0.zeroize();
     }
 }
+
+impl secrecy::CloneableSecret for GcloudInner {}
 
 impl GcloudServiceAccount {
     /// Wrap service-account JSON bytes.
@@ -162,4 +165,10 @@ pub struct AcmeConfig {
     pub domains: Vec<CompactString>,
     /// On-disk key directory for account-key + chain persistence.
     pub key_dir: KeyDir,
+    /// Cloudflare API token (required when using Cloudflare DNS-01).
+    pub cloudflare_token: Option<CloudflareToken>,
+    /// Route53 credential pair (required when using Route53 DNS-01).
+    pub route53_credentials: Option<Route53Credentials>,
+    /// Google Cloud service-account JSON (required when using Cloud DNS).
+    pub gcloud_service_account: Option<GcloudServiceAccount>,
 }
