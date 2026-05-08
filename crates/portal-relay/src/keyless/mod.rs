@@ -32,16 +32,18 @@
 //!   `RoutingContext` (greenfield rename of the Go reference's
 //!   `signrpc::*` shapes) + the SEC-007 [`wire::canonical_signing_input`]
 //!   helper.
-//! - [`policy::KeylessPolicy`] — the four-step SEC-004 validation
-//!   pipeline (known-key id, scheme-algorithm match, payload budget,
-//!   per-tenant rate limit) plus an atomic cardinality cap on the
-//!   per-subject limiter map (memory-DoS guard).
+//! - [`policy::KeylessPolicy`] — the five-step SEC-004 + SEC-015
+//!   validation pipeline (routing-context match, known-key id,
+//!   scheme-algorithm match, payload budget, per-tenant rate limit)
+//!   plus an atomic cardinality cap on the per-subject limiter map
+//!   (memory-DoS guard).
 //! - [`api::build_keyless_router`] — the axum `Router` mount + sign
 //!   handler.  The mTLS [`rustls::ServerConfig`] is constructed
 //!   locally inside `keyless::api` and never aliased into
 //!   `state/` or `listeners/` (R2 trust-boundary discipline).
 //!
-//! - U4 (deferred): SEC-015 routing-context refuse-to-sign guard.
+//! Batch 2 second half (U4) shipped the SEC-015 routing-context
+//! refuse-to-sign guard in [`policy::KeylessPolicy::validate`] Step 0.
 //!
 //! ## Trust-boundary discipline (R2)
 //!

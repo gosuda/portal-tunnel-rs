@@ -67,8 +67,17 @@
 //!   bootstrap stays strict). HTTPS-listener mounting, full
 //!   multi-source figment chain (TOML + layered defaults), and
 //!   combined single-file format remain B8 territory.
-//! - **Batches 8 + 10 fully pending**: hot-reload consumer wiring +
-//!   keyless I/O wiring; Admin View + R15 Status TUI.
+//! - **Batch 8 landed**: [`reload::ReloadHandle`] primitive with
+//!   trust-boundary diff + atomic swap, integration tests, and the
+//!   `cfg(feature = "config_file_watch")` file-watcher task are
+//!   complete. Consumer wiring (`PolicyRuntime`, SDK rate-limit layer,
+//!   `ReputationEngine` hot-swap trigger) is documented as follow-up
+//!   but not stubbed. Keyless U1-U4 are fully shipped.
+//! - **Batch 10 landed**: [`admin::Action`], [`admin::ApprovalMode`],
+//!   and [`admin::View`] trait are complete. [`tui::StatusView`]
+//!   renderer + [`tui::run_with_terminal`] watch loop are implemented
+//!   and tested. The backend-free [`tui::run`] stub and server-side
+//!   TUI launcher wiring remain follow-up work.
 //!
 //! Module-level rustdocs name the per-module deferral state where one
 //! applies.
