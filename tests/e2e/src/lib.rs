@@ -4,7 +4,7 @@
 //! and SDK trust-boundary routers on ephemeral TCP listeners,
 //! and spawns the `portal-demo` binary as a downstream target.
 //! The full expose round-trip is blocked on `portal-sdk::expose`
-//! (Phase 6a U6); tests for that path are `#[ignore]`.
+//! (Phase 6a U6).
 
 use std::net::SocketAddr;
 use std::process::Stdio;
