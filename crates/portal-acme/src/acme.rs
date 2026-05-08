@@ -18,7 +18,6 @@ use crate::persist::write_atomic_with_mode;
 use crate::provider::{DnsProvider, DnsRecord};
 
 /// File names for on-disk persistence.
-const ACCOUNT_KEY_FILE: &str = "acme-account.key";
 const REGISTRATION_FILE: &str = "acme-registration.json";
 const FULLCHAIN_FILE: &str = "fullchain.pem";
 const PRIVATE_KEY_FILE: &str = "privatekey.pem";
