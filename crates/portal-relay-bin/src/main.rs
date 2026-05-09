@@ -68,6 +68,7 @@ use portal_acme::{AcmeConfig, DirectoryUrl, KeyDir, Manager as AcmeManager, Prov
 use portal_relay::Server;
 use portal_relay::policy::{PolicyRuntime, ReputationEngine};
 use portal_relay::state::LeaseRegistry;
+use portal_relay::state::identity::{IdentityPaths, load_relay_protocol_only};
 use portal_relay::tui::run_with_terminal;
 use portal_relay_bin::ENV_PREFIX;
 use portal_relay_bin::init::{InitArgs, run_init};
@@ -279,6 +280,19 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
         mode = ?handoff.mode,
         "TLS material ready",
     );
+
+    // Load relay protocol identity key (Phase 5 SDK-API S2).
+    // Loaded BEFORE any background tasks start so a missing-key
+    // failure exits cleanly without leaking spawned tasks.
+    let identity_paths = IdentityPaths::new(args.state_dir.join("identity"));
+    let relay_protocol_key = load_relay_protocol_only(&identity_paths)
+        .await
+        .context("load relay protocol identity key")?;
+    tracing::info!(
+        relay_protocol_path = %identity_paths.relay_protocol().display(),
+        "relay protocol identity loaded; SDK router can issue/verify lease tokens",
+    );
+
     acme_mgr
         .start()
         .await
@@ -378,7 +392,9 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
     };
     let server = server
         .with_reputation_engine(reputation_engine.clone())
-        .with_reputation_persistence(reputation_engine, reputation_path);
+        .with_reputation_persistence(reputation_engine, reputation_path)
+        .with_relay_protocol_key(relay_protocol_key);
+
     server.start().await.context("start relay server")?;
     let status = server.status().await;
     tracing::info!(?status, "relay server started");
