@@ -189,6 +189,7 @@ smoltcp = { workspace = true, features = [
     "socket-udp",
     "socket-tcp",
 ] }
+x509-cert = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
