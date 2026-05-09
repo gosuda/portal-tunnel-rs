@@ -62,6 +62,9 @@ serde_json = { workspace = true }
 # `include_str!` and parsed lazily at program start via `OnceLock`.
 toml = { workspace = true }
 
+# Keyless mTLS oracle (Phase 6b/A) — RootCertStore + SigningKey trait.
+rustls = { workspace = true }
+
 [dev-dependencies]
 # Phase 5 B8 follow-up (`tests/load_bundle_with_env.rs`): the binary-
 # level env-overlay integration tests use `figment::Jail` for scoped

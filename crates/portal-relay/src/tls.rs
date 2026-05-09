@@ -80,7 +80,8 @@ pub fn build_server_config_from_acme_handoff(
     Ok(cfg)
 }
 
-fn read_cert_chain(path: &Path) -> Result<Vec<CertificateDer<'static>>, TlsBuildError> {
+/// Read a PEM-encoded certificate chain from `path`.
+pub fn read_cert_chain(path: &Path) -> Result<Vec<CertificateDer<'static>>, TlsBuildError> {
     let pem_bytes = fs::read(path).map_err(|e| TlsBuildError::Io {
         path: path.display().to_string(),
         source: e,
@@ -94,7 +95,8 @@ fn read_cert_chain(path: &Path) -> Result<Vec<CertificateDer<'static>>, TlsBuild
     Ok(certs)
 }
 
-fn read_private_key(path: &Path) -> Result<PrivateKeyDer<'static>, TlsBuildError> {
+/// Read a PEM-encoded private key from `path`.
+pub fn read_private_key(path: &Path) -> Result<PrivateKeyDer<'static>, TlsBuildError> {
     let pem_bytes = fs::read(path).map_err(|e| TlsBuildError::Io {
         path: path.display().to_string(),
         source: e,

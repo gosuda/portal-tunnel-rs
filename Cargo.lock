@@ -4669,6 +4669,7 @@ dependencies = [
  "portal-relay",
  "ratatui",
  "ratatui-crossterm",
+ "rustls",
  "serde",
  "serde_json",
  "tempfile",

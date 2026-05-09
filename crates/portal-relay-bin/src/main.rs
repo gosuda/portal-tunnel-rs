@@ -66,7 +66,14 @@ use compact_str::CompactString;
 use eyre::{Context as _, eyre};
 use portal_acme::{AcmeConfig, DirectoryUrl, KeyDir, Manager as AcmeManager, ProviderSelector};
 use portal_relay::Server;
+use portal_relay::keyless::{
+    Bridge, BridgeConfig, KeylessApiState, KeylessPolicy, KeylessSignerAdapter, KnownKey,
+    build_keyless_router, build_keyless_server_config, load_keyless_signing_key,
+    subject_from_extension,
+};
 use portal_relay::policy::{PolicyRuntime, ReputationEngine};
+use rustls::RootCertStore;
+use rustls::sign::SigningKey;
 use portal_relay::state::LeaseRegistry;
 use portal_relay::state::identity::{IdentityPaths, load_relay_protocol_only};
 use portal_relay::tui::run_with_terminal;
@@ -446,6 +453,30 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
 
     tracing::info!(port = args.api_port, "API HTTPS listener spawned");
 
+    // 4.5 Optional keyless mTLS oracle listener (best-effort).
+    //
+    // If the operator has placed keyless material on disk, spin up
+    // the bounded bridge + mTLS listener.  Any setup failure is
+    // logged and skipped — `serve` must never abort because keyless
+    // files are missing or malformed.
+    let keyless_handles: Option<(tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>)> =
+        match try_start_keyless_listener(&args.state_dir, args.keyless_port, cancel.clone()).await {
+            Ok(Some(handles)) => {
+                tracing::info!(port = args.keyless_port, "keyless mTLS listener spawned");
+                Some(handles)
+            }
+            Ok(None) => {
+                tracing::info!(
+                    "keyless mTLS listener not started — missing or unreadable keyless material"
+                );
+                None
+            }
+            Err(err) => {
+                tracing::warn!(error = %err, "keyless mTLS listener setup failed; continuing without keyless");
+                None
+            }
+        };
+
     install_signal_handler(cancel.clone());
     cancel.cancelled().await;
     tracing::info!("shutdown signal received");
@@ -455,6 +486,18 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
     api_handle.abort();
     let _ = api_handle.await;
     tracing::info!("API listener task drained");
+
+    // Abort keyless tasks (listener + bridge supervisor pool) before
+    // draining the server so the bridge does not outlive the server
+    // shutdown.
+    if let Some((listener_handle, bridge_handle)) = keyless_handles {
+        listener_handle.abort();
+        let _ = listener_handle.await;
+        tracing::info!("keyless listener task drained");
+        bridge_handle.abort();
+        let _ = bridge_handle.await;
+        tracing::info!("keyless bridge supervisor pool drained");
+    }
 
     // 5. Drain.
     //
@@ -539,6 +582,223 @@ async fn wait_for_shutdown_signal() {
             tracing::info!("Ctrl+C received");
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Keyless mTLS oracle listener — best-effort setup
+// ---------------------------------------------------------------------------
+
+/// Try to start the keyless mTLS listener.
+///
+/// Looks for four files under `state_dir/keyless/`:
+/// - `client_ca.pem` — pinned tenant CA bundle (must be non-empty).
+/// - `server_cert.pem` — keyless surface's own server certificate.
+/// - `server_key.pem` — keyless surface's own server private key.
+/// - `signing_key.pem` — keyless signing key (the key the bridge signs with).
+///
+/// If any file is missing, returns `Ok(None)` so the caller can log
+/// and continue.  Any load or validation error is returned as `Err`
+/// so the caller can warn and continue without keyless.
+#[expect(
+    clippy::too_many_lines,
+    reason = "keyless listener setup composes PEM load + rustls config + bridge spawn + router build in a strict ordered prologue"
+)]
+async fn try_start_keyless_listener(
+    state_dir: &std::path::Path,
+    keyless_port: u16,
+    cancel: CancellationToken,
+) -> eyre::Result<Option<(tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>)>> {
+    let keyless_dir = state_dir.join("keyless");
+    let client_ca_path = keyless_dir.join("client_ca.pem");
+    let server_cert_path = keyless_dir.join("server_cert.pem");
+    let server_key_path = keyless_dir.join("server_key.pem");
+    let signing_key_path = keyless_dir.join("signing_key.pem");
+
+    // All four files must exist; if any are missing, treat as "not
+    // configured" and skip silently.
+    for path in [
+        &client_ca_path,
+        &server_cert_path,
+        &server_key_path,
+        &signing_key_path,
+    ] {
+        if !path.exists() {
+            tracing::debug!(path = %path.display(), "keyless material missing; skipping keyless listener");
+            return Ok(None);
+        }
+    }
+
+    // Load PEM material using the same helpers the API TLS path uses.
+    let client_ca_certs =
+        portal_relay::tls::read_cert_chain(&client_ca_path).map_err(|e| {
+            eyre::eyre!(
+                "failed to read keyless client CA {}: {e}",
+                client_ca_path.display()
+            )
+        })?;
+    if client_ca_certs.is_empty() {
+        return Err(eyre::eyre!(
+            "keyless client CA {} contains no certificates",
+            client_ca_path.display()
+        ));
+    }
+
+    let server_cert_chain =
+        portal_relay::tls::read_cert_chain(&server_cert_path).map_err(|e| {
+            eyre::eyre!(
+                "failed to read keyless server cert {}: {e}",
+                server_cert_path.display()
+            )
+        })?;
+    if server_cert_chain.is_empty() {
+        return Err(eyre::eyre!(
+            "keyless server cert {} contains no certificates",
+            server_cert_path.display()
+        ));
+    }
+
+    let server_private_key =
+        portal_relay::tls::read_private_key(&server_key_path).map_err(|e| {
+            eyre::eyre!(
+                "failed to read keyless server key {}: {e}",
+                server_key_path.display()
+            )
+        })?;
+
+    // Build the mTLS-enabled rustls ServerConfig.
+    let mut client_roots = RootCertStore::empty();
+    for cert in client_ca_certs {
+        client_roots.add(cert).map_err(|e| {
+            eyre::eyre!("failed to add keyless client CA to root store: {e}")
+        })?;
+    }
+    let keyless_tls_cfg = build_keyless_server_config(
+        client_roots,
+        server_cert_chain,
+        server_private_key,
+    )
+    .map_err(|e| eyre::eyre!("failed to build keyless server config: {e}"))?;
+
+    // Load the keyless signing key (the key the bridge will sign with).
+    let signing_key_pem = tokio::fs::read(&signing_key_path)
+        .await
+        .map_err(|e| {
+            eyre::eyre!(
+                "failed to read keyless signing key {}: {e}",
+                signing_key_path.display()
+            )
+        })?;
+    let keyless_signing_key = load_keyless_signing_key(&signing_key_pem).map_err(|e| {
+        eyre::eyre!(
+            "failed to load keyless signing key from {}: {e}",
+            signing_key_path.display()
+        )
+    })?;
+
+    // Build the signer adapter and policy.
+    let signer_adapter =
+        KeylessSignerAdapter::from_keyless_signing_key(keyless_signing_key).map_err(|e| {
+            eyre::eyre!("failed to construct keyless signer adapter: {e}")
+        })?;
+    let algorithm = signer_adapter.algorithm();
+    let signing_key_arc: Arc<dyn rustls::sign::SigningKey> = Arc::new(signer_adapter);
+
+    let policy = KeylessPolicy::new();
+    // The policy stores the raw KeylessSigningKey for lookup; we keep
+    // a separate Arc to the KeylessSigningKey loaded earlier.  Since
+    // the adapter consumed the key, we reload it from PEM (small,
+    // cheap — key is a few KiB).  This keeps the policy's known_keys
+    // map holding the correct type while the bridge holds the trait
+    // object.
+    let signing_key_pem_reload = tokio::fs::read(&signing_key_path)
+        .await
+        .map_err(|e| {
+            eyre::eyre!(
+                "failed to re-read keyless signing key {}: {e}",
+                signing_key_path.display()
+            )
+        })?;
+    let keyless_signing_key_reload = load_keyless_signing_key(&signing_key_pem_reload).map_err(|e| {
+        eyre::eyre!(
+            "failed to reload keyless signing key from {}: {e}",
+            signing_key_path.display()
+        )
+    })?;
+    let known = KnownKey::new(Arc::new(keyless_signing_key_reload), algorithm);
+    policy.register_key("default", known);
+
+    // Spawn a single Bridge on a local JoinSet, capture its handle,
+    // then move the Bridge into the axum state so requests target
+    // the same supervisors.
+    let bridge_cancel = cancel.clone();
+    let bridge_signing_key = Arc::clone(&signing_key_arc);
+    let (bridge_tx, bridge_rx) = tokio::sync::oneshot::channel::<Bridge>();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "R9: top-of-main runtime entry — keyless bridge supervisor pool driver"
+    )]
+    let bridge_handle = tokio::task::spawn(async move {
+        let mut joinset = tokio::task::JoinSet::new();
+        let bridge = Bridge::spawn(
+            bridge_signing_key,
+            BridgeConfig::workspace_default(),
+            &mut joinset,
+            bridge_cancel.clone(),
+        );
+        let _ = bridge_tx.send(bridge);
+        // Drive the JoinSet until cancellation.
+        loop {
+            tokio::select! {
+                biased;
+                () = bridge_cancel.cancelled() => break,
+                res = joinset.join_next() => {
+                    if res.is_none() {
+                        break;
+                    }
+                }
+            }
+        }
+        // Drain any remaining supervisors so their blocking tasks finish.
+        while let Some(_res) = joinset.join_next().await {}
+    });
+
+    let bridge = bridge_rx.await.map_err(|_| eyre::eyre!("bridge oneshot dropped before send"))?;
+
+    // Build router + listener.
+    let keyless_state = KeylessApiState {
+        policy,
+        bridge,
+        subject_extractor: subject_from_extension,
+    };
+    let keyless_router = build_keyless_router(keyless_state);
+
+    let listener = portal_relay::listeners::bind_dual_stack_tcp(
+        std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+        keyless_port,
+        false,
+    )
+    .await
+    .map_err(|e| eyre::eyre!("failed to bind keyless listener on port {keyless_port}: {e}"))?;
+
+    let listener_cancel = cancel.clone();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "R9: top-of-main runtime entry — keyless mTLS listener accept loop"
+    )]
+    let listener_handle = tokio::spawn(async move {
+        if let Err(e) = portal_relay::listeners::serve_mtls_router(
+            listener,
+            keyless_tls_cfg,
+            keyless_router,
+            listener_cancel,
+        )
+        .await
+        {
+            tracing::error!(error = %e, "keyless listener error");
+        }
+    });
+
+    Ok(Some((listener_handle, bridge_handle)))
 }
 
 #[cfg(test)]
