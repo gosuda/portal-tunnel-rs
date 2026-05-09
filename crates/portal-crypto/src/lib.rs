@@ -51,7 +51,9 @@ pub(crate) mod siwe;
 pub use api_https::signing_key as api_https_signing_key;
 #[cfg(feature = "rustls-integration")]
 pub use api_https::{ApiHttpsKey, load_api_https_key};
-pub use ed25519::key::{RelayEd25519Key, load_relay_ed25519_key, verifying_key};
+pub use ed25519::key::{
+    RelayEd25519Key, generate_relay_ed25519_key, load_relay_ed25519_key, verifying_key,
+};
 pub use ed25519::sign::Ed25519Signer;
 pub use ed25519::verify::Ed25519Verifier;
 pub use ens::{

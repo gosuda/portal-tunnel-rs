@@ -33,6 +33,9 @@
 
 pub mod error;
 pub mod events;
+pub mod expose;
+pub mod identity;
+pub mod listener;
 pub mod mitm;
 pub mod picker;
 pub mod relay_set;
@@ -41,6 +44,12 @@ pub use error::{SdkError, SdkResult};
 pub use events::{
     DEFAULT_EVENT_CHANNEL_CAPACITY, TunnelEvent, TunnelState, channel, channel_with_capacity,
 };
+pub use expose::{ExposeConfig, ExposeSession};
+pub use identity::{
+    ProtocolKey, generate_protocol_key, load_protocol_key, load_tenant_key, protocol_pubkey,
+    tenant_public_key,
+};
+pub use listener::Listener;
 pub use mitm::{MitmError, PROBE_EKM_LEN, derive_probe_ekm};
 pub use picker::{PickerConstraints, pick_relays};
 pub use relay_set::{AsnBin, MetadataProvenance, RelayCandidate, RelayMetadata, RelaySet};

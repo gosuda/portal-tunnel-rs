@@ -13,6 +13,7 @@
 //! [`RelayEd25519Key::signing_key`].  The reconstruction is cheap (one scalar
 //! multiply) and only happens inside signing operations.
 
+use rand_core::{OsRng, RngCore};
 use secrecy::{ExposeSecret, SecretBox};
 use serde::Deserialize;
 use zeroize::{Zeroize, Zeroizing};
@@ -116,6 +117,24 @@ pub fn load_relay_ed25519_key(
     // `seed` is `Zeroizing<[u8; 32]>` — wiped on drop.
     let seed =
         decode_hex_exact::<32>(&raw.ed25519_secret_key).map_err(PortalCryptoError::Ed25519)?;
+    Ok(SecretBox::new(Box::new(RelayEd25519Key(seed))))
+}
+
+/// Generate a fresh cryptographically-random ed25519 protocol-identity key.
+///
+/// The seed is drawn from [`rand_core::OsRng`] and immediately wrapped in
+/// `secrecy::SecretBox`.  Callers (relay or SDK) own the resulting key
+/// and are responsible for persisting it if the identity must survive
+/// process restart.
+///
+/// # Errors
+///
+/// Returns [`PortalCryptoError::Ed25519`] on RNG failure (extremely rare).
+pub fn generate_relay_ed25519_key() -> Result<SecretBox<RelayEd25519Key>, PortalCryptoError> {
+    let mut seed = Zeroizing::new([0u8; 32]);
+    OsRng
+        .try_fill_bytes(&mut *seed)
+        .map_err(|e| PortalCryptoError::Ed25519(format!("rng failure: {e}")))?;
     Ok(SecretBox::new(Box::new(RelayEd25519Key(seed))))
 }
 

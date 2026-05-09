@@ -24,5 +24,8 @@ pub use quic::{
     AcceptedStream, Endpoint, EndpointRole, InboundStream, SdkAcceptor, SpkiPinVerifier,
     TcpProxyKind,
 };
+// Re-export quinn so downstream crates that consume `SdkAcceptor` or
+// `Endpoint::connect` do not need to add a direct `quinn` dependency.
+pub use quinn;
 pub use tcp::TcpPortRelay;
 pub use udp::{DatagramClient, DatagramSession, UdpRelay};

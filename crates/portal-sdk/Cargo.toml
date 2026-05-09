@@ -8,20 +8,33 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-# Cross-crate (Phase 1/3 outputs)
+# Cross-crate (Phase 1/2/3 outputs)
+portal-crypto = { workspace = true }
 portal-net = { workspace = true }
 portal-wire = { workspace = true }
 
 # Async runtime
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+tokio-util = { workspace = true, features = ["rt"] }
 
 # Domain primitives
+base64 = { workspace = true }
 compact_str = { workspace = true }
 jiff = { workspace = true }
+
+# Secrets (SecretBox wrapping for key material)
+secrecy = { workspace = true }
+
+# k256 — required by `identity::tenant_public_key` which exposes the
+# secp256k1 public-key type in the SDK surface.
+k256 = { workspace = true }
 
 # Errors + tracing
 thiserror = { workspace = true }
 tracing = { workspace = true }
+
+# HTTP client for relay API (register-challenge + register)
+reqwest = { workspace = true }
 
 # TLS — required for the RFC 5705 EKM exporter helper in `mitm.rs`.
 # Pulled from the workspace pin (rustls 0.23 + aws_lc_rs provider per R13).

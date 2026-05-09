@@ -51,6 +51,9 @@ http-body-util = "0.1"
 hyper = { version = "1", features = ["full"] }
 hyper-util = { version = "0.1", features = ["tokio", "server-auto", "service"] }
 iri-string = "0.7"
+# HTTP client for SDK relay API calls (register-challenge + register).
+# default-features=false avoids native-tls; rustls-tls aligns with R13.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 tower = "0.5"
 # Async TLS (server + client) layered on rustls — used by the keyless mTLS
 # integration test (Phase 6b/A U3) and any future tenant-TLS surfaces that
