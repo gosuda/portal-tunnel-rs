@@ -62,6 +62,7 @@ use tokio::io::AsyncWriteExt as _;
 
 use crate::api::envelope::{ApiDataEnvelope, ApiError, ApiErrorCode, ok};
 use crate::api::state::SdkState;
+use crate::policy::reputation::{BlockReason, ReputationDecision, SignalKind};
 use crate::state::challenge::{
     RegisterChallengeRequest as InnerRegisterChallengeRequest,
     RegisterRequest as InnerRegisterRequest,
@@ -251,6 +252,7 @@ pub use portal_wire::api::RegisterChallengeResponse as RegisterChallengeResponse
 ///   ([`crate::state::REGISTER_CHALLENGE_PER_IP_CAP`]) exceeded.
 /// - 503 `feature_unavailable` — `hop_token != ""` (v0.1 hop is
 ///   genuinely unimplemented).
+#[expect(clippy::too_many_lines, reason = "handler orchestration: body decode → identity decode → IP extraction → banned check → reputation check → transport validation → domain resolution → challenge issue")]
 #[tracing::instrument(
     name = "sdk.register_challenge",
     skip_all,
@@ -279,7 +281,13 @@ pub async fn register_challenge_handler(
         )
     })?;
 
-    // 2. Extract the canonicalized client IP (R12) via the policy
+    // 2. Decode the wire-shape bytes early so the identity is available
+    //    for the reputation check before the challenge is issued.
+    let eth_address = decode_eth_address(&req.eth_address)?;
+    let ed25519_pk = decode_ed25519_pk(&req.ed25519_pk)?;
+    let identity = IdentityKey(ed25519_pk);
+
+    // 3. Extract the canonicalized client IP (R12) via the policy
     //    runtime's `ProxyTrust` chain. Only the legacy
     //    `X-Forwarded-For` and `X-Real-IP` headers are consulted —
     //    `ProxyTrust::extract_client_ip` does not parse the RFC 7239
@@ -297,12 +305,28 @@ pub async fn register_challenge_handler(
         .extract_client_ip(remote_addr, xff, real_ip);
     tracing::Span::current().record("client_ip", tracing::field::display(client_ip));
 
-    // 3. Banned-IP check.
+    // 4. Banned-IP check.
     if state.policy.is_ip_banned(client_ip) {
         return Err(ApiError::new(ApiErrorCode::IpBanned, "source ip is banned"));
     }
 
-    // 4. Transport-flag validation.
+    // 5. Reputation check.
+    let decision = state.engine.decide(identity, client_ip, &CompactString::default());
+    tracing::Span::current().record("reputation_decision", decision.label());
+    match decision {
+        ReputationDecision::Allow => {}
+        ReputationDecision::Backpressure(d) => tokio::time::sleep(d).await,
+        ReputationDecision::Block(reason) => {
+            state.engine.record_signal_default(identity, SignalKind::BlockedRequest);
+            let code = match reason {
+                BlockReason::RateLimited => ApiErrorCode::RateLimited,
+                BlockReason::ReputationExceeded => ApiErrorCode::LeaseRejected,
+            };
+            return Err(ApiError::new(code, format!("reputation: {reason}")));
+        }
+    }
+
+    // 6. Transport-flag validation.
     let hop_token = req.hop_token.trim();
     let has_hop = !hop_token.is_empty();
     if has_hop {
@@ -319,7 +343,7 @@ pub async fn register_challenge_handler(
         ));
     }
 
-    // 5. Domain resolution (Path A — Host header required). Validate
+    // 7. Domain resolution (Path A — Host header required). Validate
     //    as `Host = uri-host [":" port]` (no userinfo) before any
     //    string-formatting so a malformed Host returns 400.
     let host = headers
@@ -348,9 +372,7 @@ pub async fn register_challenge_handler(
     let siwe_domain = authority.host();
     let register_uri = format!("https://{}/v1/sdk/register", authority.as_str());
 
-    // 6. Decode the wire-shape bytes for the inner challenge request.
-    let eth_address = decode_eth_address(&req.eth_address)?;
-    let ed25519_pk = decode_ed25519_pk(&req.ed25519_pk)?;
+    // 8. Decode the remaining wire-shape bytes for the inner challenge request.
     let reported_ip = match req.reported_ip.as_deref().map(str::trim) {
         Some("") | None => None,
         Some(s) => Some(s.parse::<IpAddr>().map_err(|err| {
@@ -366,7 +388,7 @@ pub async fn register_challenge_handler(
         reported_ip,
     };
 
-    // 7. Issue the challenge.
+    // 9. Issue the challenge.
     let resp = state
         .leases
         .issue_register_challenge(
@@ -481,6 +503,7 @@ pub use portal_wire::api::RegisterResponse as RegisterResponseBody;
 /// effectively log `(client_ip, identity)` pairs for every register
 /// call. Operators MAY redact one or the other in their tracing
 /// subscriber if log retention or privacy policy requires it.
+#[expect(clippy::too_many_lines, reason = "handler orchestration: body decode → IP extraction → banned check → SIWE decode → challenge consume → reputation check → token mint → lease register → ENS round-trip")]
 #[tracing::instrument(
     name = "sdk.register",
     skip_all,
@@ -556,6 +579,29 @@ pub async fn register_handler(
     //    ed25519 protocol pubkey.
     let identity = IdentityKey(verified.ed25519_pk.to_bytes());
     tracing::Span::current().record("identity", tracing::field::display(hex_lower(&identity.0)));
+
+    // 7a. Reputation check (after challenge consumption so identity is
+    //     known, before lease creation so a blocked tenant cannot mint
+    //     a live lease).
+    let decision = state
+        .engine
+        .decide(identity, client_ip, &verified.hostname);
+    tracing::Span::current().record("reputation_decision", decision.label());
+    match decision {
+        ReputationDecision::Allow => {}
+        ReputationDecision::Backpressure(d) => tokio::time::sleep(d).await,
+        ReputationDecision::Block(reason) => {
+            state
+                .engine
+                .record_signal_default(identity, SignalKind::BlockedRequest);
+            let code = match reason {
+                BlockReason::RateLimited => ApiErrorCode::RateLimited,
+                BlockReason::ReputationExceeded => ApiErrorCode::LeaseRejected,
+            };
+            return Err(ApiError::new(code, format!("reputation: {reason}")));
+        }
+    }
+
     let now = Timestamp::now();
     let expires_at = now.checked_add(LEASE_DEFAULT_TTL).unwrap_or(Timestamp::MAX);
 
@@ -689,12 +735,30 @@ pub async fn connect_handler(
         return Err(ApiError::new(ApiErrorCode::IpBanned, "source ip is banned"));
     }
 
-    let _lease = state.leases.lookup_by_identity(identity).ok_or_else(|| {
+    let lease = state.leases.lookup_by_identity(identity).ok_or_else(|| {
         ApiError::new(
             ApiErrorCode::LeaseNotFound,
             "lease not found for verified identity",
         )
     })?;
+
+    // Reputation check (after lease lookup so the lease ID is available).
+    let decision = state.engine.decide(identity, client_ip, &lease.hostname);
+    tracing::Span::current().record("reputation_decision", decision.label());
+    match decision {
+        ReputationDecision::Allow => {}
+        ReputationDecision::Backpressure(d) => tokio::time::sleep(d).await,
+        ReputationDecision::Block(reason) => {
+            state
+                .engine
+                .record_signal_default(identity, SignalKind::BlockedRequest);
+            let code = match reason {
+                BlockReason::RateLimited => ApiErrorCode::RateLimited,
+                BlockReason::ReputationExceeded => ApiErrorCode::LeaseRejected,
+            };
+            return Err(ApiError::new(code, format!("reputation: {reason}")));
+        }
+    }
 
     if req.version() != Version::HTTP_11 {
         return Err(ApiError::new(
