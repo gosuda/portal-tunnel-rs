@@ -199,6 +199,7 @@ fn reload_emits_swapped_fields_in_audit_event() {
         .with_current_span(false)
         .with_span_list(false)
         .without_time()
+        .with_max_level(tracing::Level::INFO)
         .finish();
 
     let mut next = RuntimeConfig::default();
