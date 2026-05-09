@@ -76,7 +76,7 @@ use tokio::sync::{Mutex, watch};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
-use crate::api::{AdminState, SdkState};
+use crate::api::{AdminState, SdkState, DiscoveryState};
 use crate::error::RelayResult;
 use crate::policy::{PolicyRuntime, REPUTATION_PERSIST_INTERVAL, ReputationEngine};
 use crate::reload::ReloadHandle;
@@ -725,6 +725,18 @@ impl Server {
         }
     }
 
+    /// Build the [`DiscoveryState`] consumed by
+    /// [`crate::api::build_discovery_router`]. Canonical bridge between
+    /// server orchestration and the discovery axum router: the bin
+    /// crate constructs the `Server` and then asks for a
+    /// `DiscoveryState` to hand to the router builder.
+    #[must_use]
+    pub fn discovery_state(&self) -> DiscoveryState {
+        DiscoveryState {
+            leases: self.leases(),
+        }
+    }
+
     /// Hand the assembled admin [`axum::Router`] off for listener
     /// mounting. Canonical orchestrator-to-router bridge: future
     /// HTTPS listener wiring (admin trust-boundary) calls through
@@ -772,6 +784,70 @@ impl Server {
     )]
     pub fn admin_router(&self) -> axum::Router {
         crate::api::build_admin_router(self.admin_state())
+    }
+
+    /// Hand the assembled discovery [`axum::Router`] off for listener
+    /// mounting. Canonical orchestrator-to-router bridge: future
+    /// HTTPS listener wiring (discovery trust-boundary) calls through
+    /// this single entry point rather than reaching for
+    /// [`Self::discovery_state`] + [`crate::api::build_discovery_router`]
+    /// independently at every mount site.
+    ///
+    /// # Lifecycle
+    ///
+    /// Callable at any time. [`Self::discovery_state`] is a cheap
+    /// reader (cloning `LeaseRegistry` only); [`crate::api::build_discovery_router`]
+    /// is `axum::Router::new().route(...).with_state(...)` shape —
+    /// no I/O, no state-dependent allocation. Calling before
+    /// [`Self::start`] or after [`Self::shutdown`] is fine.
+    ///
+    /// # Endpoint contract
+    ///
+    /// The returned router responds to the discovery endpoint:
+    ///
+    /// - `GET /v1/discovery/leases` — lists all active leases;
+    ///   always 200, empty array when no leases are registered.
+    #[must_use]
+    #[expect(
+        clippy::double_must_use,
+        reason = "wrapper-fn boundary contract: `axum::Router` is `#[must_use]` \
+                  but the orchestrator-to-router bridge re-affirms it here, \
+                  matching the discipline on `crate::api::build_discovery_router`"
+    )]
+    pub fn discovery_router(&self) -> axum::Router {
+        crate::api::build_discovery_router(self.discovery_state())
+    }
+
+    /// Hand the assembled SDK [`axum::Router`] off for listener
+    /// mounting. Canonical orchestrator-to-router bridge: future
+    /// HTTPS listener wiring (SDK trust-boundary) calls through
+    /// this single entry point rather than reaching for
+    /// [`Self::sdk_state`] + [`crate::api::build_sdk_router`]
+    /// independently at every mount site.
+    ///
+    /// # Lifecycle
+    ///
+    /// Callable at any time. [`Self::sdk_state`] is a cheap
+    /// reader; [`crate::api::build_sdk_router`]
+    /// is `axum::Router::new().route(...).with_state(...)` shape —
+    /// no I/O, no state-dependent allocation. Calling before
+    /// [`Self::start`] or after [`Self::shutdown`] is fine.
+    ///
+    /// # Panics
+    ///
+    /// Panics with a clear message when either
+    /// [`Self::with_reputation_engine`] or
+    /// [`Self::with_relay_protocol_key`] has not been called.
+    /// See [`Self::sdk_state`] for the precondition contract.
+    #[must_use]
+    #[expect(
+        clippy::double_must_use,
+        reason = "wrapper-fn boundary contract: `axum::Router` is `#[must_use]` \
+                  but the orchestrator-to-router bridge re-affirms it here, \
+                  matching the discipline on `crate::api::build_sdk_router`"
+    )]
+    pub fn sdk_router(&self) -> axum::Router {
+        crate::api::build_sdk_router(self.sdk_state())
     }
 
     /// Spawn the janitor task. Only valid from the
