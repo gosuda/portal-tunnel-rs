@@ -136,6 +136,10 @@ struct ServeArgs {
     /// issuance; rejected at parse time today. Repeatable.
     #[arg(long = "domain")]
     domains: Vec<String>,
+
+    /// HTTPS port for the combined admin / SDK / discovery API surface.
+    #[arg(long, default_value = "8443")]
+    api_port: u16,
 }
 
 fn main() -> eyre::Result<()> {
@@ -399,13 +403,60 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
     let status = server.status().await;
     tracing::info!(?status, "relay server started");
 
-    // 3. Wait for SIGINT/SIGTERM (Ctrl+C on Windows).
+    // 3. Build TLS config and spawn the combined API HTTPS listener.
+    let tls_cfg = portal_relay::tls::build_server_config_from_acme_handoff(
+        &handoff.fullchain,
+        &handoff.private_key,
+    )
+    .context("build TLS config from ACME material")?;
+
+    let api_router = server
+        .admin_router()
+        .merge(server.sdk_router())
+        .merge(server.discovery_router());
+
+    let listener = portal_relay::listeners::bind_dual_stack_tcp(
+        std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+        args.api_port,
+        false,
+    )
+    .await
+    .context("bind API listener")?;
+
+    // 4. Wait for SIGINT/SIGTERM (Ctrl+C on Windows).
     let cancel = CancellationToken::new();
+
+    let api_cancel = cancel.clone();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "R9: top-of-main runtime entry — HTTPS API listener accept loop"
+    )]
+    let api_handle = tokio::spawn(async move {
+        if let Err(e) = portal_relay::listeners::serve_tls_router(
+            listener,
+            tls_cfg,
+            api_router,
+            api_cancel,
+        )
+        .await
+        {
+            tracing::error!(error = %e, "API listener error");
+        }
+    });
+
+    tracing::info!(port = args.api_port, "API HTTPS listener spawned");
+
     install_signal_handler(cancel.clone());
     cancel.cancelled().await;
     tracing::info!("shutdown signal received");
 
-    // 4. Drain.
+    // Abort the API listener task and await its exit so the socket
+    // is released before the server drains.
+    api_handle.abort();
+    let _ = api_handle.await;
+    tracing::info!("API listener task drained");
+
+    // 5. Drain.
     //
     // Abort the config-file watcher first AND await its
     // JoinHandle: `abort()` only requests cancellation, so we must
