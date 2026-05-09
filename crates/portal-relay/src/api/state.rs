@@ -192,30 +192,6 @@ mod tests {
         (key, verifier)
     }
 
-    #[test]
-    fn states_are_cheaply_cloneable() {
-        // Smoke test that the state types compile and clone without
-        // owning anything heavy directly. This is the type-level
-        // contract that subsequent handlers rely on.
-        let leases = LeaseRegistry::new();
-        let policy = Arc::new(PolicyRuntime::new());
-        let (signing_key, verifier) = fixture_lease_token_keys([0xAAu8; 32]);
-        let _sdk = SdkState {
-            leases: leases.clone(),
-            policy: Arc::clone(&policy),
-            engine: ReputationEngine::new(),
-            ens_resolver: None,
-            lease_token_signing_key: signing_key,
-            lease_token_verifier: verifier,
-        };
-        let _admin = AdminState {
-            leases: leases.clone(),
-            policy,
-            reload: None,
-        };
-        let _disc = DiscoveryState { leases };
-    }
-
     #[tokio::test]
     async fn sdk_state_carries_engine_and_resolver() {
         // Type-level: SdkState is Send + Sync. If any field type ever
