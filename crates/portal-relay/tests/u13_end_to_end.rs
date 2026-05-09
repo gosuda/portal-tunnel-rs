@@ -33,6 +33,9 @@ async fn write_test_fixtures(dir: &Path, runtime: &RuntimeConfig) -> (PathBuf, P
         dir.join("api-https.key"),
         dir.join("keyless.key"),
         dir.join("quic-id.key"),
+        dir.join("keyless-server-cert.pem"),
+        dir.join("keyless-server-key.pem"),
+        dir.join("keyless-client-ca.pem"),
     );
     let server_path = dir.join("bootstrap.json");
     let runtime_path = dir.join("runtime.json");

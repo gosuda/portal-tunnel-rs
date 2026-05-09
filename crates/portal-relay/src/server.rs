@@ -1468,6 +1468,9 @@ mod tests {
             std::path::PathBuf::from("/etc/portal/api.key"),
             std::path::PathBuf::from("/etc/portal/keyless.key"),
             std::path::PathBuf::from("/etc/portal/quic.key"),
+            std::path::PathBuf::from("/etc/portal/keyless-server-cert.pem"),
+            std::path::PathBuf::from("/etc/portal/keyless-server-key.pem"),
+            std::path::PathBuf::from("/etc/portal/keyless-client-ca.pem"),
         )
     }
 

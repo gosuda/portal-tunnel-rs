@@ -98,6 +98,9 @@ pub async fn run_init(args: &InitArgs) -> eyre::Result<()> {
         state_dir.join("api-https.key"),
         state_dir.join("keyless.key"),
         state_dir.join("quic-id.key"),
+        state_dir.join("keyless-server-cert.pem"),
+        state_dir.join("keyless-server-key.pem"),
+        state_dir.join("keyless-client-ca.pem"),
     );
     let runtime = RuntimeConfig::default();
 
@@ -116,10 +119,13 @@ pub async fn run_init(args: &InitArgs) -> eyre::Result<()> {
     println!("Scaffolded relay config in {}:", state_dir.display());
     println!("  - bootstrap.json (replace placeholder *.key paths before `serve`)");
     println!("  - runtime.json (operator-tunable; safe to leave at defaults for v0.1)");
-    println!("Next: generate the three trust-boundary keys and update bootstrap.json:");
+    println!("Next: generate the six trust-boundary credentials and update bootstrap.json:");
     println!("  - api-https.key (rustls-acceptable PEM private key)");
     println!("  - keyless.key (PEM private key for tenant keyless oracle)");
     println!("  - quic-id.key (PEM private key for QUIC backhaul identity)");
+    println!("  - keyless-server-cert.pem (mTLS server certificate)");
+    println!("  - keyless-server-key.pem (mTLS server private key)");
+    println!("  - keyless-client-ca.pem (mTLS client CA certificate)");
     println!("Then: portal-relay serve (Phase 7 B1)");
 
     Ok(())

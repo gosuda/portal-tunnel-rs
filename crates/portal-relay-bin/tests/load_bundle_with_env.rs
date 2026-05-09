@@ -71,7 +71,10 @@ fn sample_bootstrap_json() -> &'static str {
         "state_dir": "/var/lib/portal-relay",
         "api_https_key_path": "/etc/portal-relay/api-https.key",
         "keyless_signing_key_path": "/etc/portal-relay/keyless.key",
-        "quic_identity_key_path": "/etc/portal-relay/quic-id.key"
+        "quic_identity_key_path": "/etc/portal-relay/quic-id.key",
+        "keyless_server_cert_path": "/etc/portal-relay/keyless-server-cert.pem",
+        "keyless_server_key_path": "/etc/portal-relay/keyless-server-key.pem",
+        "keyless_client_ca_path": "/etc/portal-relay/keyless-client-ca.pem"
     }"#
 }
 

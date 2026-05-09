@@ -194,6 +194,9 @@ mod tests {
             PathBuf::from("/etc/portal-relay/api-https.key"),
             PathBuf::from("/etc/portal-relay/keyless.key"),
             PathBuf::from("/etc/portal-relay/quic-id.key"),
+            PathBuf::from("/etc/portal-relay/keyless-server-cert.pem"),
+            PathBuf::from("/etc/portal-relay/keyless-server-key.pem"),
+            PathBuf::from("/etc/portal-relay/keyless-client-ca.pem"),
         )
     }
 

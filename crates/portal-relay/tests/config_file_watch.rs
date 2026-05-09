@@ -38,6 +38,9 @@ fn baseline_bootstrap() -> RelayServerConfig {
         PathBuf::from("/etc/portal/api.key"),
         PathBuf::from("/etc/portal/keyless.key"),
         PathBuf::from("/etc/portal/quic.key"),
+        PathBuf::from("/etc/portal/keyless-server-cert.pem"),
+        PathBuf::from("/etc/portal/keyless-server-key.pem"),
+        PathBuf::from("/etc/portal/keyless-client-ca.pem"),
     )
 }
 

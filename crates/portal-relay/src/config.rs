@@ -50,7 +50,10 @@
 //!   "state_dir": "/var/lib/portal-relay",
 //!   "api_https_key_path": "/etc/portal-relay/api-https.key",
 //!   "keyless_signing_key_path": "/etc/portal-relay/keyless.key",
-//!   "quic_identity_key_path": "/etc/portal-relay/quic-id.key"
+//!   "quic_identity_key_path": "/etc/portal-relay/quic-id.key",
+//!   "keyless_server_cert_path": "/etc/portal-relay/keyless-server-cert.pem",
+//!   "keyless_server_key_path": "/etc/portal-relay/keyless-server-key.pem",
+//!   "keyless_client_ca_path": "/etc/portal-relay/keyless-client-ca.pem"
 //! }
 //! ```
 //!
@@ -92,11 +95,18 @@ pub struct RelayServerConfig {
     pub keyless_signing_key_path: PathBuf,
     /// Path to the QUIC backhaul identity key. Trust-boundary.
     pub quic_identity_key_path: PathBuf,
+    /// Path to the keyless mTLS server certificate (PEM-encoded). Trust-boundary.
+    pub keyless_server_cert_path: PathBuf,
+    /// Path to the keyless mTLS server private key (PEM-encoded). Trust-boundary.
+    pub keyless_server_key_path: PathBuf,
+    /// Path to the keyless mTLS client CA certificate (PEM-encoded). Trust-boundary.
+    pub keyless_client_ca_path: PathBuf,
 }
 
 impl RelayServerConfig {
     /// Construct a minimal bootstrap config. Phase 5 U13 follow-up
     /// replaces this with a figment-driven builder.
+    #[expect(clippy::too_many_arguments, reason = "bootstrap config constructor carries 8 required trust-boundary paths; builder is B8 follow-up")]
     #[must_use]
     pub const fn new(
         name: CompactString,
@@ -104,6 +114,9 @@ impl RelayServerConfig {
         api_https_key_path: PathBuf,
         keyless_signing_key_path: PathBuf,
         quic_identity_key_path: PathBuf,
+        keyless_server_cert_path: PathBuf,
+        keyless_server_key_path: PathBuf,
+        keyless_client_ca_path: PathBuf,
     ) -> Self {
         Self {
             name,
@@ -111,6 +124,9 @@ impl RelayServerConfig {
             api_https_key_path,
             keyless_signing_key_path,
             quic_identity_key_path,
+            keyless_server_cert_path,
+            keyless_server_key_path,
+            keyless_client_ca_path,
         }
     }
 }
@@ -501,6 +517,9 @@ mod tests {
             PathBuf::from("/etc/portal-relay/api-https.key"),
             PathBuf::from("/etc/portal-relay/keyless.key"),
             PathBuf::from("/etc/portal-relay/quic-id.key"),
+            PathBuf::from("/etc/portal-relay/keyless-server-cert.pem"),
+            PathBuf::from("/etc/portal-relay/keyless-server-key.pem"),
+            PathBuf::from("/etc/portal-relay/keyless-client-ca.pem"),
         )
     }
 
@@ -592,6 +611,9 @@ mod tests {
             "api_https_key_path": "/k1.pem",
             "keyless_signing_key_path": "/k2.pem",
             "quic_identity_key_path": "/k3.pem",
+            "keyless_server_cert_path": "/k4.pem",
+            "keyless_server_key_path": "/k5.pem",
+            "keyless_client_ca_path": "/k6.pem",
             "extra_field": "hello"
         }"#;
         let err = serde_json::from_str::<RelayServerConfig>(payload).unwrap_err();
@@ -617,7 +639,10 @@ mod tests {
             "state_dir": "/var/lib/portal-relay",
             "api_https_key_path": "/etc/portal-relay/api-https.key",
             "keyless_signing_key_path": "/etc/portal-relay/keyless.key",
-            "quic_identity_key_path": "/etc/portal-relay/quic-id.key"
+            "quic_identity_key_path": "/etc/portal-relay/quic-id.key",
+            "keyless_server_cert_path": "/etc/portal-relay/keyless-server-cert.pem",
+            "keyless_server_key_path": "/etc/portal-relay/keyless-server-key.pem",
+            "keyless_client_ca_path": "/etc/portal-relay/keyless-client-ca.pem"
         }"#
         .to_owned()
     }
@@ -706,6 +731,9 @@ mod tests {
             "api_https_key_path": "/etc/portal-relay/api-https.key",
             "keyless_signing_key_path": "/etc/portal-relay/keyless.key",
             "quic_identity_key_path": "/etc/portal-relay/quic-id.key",
+            "keyless_server_cert_path": "/etc/portal-relay/keyless-server-cert.pem",
+            "keyless_server_key_path": "/etc/portal-relay/keyless-server-key.pem",
+            "keyless_client_ca_path": "/etc/portal-relay/keyless-client-ca.pem",
             "extra_field": "hello"
         }"#;
         tokio::fs::write(&server_path, bad_server).await.unwrap();

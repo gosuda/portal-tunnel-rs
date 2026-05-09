@@ -140,6 +140,10 @@ struct ServeArgs {
     /// HTTPS port for the combined admin / SDK / discovery API surface.
     #[arg(long, default_value = "8443")]
     api_port: u16,
+
+    /// TCP port for the keyless mTLS oracle listener.
+    #[arg(long, default_value = "8444")]
+    keyless_port: u16,
 }
 
 fn main() -> eyre::Result<()> {
