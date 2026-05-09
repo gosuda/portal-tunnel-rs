@@ -223,9 +223,7 @@ async fn tui(_args: TuiArgs) -> eyre::Result<()> {
     let cancel = CancellationToken::new();
     install_signal_handler(cancel.clone());
 
-    run(snapshot_rx, cancel)
-        .await
-        .context("run status TUI")
+    run(snapshot_rx, cancel).await.context("run status TUI")
 }
 
 #[tracing::instrument(skip_all, fields(state_dir = %args.state_dir.display(), name = %args.name))]
@@ -506,9 +504,7 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
                 }
             }
         } else {
-            tracing::debug!(
-                "keyless paths not configured in bundle; skipping keyless listener"
-            );
+            tracing::debug!("keyless paths not configured in bundle; skipping keyless listener");
             None
         };
 
@@ -687,13 +683,12 @@ async fn try_start_keyless_listener(
         ));
     }
 
-    let server_private_key =
-        portal_relay::tls::read_private_key(server_key_path).map_err(|e| {
-            eyre::eyre!(
-                "failed to read keyless server key {}: {e}",
-                server_key_path.display()
-            )
-        })?;
+    let server_private_key = portal_relay::tls::read_private_key(server_key_path).map_err(|e| {
+        eyre::eyre!(
+            "failed to read keyless server key {}: {e}",
+            server_key_path.display()
+        )
+    })?;
 
     // Build the mTLS-enabled rustls ServerConfig.
     let mut client_roots = RootCertStore::empty();
@@ -838,7 +833,9 @@ fn redact_url(url: &str) -> String {
     // For IPv6 literals the host is bracketed; do not split on ':' inside brackets.
     let host = if authority.starts_with('[') {
         // Find the closing bracket; port (if any) follows after ']:'.
-        authority.find(']').map_or(authority, |end| &authority[..=end])
+        authority
+            .find(']')
+            .map_or(authority, |end| &authority[..=end])
     } else {
         // Strip optional port.
         authority.split(':').next().unwrap_or(authority)

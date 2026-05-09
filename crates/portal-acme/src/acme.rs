@@ -344,9 +344,12 @@ mod tests {
     use super::*;
 
     fn write_self_signed_cert(dir: &std::path::Path, san: &[&str], not_after_days: i64) {
-        let mut params =
-            rcgen::CertificateParams::new(san.iter().map(std::string::ToString::to_string).collect::<Vec<_>>())
-                .expect("params");
+        let mut params = rcgen::CertificateParams::new(
+            san.iter()
+                .map(std::string::ToString::to_string)
+                .collect::<Vec<_>>(),
+        )
+        .expect("params");
 
         let now = jiff::Timestamp::now().to_zoned(jiff::tz::TimeZone::UTC);
         let not_before = now

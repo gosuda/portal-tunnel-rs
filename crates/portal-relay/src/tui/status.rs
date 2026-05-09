@@ -263,12 +263,12 @@ pub async fn run(
     use std::io::stdout;
     use std::time::Duration;
 
-    use ratatui_crossterm::crossterm::event;
-    use ratatui_crossterm::crossterm::terminal::{
-        disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
-    };
-    use ratatui_crossterm::crossterm::execute;
     use ratatui_crossterm::CrosstermBackend;
+    use ratatui_crossterm::crossterm::event;
+    use ratatui_crossterm::crossterm::execute;
+    use ratatui_crossterm::crossterm::terminal::{
+        EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+    };
 
     // -- Terminal setup -------------------------------------------------------
 
@@ -277,11 +277,7 @@ pub async fn run(
     }
 
     let mut stdout = stdout();
-    if let Err(e) = execute!(
-        stdout,
-        EnterAlternateScreen,
-        event::EnableMouseCapture,
-    ) {
+    if let Err(e) = execute!(stdout, EnterAlternateScreen, event::EnableMouseCapture,) {
         let _ = disable_raw_mode();
         return Err(TuiError::Draw(e.to_string()));
     }
@@ -629,9 +625,7 @@ mod tests {
     fn snapshot_stopping() {
         let snapshot = StatusSnapshot {
             lifecycle: Lifecycle::Stopping,
-            recent_events: vec![RecentEvent::Denial(
-                "tenant denied by policy".to_owned(),
-            )],
+            recent_events: vec![RecentEvent::Denial("tenant denied by policy".to_owned())],
             lease_count: 2,
             identity_health: IdentityHealth {
                 approved: 1,
