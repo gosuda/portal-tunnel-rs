@@ -359,6 +359,13 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
     };
 
     let reputation_engine = ReputationEngine::new();
+    let reputation_path = args.state_dir.join("reputation.json");
+    if let Err(err) = reputation_engine.restore_from_path(&reputation_path).await {
+        tracing::warn!(
+            ?err,
+            "no prior reputation snapshot restored; starting fresh",
+        );
+    }
     let server = Server::with_components(LeaseRegistry::new(), policy);
     let server = if let Some(handle) = reload_handle.as_ref() {
         tracing::info!(
@@ -371,7 +378,7 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
     };
     let server = server
         .with_reputation_engine(reputation_engine.clone())
-        .with_reputation_persistence(reputation_engine, args.state_dir.join("reputation.json"));
+        .with_reputation_persistence(reputation_engine, reputation_path);
     server.start().await.context("start relay server")?;
     let status = server.status().await;
     tracing::info!(?status, "relay server started");
