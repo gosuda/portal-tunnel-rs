@@ -195,7 +195,7 @@ impl AcmeClient {
     ///
     /// Returns `true` if:
     /// - The cert file does not exist.
-    /// - The cert's `notAfter` is within [`RENEWAL_WINDOW_DAYS`] of now.
+    /// - The cert's `notAfter` is within 30 days of now.
     /// - The requested `domains` are not a subset of the cert's SAN list.
     ///
     /// # Errors
