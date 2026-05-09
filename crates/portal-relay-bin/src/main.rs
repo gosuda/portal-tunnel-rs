@@ -57,7 +57,6 @@
 )]
 mod installer;
 
-use std::io::stdout;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -74,15 +73,12 @@ use portal_relay::keyless::{
 use portal_relay::policy::{PolicyRuntime, ReputationEngine};
 use portal_relay::state::LeaseRegistry;
 use portal_relay::state::identity::{IdentityPaths, load_relay_protocol_only};
-use portal_relay::tui::run_with_terminal;
+use portal_relay::tui::run;
 use portal_relay_bin::ENV_PREFIX;
 use portal_relay_bin::init::{InitArgs, run_init};
 use portal_relay_bin::load::load_bundle_if_present;
 use portal_relay_bin::manifest::embedded_manifest;
 use portal_relay_bin::tui::initial_tui_snapshot;
-use ratatui_crossterm::CrosstermBackend;
-use ratatui_crossterm::crossterm::ExecutableCommand;
-use ratatui_crossterm::crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
 use rustls::RootCertStore;
 use rustls::sign::SigningKey;
 use tokio::sync::watch;
@@ -152,7 +148,7 @@ struct ServeArgs {
     #[arg(long, default_value = "8444")]
     keyless_port: u16,
 
-    /// Ethereum JSON-RPC URL for ENS resolution (e.g. https://mainnet.infura.io/v3/KEY).
+    /// Ethereum JSON-RPC URL for ENS resolution (e.g. <https://mainnet.infura.io/v3/KEY>).
     /// When provided, the relay attempts SIWE+ENS Sybil-gating: identities
     /// with a verified ENS name bypass the reputation block threshold.
     /// Best-effort — if the resolver cannot be built, the relay starts
@@ -227,29 +223,9 @@ async fn tui(_args: TuiArgs) -> eyre::Result<()> {
     let cancel = CancellationToken::new();
     install_signal_handler(cancel.clone());
 
-    let mut stdout_handle = stdout();
-    stdout_handle
-        .execute(EnterAlternateScreen)
-        .context("enter terminal alternate screen")?;
-
-    let result = async {
-        let backend = CrosstermBackend::new(stdout_handle);
-        let mut terminal = ratatui::Terminal::new(backend).context("initialize TUI terminal")?;
-        terminal.clear().context("clear TUI terminal")?;
-        run_with_terminal(&mut terminal, snapshot_rx, cancel)
-            .await
-            .context("run status TUI")
-    }
-    .await;
-
-    let teardown_result = if let Err(err) = stdout().execute(LeaveAlternateScreen) {
-        Err(err).context("leave terminal alternate screen")
-    } else {
-        Ok(())
-    };
-
-    teardown_result?;
-    result
+    run(snapshot_rx, cancel)
+        .await
+        .context("run status TUI")
 }
 
 #[tracing::instrument(skip_all, fields(state_dir = %args.state_dir.display(), name = %args.name))]
@@ -503,40 +479,37 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
     // logged and skipped — `serve` must never abort because keyless
     // files are missing or malformed.
     let keyless_handles: Option<(tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>)> =
-        match keyless_paths {
-            Some((client_ca, server_cert, server_key, signing_key)) => {
-                match try_start_keyless_listener(
-                    &client_ca,
-                    &server_cert,
-                    &server_key,
-                    &signing_key,
-                    args.keyless_port,
-                    cancel.clone(),
-                )
-                .await
-                {
-                    Ok(Some(handles)) => {
-                        tracing::info!(port = args.keyless_port, "keyless mTLS listener spawned");
-                        Some(handles)
-                    }
-                    Ok(None) => {
-                        tracing::info!(
-                            "keyless mTLS listener not started — missing or unreadable keyless material"
-                        );
-                        None
-                    }
-                    Err(err) => {
-                        tracing::warn!(error = %err, "keyless mTLS listener setup failed; continuing without keyless");
-                        None
-                    }
+        if let Some((client_ca, server_cert, server_key, signing_key)) = keyless_paths {
+            match try_start_keyless_listener(
+                &client_ca,
+                &server_cert,
+                &server_key,
+                &signing_key,
+                args.keyless_port,
+                cancel.clone(),
+            )
+            .await
+            {
+                Ok(Some(handles)) => {
+                    tracing::info!(port = args.keyless_port, "keyless mTLS listener spawned");
+                    Some(handles)
+                }
+                Ok(None) => {
+                    tracing::info!(
+                        "keyless mTLS listener not started — missing or unreadable keyless material"
+                    );
+                    None
+                }
+                Err(err) => {
+                    tracing::warn!(error = %err, "keyless mTLS listener setup failed; continuing without keyless");
+                    None
                 }
             }
-            None => {
-                tracing::debug!(
-                    "keyless paths not configured in bundle; skipping keyless listener"
-                );
-                None
-            }
+        } else {
+            tracing::debug!(
+                "keyless paths not configured in bundle; skipping keyless listener"
+            );
+            None
         };
 
     install_signal_handler(cancel.clone());
@@ -688,7 +661,7 @@ async fn try_start_keyless_listener(
     }
 
     // Load PEM material using the same helpers the API TLS path uses.
-    let client_ca_certs = portal_relay::tls::read_cert_chain(&client_ca_path).map_err(|e| {
+    let client_ca_certs = portal_relay::tls::read_cert_chain(client_ca_path).map_err(|e| {
         eyre::eyre!(
             "failed to read keyless client CA {}: {e}",
             client_ca_path.display()
@@ -701,7 +674,7 @@ async fn try_start_keyless_listener(
         ));
     }
 
-    let server_cert_chain = portal_relay::tls::read_cert_chain(&server_cert_path).map_err(|e| {
+    let server_cert_chain = portal_relay::tls::read_cert_chain(server_cert_path).map_err(|e| {
         eyre::eyre!(
             "failed to read keyless server cert {}: {e}",
             server_cert_path.display()
@@ -715,7 +688,7 @@ async fn try_start_keyless_listener(
     }
 
     let server_private_key =
-        portal_relay::tls::read_private_key(&server_key_path).map_err(|e| {
+        portal_relay::tls::read_private_key(server_key_path).map_err(|e| {
             eyre::eyre!(
                 "failed to read keyless server key {}: {e}",
                 server_key_path.display()
@@ -855,25 +828,17 @@ async fn try_start_keyless_listener(
 /// Strip path, query, and fragment from a URL so only scheme + host
 /// remain — prevents API keys from leaking into logs.
 fn redact_url(url: &str) -> String {
-    // Split on "://" to isolate scheme and the rest.
-    let (scheme, rest) = match url.split_once("://") {
-        Some((s, r)) => (s, r),
-        None => return "<invalid-url>".to_owned(),
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return "<invalid-url>".to_owned();
     };
     // The authority is everything before the next '/', '?', or '#'.
-    let authority = match rfind_any(rest, &['/', '?', '#']) {
-        Some(idx) => &rest[..idx],
-        None => rest,
-    };
+    let authority = rfind_any(rest, &['/', '?', '#']).map_or(rest, |idx| &rest[..idx]);
     // Drop any '@' Basic-auth prefix.
     let authority = authority.split('@').next_back().unwrap_or(authority);
     // For IPv6 literals the host is bracketed; do not split on ':' inside brackets.
     let host = if authority.starts_with('[') {
         // Find the closing bracket; port (if any) follows after ']:'.
-        match authority.find(']') {
-            Some(end) => &authority[..=end],
-            None => authority, // malformed, keep as-is
-        }
+        authority.find(']').map_or(authority, |end| &authority[..=end])
     } else {
         // Strip optional port.
         authority.split(':').next().unwrap_or(authority)

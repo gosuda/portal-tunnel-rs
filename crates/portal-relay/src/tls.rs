@@ -81,6 +81,11 @@ pub fn build_server_config_from_acme_handoff(
 }
 
 /// Read a PEM-encoded certificate chain from `path`.
+///
+/// # Errors
+///
+/// Returns [`TlsBuildError::Io`] on filesystem read failure, or
+/// [`TlsBuildError::PemParse`] if the PEM contents cannot be parsed.
 pub fn read_cert_chain(path: &Path) -> Result<Vec<CertificateDer<'static>>, TlsBuildError> {
     let pem_bytes = fs::read(path).map_err(|e| TlsBuildError::Io {
         path: path.display().to_string(),
@@ -96,6 +101,12 @@ pub fn read_cert_chain(path: &Path) -> Result<Vec<CertificateDer<'static>>, TlsB
 }
 
 /// Read a PEM-encoded private key from `path`.
+///
+/// # Errors
+///
+/// Returns [`TlsBuildError::Io`] on filesystem read failure,
+/// [`TlsBuildError::PemParse`] if the PEM parser fails, or
+/// [`TlsBuildError::MissingPrivateKey`] if no recognised private key is found.
 pub fn read_private_key(path: &Path) -> Result<PrivateKeyDer<'static>, TlsBuildError> {
     let pem_bytes = fs::read(path).map_err(|e| TlsBuildError::Io {
         path: path.display().to_string(),

@@ -203,26 +203,22 @@ impl AcmeClient {
     #[must_use]
     pub fn should_renew(key_dir: &KeyDir, domains: &[CompactString]) -> bool {
         let chain_path = key_dir.0.join(FULLCHAIN_FILE);
-        let pem_bytes = match std::fs::read(&chain_path) {
-            Ok(b) => b,
-            Err(_) => return true,
+        let Ok(pem_bytes) = std::fs::read(&chain_path) else {
+            return true;
         };
 
-        let pem = match x509_parser::pem::parse_x509_pem(&pem_bytes) {
-            Ok((_, pem)) => pem,
-            Err(_) => return true,
+        let Ok((_, pem)) = x509_parser::pem::parse_x509_pem(&pem_bytes) else {
+            return true;
         };
-        let cert = match pem.parse_x509() {
-            Ok(cert) => cert,
-            Err(_) => return true,
+        let Ok(cert) = pem.parse_x509() else {
+            return true;
         };
 
         // Check expiry
         let not_after = cert.validity().not_after;
         let now = Timestamp::now();
-        let not_after_ts = match jiff::Timestamp::new(not_after.timestamp(), 0) {
-            Ok(ts) => ts,
-            Err(_) => return true,
+        let Ok(not_after_ts) = jiff::Timestamp::new(not_after.timestamp(), 0) else {
+            return true;
         };
 
         let window = jiff::SignedDuration::from_secs(RENEWAL_WINDOW_DAYS * 24 * 60 * 60);
@@ -281,8 +277,7 @@ impl AcmeClient {
 
         if state != instant_acme::OrderStatus::Ready {
             return Err(AcmeError::Acme(format!(
-                "order not ready after polling: {:?}",
-                state
+                "order not ready after polling: {state:?}"
             )));
         }
 

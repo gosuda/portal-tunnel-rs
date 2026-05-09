@@ -253,10 +253,6 @@ pub use portal_wire::api::RegisterChallengeResponse as RegisterChallengeResponse
 ///   ([`crate::state::REGISTER_CHALLENGE_PER_IP_CAP`]) exceeded.
 /// - 503 `feature_unavailable` — `hop_token != ""` (v0.1 hop is
 ///   genuinely unimplemented).
-#[expect(
-    clippy::too_many_lines,
-    reason = "handler orchestration: body decode → identity decode → IP extraction → banned check → reputation check → transport validation → domain resolution → challenge issue"
-)]
 #[tracing::instrument(
     name = "sdk.register_challenge",
     skip_all,
@@ -503,10 +499,6 @@ pub use portal_wire::api::RegisterResponse as RegisterResponseBody;
 /// effectively log `(client_ip, identity)` pairs for every register
 /// call. Operators MAY redact one or the other in their tracing
 /// subscriber if log retention or privacy policy requires it.
-#[expect(
-    clippy::too_many_lines,
-    reason = "handler orchestration: body decode → IP extraction → banned check → SIWE decode → challenge consume → reputation check → token mint → lease register → ENS round-trip"
-)]
 #[tracing::instrument(
     name = "sdk.register",
     skip_all,

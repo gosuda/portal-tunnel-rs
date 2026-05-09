@@ -360,31 +360,25 @@ impl Manager {
 /// local mode both ticks are no-ops; in ACME modes (deferred) the
 /// ticks dispatch to renewal + DNS resync.
 //
-// `Duration::from_hours` / `Duration::from_mins` are nightly-only
-// (`duration_constructors`) at the workspace's MSRV (1.95). We keep
-// the explicit `from_secs` arithmetic and silence the clippy
-// lint via clippy.toml rather than per-call-site allows.
 async fn maintenance_loop(mode: Mode, _key_dir: KeyDir, cancel: CancellationToken) {
-    let renew_interval = Duration::from_secs(24 * 60 * 60);
-    let dns_resync_interval = Duration::from_secs(10 * 60);
+    let renew_interval = Duration::from_hours(24);
+    let dns_resync_interval = Duration::from_mins(10);
 
     let mut renew_tick = tokio::time::interval(renew_interval);
     let mut dns_tick = tokio::time::interval(dns_resync_interval);
 
     loop {
         tokio::select! {
-            _ = cancel.cancelled() => break,
+            () = cancel.cancelled() => break,
             _ = renew_tick.tick() => {
-                if matches!(mode, Mode::LocalSelfSigned) {
-                    continue; // 10y validity, no-op
+                if !matches!(mode, Mode::LocalSelfSigned) {
+                    // TODO: renewal check (Phase 4 follow-up)
                 }
-                // TODO: renewal check (Phase 4 follow-up)
             }
             _ = dns_tick.tick() => {
-                if matches!(mode, Mode::LocalSelfSigned) {
-                    continue; // local provider does not touch DNS
+                if !matches!(mode, Mode::LocalSelfSigned) {
+                    // TODO: DNS resync (Phase 4 follow-up)
                 }
-                // TODO: DNS resync (Phase 4 follow-up)
             }
         }
     }
