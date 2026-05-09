@@ -607,7 +607,7 @@ mod tests {
     fn snapshot_running() {
         let snapshot = StatusSnapshot {
             lifecycle: Lifecycle::Running {
-                uptime: Duration::from_secs(3_600),
+                uptime: Duration::from_hours(1),
             },
             recent_events: Vec::new(),
             lease_count: 7,
