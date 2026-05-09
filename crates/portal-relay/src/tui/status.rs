@@ -252,10 +252,6 @@ fn format_uptime(uptime: Duration) -> String {
 /// # Errors
 ///
 /// Returns [`TuiError::Draw`] if the terminal backend fails while drawing.
-#[expect(
-    clippy::too_many_lines,
-    reason = "terminal lifecycle is sequential by nature; splitting would obscure the setup→loop→teardown flow"
-)]
 pub async fn run(
     mut snapshot_rx: watch::Receiver<StatusSnapshot>,
     cancel: CancellationToken,
