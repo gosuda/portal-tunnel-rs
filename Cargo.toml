@@ -172,6 +172,10 @@ uuid = { version = "1", features = ["v4"] }
 # features are kept to inherit the same prebuilt-NASM / fips toggles
 # rustls relies on so the dev-dep does not silently rebuild aws-lc-rs.
 aws-lc-rs = "1"
+# `rustls-pemfile` — PEM decoder used by `portal-relay::tls` to load
+# ACME-issued `fullchain.pem` + `privatekey.pem` into rustls
+# `CertificateDer` / `PrivateKeyDer` types.
+rustls-pemfile = "2"
 
 # TUI (R15)
 ratatui = { version = "0.30", default-features = false }

@@ -111,6 +111,7 @@ pub mod proxy;
 pub mod reload;
 pub mod server;
 pub mod state;
+pub mod tls;
 pub mod tui;
 
 pub use config::{ConfigLoadError, RelayConfigBundle, RelayServerConfig, RuntimeConfig};

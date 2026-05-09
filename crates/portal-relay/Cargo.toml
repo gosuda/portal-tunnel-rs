@@ -143,6 +143,7 @@ rand_core = { workspace = true }
 ratatui = { workspace = true }
 rustls = { workspace = true }
 rustls-pki-types = { workspace = true }
+rustls-pemfile = { workspace = true }
 sec1 = { workspace = true }
 secrecy = { workspace = true }
 serde = { workspace = true }
