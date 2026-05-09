@@ -66,7 +66,7 @@ use compact_str::CompactString;
 use eyre::{Context as _, eyre};
 use portal_acme::{AcmeConfig, DirectoryUrl, KeyDir, Manager as AcmeManager, ProviderSelector};
 use portal_relay::Server;
-use portal_relay::policy::PolicyRuntime;
+use portal_relay::policy::{PolicyRuntime, ReputationEngine};
 use portal_relay::state::LeaseRegistry;
 use portal_relay::tui::run_with_terminal;
 use portal_relay_bin::ENV_PREFIX;
@@ -358,6 +358,7 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
         None => None,
     };
 
+    let reputation_engine = ReputationEngine::new();
     let server = Server::with_components(LeaseRegistry::new(), policy);
     let server = if let Some(handle) = reload_handle.as_ref() {
         tracing::info!(
@@ -368,6 +369,9 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
     } else {
         server
     };
+    let server = server
+        .with_reputation_engine(reputation_engine.clone())
+        .with_reputation_persistence(reputation_engine, args.state_dir.join("reputation.json"));
     server.start().await.context("start relay server")?;
     let status = server.status().await;
     tracing::info!(?status, "relay server started");
