@@ -62,7 +62,8 @@ use tokio::io::AsyncWriteExt as _;
 
 use crate::api::envelope::{ApiDataEnvelope, ApiError, ApiErrorCode, ok};
 use crate::api::state::SdkState;
-use crate::policy::reputation::{BlockReason, ReputationDecision, SignalKind};
+use crate::policy::reputation::{BlockReason, ReputationDecision};
+use crate::policy::reputation::ReputationEngine;
 use crate::state::challenge::{
     RegisterChallengeRequest as InnerRegisterChallengeRequest,
     RegisterRequest as InnerRegisterRequest,
@@ -256,7 +257,10 @@ pub use portal_wire::api::RegisterChallengeResponse as RegisterChallengeResponse
 #[tracing::instrument(
     name = "sdk.register_challenge",
     skip_all,
-    fields(client_ip = tracing::field::Empty),
+    fields(
+        client_ip = tracing::field::Empty,
+        reputation_decision = tracing::field::Empty,
+    ),
 )]
 pub async fn register_challenge_handler(
     State(state): State<SdkState>,
@@ -311,20 +315,7 @@ pub async fn register_challenge_handler(
     }
 
     // 5. Reputation check.
-    let decision = state.engine.decide(identity, client_ip, &CompactString::default());
-    tracing::Span::current().record("reputation_decision", decision.label());
-    match decision {
-        ReputationDecision::Allow => {}
-        ReputationDecision::Backpressure(d) => tokio::time::sleep(d).await,
-        ReputationDecision::Block(reason) => {
-            state.engine.record_signal_default(identity, SignalKind::BlockedRequest);
-            let code = match reason {
-                BlockReason::RateLimited => ApiErrorCode::RateLimited,
-                BlockReason::ReputationExceeded => ApiErrorCode::LeaseRejected,
-            };
-            return Err(ApiError::new(code, format!("reputation: {reason}")));
-        }
-    }
+    check_reputation(&state.engine, identity, client_ip, &CompactString::default()).await?;
 
     // 6. Transport-flag validation.
     let hop_token = req.hop_token.trim();
@@ -511,6 +502,7 @@ pub use portal_wire::api::RegisterResponse as RegisterResponseBody;
         client_ip = tracing::field::Empty,
         identity = tracing::field::Empty,
         ens_named = tracing::field::Empty,
+        reputation_decision = tracing::field::Empty,
     ),
 )]
 pub async fn register_handler(
@@ -583,24 +575,7 @@ pub async fn register_handler(
     // 7a. Reputation check (after challenge consumption so identity is
     //     known, before lease creation so a blocked tenant cannot mint
     //     a live lease).
-    let decision = state
-        .engine
-        .decide(identity, client_ip, &verified.hostname);
-    tracing::Span::current().record("reputation_decision", decision.label());
-    match decision {
-        ReputationDecision::Allow => {}
-        ReputationDecision::Backpressure(d) => tokio::time::sleep(d).await,
-        ReputationDecision::Block(reason) => {
-            state
-                .engine
-                .record_signal_default(identity, SignalKind::BlockedRequest);
-            let code = match reason {
-                BlockReason::RateLimited => ApiErrorCode::RateLimited,
-                BlockReason::ReputationExceeded => ApiErrorCode::LeaseRejected,
-            };
-            return Err(ApiError::new(code, format!("reputation: {reason}")));
-        }
-    }
+    check_reputation(&state.engine, identity, client_ip, &verified.hostname).await?;
 
     let now = Timestamp::now();
     let expires_at = now.checked_add(LEASE_DEFAULT_TTL).unwrap_or(Timestamp::MAX);
@@ -704,6 +679,7 @@ pub async fn register_handler(
     fields(
         client_ip = tracing::field::Empty,
         identity = tracing::field::Empty,
+        reputation_decision = tracing::field::Empty,
     ),
 )]
 pub async fn connect_handler(
@@ -743,22 +719,7 @@ pub async fn connect_handler(
     })?;
 
     // Reputation check (after lease lookup so the lease ID is available).
-    let decision = state.engine.decide(identity, client_ip, &lease.hostname);
-    tracing::Span::current().record("reputation_decision", decision.label());
-    match decision {
-        ReputationDecision::Allow => {}
-        ReputationDecision::Backpressure(d) => tokio::time::sleep(d).await,
-        ReputationDecision::Block(reason) => {
-            state
-                .engine
-                .record_signal_default(identity, SignalKind::BlockedRequest);
-            let code = match reason {
-                BlockReason::RateLimited => ApiErrorCode::RateLimited,
-                BlockReason::ReputationExceeded => ApiErrorCode::LeaseRejected,
-            };
-            return Err(ApiError::new(code, format!("reputation: {reason}")));
-        }
-    }
+    check_reputation(&state.engine, identity, client_ip, &lease.hostname).await?;
 
     if req.version() != Version::HTTP_11 {
         return Err(ApiError::new(
@@ -1078,6 +1039,30 @@ fn has_portal_tunnel_upgrade(headers: &HeaderMap) -> bool {
 
 /// Render a 32-byte buffer as 64-char lowercase hex (no `0x` prefix).
 /// Used to surface the registered identity on the wire.
+async fn check_reputation(
+    engine: &ReputationEngine,
+    identity: IdentityKey,
+    client_ip: IpAddr,
+    lease_id: &CompactString,
+) -> Result<(), ApiError> {
+    let decision = engine.decide(identity, client_ip, lease_id);
+    tracing::Span::current().record("reputation_decision", decision.label());
+    match decision {
+        ReputationDecision::Allow => Ok(()),
+        ReputationDecision::Backpressure(d) => {
+            tokio::time::sleep(d).await;
+            Ok(())
+        }
+        ReputationDecision::Block(reason) => {
+            let code = match reason {
+                BlockReason::RateLimited => ApiErrorCode::RateLimited,
+                BlockReason::ReputationExceeded => ApiErrorCode::LeaseRejected,
+            };
+            Err(ApiError::new(code, format!("reputation: {reason}")))
+        }
+    }
+}
+
 fn hex_lower(bytes: &[u8; 32]) -> String {
     use core::fmt::Write as _;
     bytes.iter().fold(String::with_capacity(64), |mut s, byte| {
