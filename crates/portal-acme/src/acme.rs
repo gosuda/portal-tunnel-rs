@@ -431,4 +431,51 @@ mod tests {
             "missing domain in SAN => renew"
         );
     }
+
+    // ---- Adversarial tests ------------------------------------------------
+
+    #[test]
+    fn should_renew_corrupt_pem() {
+        // A corrupted PEM file must trigger renewal rather than panic or
+        // return a false negative.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let key_dir = KeyDir::new(dir.path().to_path_buf());
+        std::fs::write(dir.path().join(FULLCHAIN_FILE), b"not a pem").expect("write");
+
+        let domains = vec![CompactString::from("example.com")];
+        assert!(
+            AcmeClient::should_renew(&key_dir, &domains),
+            "corrupt PEM => renew"
+        );
+    }
+
+    #[test]
+    fn should_renew_pem_without_san() {
+        // A certificate that lacks a SubjectAlternativeName extension has
+        // an empty SAN set, so any requested domain is "missing".
+        let dir = tempfile::tempdir().expect("tempdir");
+        let key_dir = KeyDir::new(dir.path().to_path_buf());
+        write_self_signed_cert(dir.path(), &[], 90);
+
+        let domains = vec![CompactString::from("example.com")];
+        assert!(
+            AcmeClient::should_renew(&key_dir, &domains),
+            "cert without SAN cannot cover any domain => renew"
+        );
+    }
+
+    #[test]
+    fn should_renew_empty_domains() {
+        // Empty domain list is vacuously covered by any SAN set, so the
+        // decision hinges purely on expiry. A fresh cert => no renew.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let key_dir = KeyDir::new(dir.path().to_path_buf());
+        write_self_signed_cert(dir.path(), &["example.com"], 90);
+
+        let domains: Vec<CompactString> = vec![];
+        assert!(
+            !AcmeClient::should_renew(&key_dir, &domains),
+            "empty domains list on fresh cert => no renew"
+        );
+    }
 }

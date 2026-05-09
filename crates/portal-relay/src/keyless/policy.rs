@@ -981,4 +981,77 @@ mod tests {
             "expected RoutingContextMismatch first; got {err:?}"
         );
     }
+
+    // ---- Adversarial tests ------------------------------------------------
+
+    #[test]
+    fn empty_payload_is_accepted() {
+        // Boundary: zero-length payload is within the budget.
+        let policy = KeylessPolicy::new();
+        assert!(policy.register_key("test-key-1", rsa_known_key()));
+        let req = fixture_request(0, SignatureScheme::RSA_PSS_SHA256);
+        policy
+            .validate("subject-a", &req)
+            .expect("empty payload must be accepted");
+    }
+
+    #[test]
+    fn empty_key_id_is_rejected_as_unknown() {
+        // An empty key_id is not registered by default, so it must
+        // surface as UnknownKeyId.
+        let policy = KeylessPolicy::new();
+        let mut req = fixture_request(16, SignatureScheme::RSA_PSS_SHA256);
+        req.key_id = CompactString::new("");
+        let err = policy
+            .validate("subject-a", &req)
+            .expect_err("empty key_id must be refused");
+        assert!(
+            matches!(err, KeylessError::UnknownKeyId(_)),
+            "expected UnknownKeyId, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn overflow_limiter_is_shared_and_enforces_burst() {
+        // When the subject map is at capacity, new subjects fall back
+        // to the shared overflow limiter. This test proves the overflow
+        // limiter is actually shared (not a fresh unlimited limiter per
+        // subject) by exhausting it across two distinct overflow subjects.
+        //
+        // Sustained refill is 1 token/sec — the test executes all
+        // requests in a tight loop (sub-millisecond), so no refill
+        // can occur between assertions, making the outcome deterministic.
+        let burst = core::num::NonZeroU32::new(2).expect("non-zero");
+        let sustained = core::num::NonZeroU32::new(1).expect("non-zero");
+        let quota = Quota::per_second(sustained).allow_burst(burst);
+        let cap: usize = 1;
+        let policy = KeylessPolicy::with_capacity(quota, cap);
+        assert!(policy.register_key("test-key-1", rsa_known_key()));
+
+        let req = fixture_request(16, SignatureScheme::RSA_PSS_SHA256);
+
+        // Subject 1 fills the map (size == cap).
+        policy.validate("subj-1", &req).expect("subj-1 first ok");
+        policy.validate("subj-1", &req).expect("subj-1 second ok");
+        let err = policy
+            .validate("subj-1", &req)
+            .expect_err("subj-1 third must rate-limit");
+        assert!(matches!(err, KeylessError::RateLimited));
+
+        // Subject 2 and 3 both overflow. They share ONE limiter,
+        // so their combined consumption exhausts the same burst.
+        policy
+            .validate("subj-2", &req)
+            .expect("subj-2 first ok (overflow)");
+        policy
+            .validate("subj-3", &req)
+            .expect("subj-3 first ok (shared overflow)");
+        let err = policy
+            .validate("subj-2", &req)
+            .expect_err("subj-2 second must rate-limit (shared overflow exhausted)");
+        assert!(
+            matches!(err, KeylessError::RateLimited),
+            "expected RateLimited on shared overflow exhaustion, got: {err:?}"
+        );
+    }
 }
