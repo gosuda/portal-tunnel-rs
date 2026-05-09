@@ -324,6 +324,15 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
     // the baseline of `serve` working without `init` first is
     // preserved.
     let bundle = load_bundle_if_present(&args.state_dir).await?;
+    let keyless_paths: Option<(std::path::PathBuf, std::path::PathBuf, std::path::PathBuf, std::path::PathBuf)> =
+        bundle.as_ref().map(|b| {
+            (
+                b.server.keyless_client_ca_path.clone(),
+                b.server.keyless_server_cert_path.clone(),
+                b.server.keyless_server_key_path.clone(),
+                b.server.keyless_signing_key_path.clone(),
+            )
+        });
     let reload_handle: Option<Arc<portal_relay::ReloadHandle>> = bundle.map(|bundle| {
         let bundle_name = bundle.server.name.clone();
         let ip_ban_count = bundle.runtime.ip_ban_list.len();
@@ -460,19 +469,36 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
     // logged and skipped — `serve` must never abort because keyless
     // files are missing or malformed.
     let keyless_handles: Option<(tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>)> =
-        match try_start_keyless_listener(&args.state_dir, args.keyless_port, cancel.clone()).await {
-            Ok(Some(handles)) => {
-                tracing::info!(port = args.keyless_port, "keyless mTLS listener spawned");
-                Some(handles)
+        match keyless_paths {
+            Some((client_ca, server_cert, server_key, signing_key)) => {
+                match try_start_keyless_listener(
+                    &client_ca,
+                    &server_cert,
+                    &server_key,
+                    &signing_key,
+                    args.keyless_port,
+                    cancel.clone(),
+                )
+                .await
+                {
+                    Ok(Some(handles)) => {
+                        tracing::info!(port = args.keyless_port, "keyless mTLS listener spawned");
+                        Some(handles)
+                    }
+                    Ok(None) => {
+                        tracing::info!(
+                            "keyless mTLS listener not started — missing or unreadable keyless material"
+                        );
+                        None
+                    }
+                    Err(err) => {
+                        tracing::warn!(error = %err, "keyless mTLS listener setup failed; continuing without keyless");
+                        None
+                    }
+                }
             }
-            Ok(None) => {
-                tracing::info!(
-                    "keyless mTLS listener not started — missing or unreadable keyless material"
-                );
-                None
-            }
-            Err(err) => {
-                tracing::warn!(error = %err, "keyless mTLS listener setup failed; continuing without keyless");
+            None => {
+                tracing::debug!("keyless paths not configured in bundle; skipping keyless listener");
                 None
             }
         };
@@ -590,11 +616,11 @@ async fn wait_for_shutdown_signal() {
 
 /// Try to start the keyless mTLS listener.
 ///
-/// Looks for four files under `state_dir/keyless/`:
-/// - `client_ca.pem` — pinned tenant CA bundle (must be non-empty).
-/// - `server_cert.pem` — keyless surface's own server certificate.
-/// - `server_key.pem` — keyless surface's own server private key.
-/// - `signing_key.pem` — keyless signing key (the key the bridge signs with).
+/// Expects four PEM files:
+/// - `client_ca_path` — pinned tenant CA bundle (must be non-empty).
+/// - `server_cert_path` — keyless surface's own server certificate.
+/// - `server_key_path` — keyless surface's own server private key.
+/// - `signing_key_path` — keyless signing key (the key the bridge signs with).
 ///
 /// If any file is missing, returns `Ok(None)` so the caller can log
 /// and continue.  Any load or validation error is returned as `Err`
@@ -604,23 +630,20 @@ async fn wait_for_shutdown_signal() {
     reason = "keyless listener setup composes PEM load + rustls config + bridge spawn + router build in a strict ordered prologue"
 )]
 async fn try_start_keyless_listener(
-    state_dir: &std::path::Path,
+    client_ca_path: &std::path::Path,
+    server_cert_path: &std::path::Path,
+    server_key_path: &std::path::Path,
+    signing_key_path: &std::path::Path,
     keyless_port: u16,
     cancel: CancellationToken,
 ) -> eyre::Result<Option<(tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>)>> {
-    let keyless_dir = state_dir.join("keyless");
-    let client_ca_path = keyless_dir.join("client_ca.pem");
-    let server_cert_path = keyless_dir.join("server_cert.pem");
-    let server_key_path = keyless_dir.join("server_key.pem");
-    let signing_key_path = keyless_dir.join("signing_key.pem");
-
     // All four files must exist; if any are missing, treat as "not
     // configured" and skip silently.
     for path in [
-        &client_ca_path,
-        &server_cert_path,
-        &server_key_path,
-        &signing_key_path,
+        client_ca_path,
+        server_cert_path,
+        server_key_path,
+        signing_key_path,
     ] {
         if !path.exists() {
             tracing::debug!(path = %path.display(), "keyless material missing; skipping keyless listener");
@@ -701,7 +724,7 @@ async fn try_start_keyless_listener(
             eyre::eyre!("failed to construct keyless signer adapter: {e}")
         })?;
     let algorithm = signer_adapter.algorithm();
-    let signing_key_arc: Arc<dyn rustls::sign::SigningKey> = Arc::new(signer_adapter);
+    let signing_key_arc: Arc<dyn SigningKey> = Arc::new(signer_adapter);
 
     let policy = KeylessPolicy::new();
     // The policy stores the raw KeylessSigningKey for lookup; we keep
