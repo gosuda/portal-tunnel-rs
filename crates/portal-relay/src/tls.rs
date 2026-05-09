@@ -10,8 +10,8 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
 /// Errors emitted when converting ACME PEM files into a [`ServerConfig`].
 #[derive(Debug, thiserror::Error)]
@@ -81,11 +81,10 @@ pub fn build_server_config_from_acme_handoff(
 }
 
 fn read_cert_chain(path: &Path) -> Result<Vec<CertificateDer<'static>>, TlsBuildError> {
-    let pem_bytes =
-        fs::read(path).map_err(|e| TlsBuildError::Io {
-            path: path.display().to_string(),
-            source: e,
-        })?;
+    let pem_bytes = fs::read(path).map_err(|e| TlsBuildError::Io {
+        path: path.display().to_string(),
+        source: e,
+    })?;
     let mut reader = std::io::BufReader::new(&pem_bytes[..]);
     let certs: Result<Vec<_>, _> = rustls_pemfile::certs(&mut reader).collect();
     let certs = certs.map_err(|e| TlsBuildError::PemParse {
@@ -96,11 +95,10 @@ fn read_cert_chain(path: &Path) -> Result<Vec<CertificateDer<'static>>, TlsBuild
 }
 
 fn read_private_key(path: &Path) -> Result<PrivateKeyDer<'static>, TlsBuildError> {
-    let pem_bytes =
-        fs::read(path).map_err(|e| TlsBuildError::Io {
-            path: path.display().to_string(),
-            source: e,
-        })?;
+    let pem_bytes = fs::read(path).map_err(|e| TlsBuildError::Io {
+        path: path.display().to_string(),
+        source: e,
+    })?;
     let mut reader = std::io::BufReader::new(&pem_bytes[..]);
     rustls_pemfile::private_key(&mut reader)
         .map_err(|e| TlsBuildError::PemParse {
@@ -124,10 +122,11 @@ mod tests {
         path
     }
 
-    fn generate_self_signed_pems(dir: &tempfile::TempDir) -> (std::path::PathBuf, std::path::PathBuf) {
+    fn generate_self_signed_pems(
+        dir: &tempfile::TempDir,
+    ) -> (std::path::PathBuf, std::path::PathBuf) {
         let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
-        let params = CertificateParams::new(vec!["localhost".to_owned()])
-            .unwrap();
+        let params = CertificateParams::new(vec!["localhost".to_owned()]).unwrap();
         let cert = params.self_signed(&key_pair).unwrap();
 
         let fullchain = write_pem(dir, "fullchain.pem", cert.pem().as_bytes());
@@ -186,11 +185,7 @@ mod tests {
         let cert = params.self_signed(&key_a).unwrap();
 
         let fullchain = write_pem(&dir, "fullchain.pem", cert.pem().as_bytes());
-        let private_key = write_pem(
-            &dir,
-            "privatekey.pem",
-            key_b.serialize_pem().as_bytes(),
-        );
+        let private_key = write_pem(&dir, "privatekey.pem", key_b.serialize_pem().as_bytes());
 
         let result = build_server_config_from_acme_handoff(&fullchain, &private_key);
         assert!(

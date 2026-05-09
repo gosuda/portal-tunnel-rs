@@ -170,7 +170,10 @@ mod tests {
     }
 
     #[tokio::test]
-    #[expect(clippy::disallowed_methods, reason = "test runtime: server task spawned for cancellation")]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test runtime: server task spawned for cancellation"
+    )]
     async fn serves_request_over_tls() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
@@ -208,8 +211,14 @@ mod tests {
         tls.read_to_end(&mut buf).await.unwrap();
         let response = String::from_utf8_lossy(&buf);
 
-        assert!(response.contains("200 OK"), "expected 200 OK, got: {response}");
-        assert!(response.contains("hello"), "expected body 'hello', got: {response}");
+        assert!(
+            response.contains("200 OK"),
+            "expected 200 OK, got: {response}"
+        );
+        assert!(
+            response.contains("hello"),
+            "expected body 'hello', got: {response}"
+        );
 
         cancel.cancel();
         let _ = server_task.await;

@@ -432,13 +432,9 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
         reason = "R9: top-of-main runtime entry — HTTPS API listener accept loop"
     )]
     let api_handle = tokio::spawn(async move {
-        if let Err(e) = portal_relay::listeners::serve_tls_router(
-            listener,
-            tls_cfg,
-            api_router,
-            api_cancel,
-        )
-        .await
+        if let Err(e) =
+            portal_relay::listeners::serve_tls_router(listener, tls_cfg, api_router, api_cancel)
+                .await
         {
             tracing::error!(error = %e, "API listener error");
         }
