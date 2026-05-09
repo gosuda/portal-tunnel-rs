@@ -118,6 +118,7 @@ pub fn build_admin_router(state: AdminState) -> axum::Router {
         get(admin::policy_snapshot_handler),
     );
     let r = r.route("/v1/admin/lease/count", get(admin::lease_count_handler));
+    let r = r.route("/v1/admin/status", get(admin::status_handler));
     r.with_state(state)
 }
 
@@ -164,10 +165,12 @@ mod tests {
     fn build_admin_router_returns_router() {
         let leases = LeaseRegistry::new();
         let policy = Arc::new(PolicyRuntime::new());
+        let (_tx, rx) = tokio::sync::watch::channel(crate::tui::StatusSnapshot::default());
         let _r = build_admin_router(AdminState {
             leases,
             policy,
             reload: None,
+            status: Some(rx),
         });
     }
 

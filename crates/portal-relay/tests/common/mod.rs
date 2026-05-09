@@ -54,5 +54,6 @@ pub fn admin_state_with(reload: Option<Arc<ReloadHandle>>) -> AdminState {
         leases: LeaseRegistry::new(),
         policy: Arc::new(PolicyRuntime::new()),
         reload,
+        status: None,
     }
 }

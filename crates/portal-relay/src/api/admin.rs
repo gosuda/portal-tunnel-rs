@@ -39,6 +39,7 @@ use serde::Serialize;
 use crate::api::envelope::{ApiError, ApiErrorCode, ApiResult, ok};
 use crate::api::state::AdminState;
 use crate::config::RuntimeConfig;
+use crate::tui::{Lifecycle, StatusSnapshot};
 
 /// Response body for a successful reload. `accepted: true` is the
 /// only field on a 200 response.
@@ -237,6 +238,119 @@ pub async fn lease_count_handler(State(state): State<AdminState>) -> ApiResult<L
     }))
 }
 
+/// Wire body for `GET /v1/admin/status`. Mirrors
+/// [`crate::tui::StatusSnapshot`] for serde.
+#[derive(Debug, Clone, serde::Serialize)]
+#[non_exhaustive]
+pub struct StatusBody {
+    /// Lifecycle state.
+    pub lifecycle: LifecycleBody,
+    /// Recent events.
+    pub recent_events: Vec<String>,
+    /// Active lease count.
+    pub lease_count: usize,
+    /// Identity health summary.
+    pub identity_health: IdentityHealthBody,
+    /// Aggregate BPS.
+    pub bps: BpsBody,
+}
+
+/// Tagged lifecycle body preserving structured fields.
+#[derive(Debug, Clone, serde::Serialize)]
+#[non_exhaustive]
+pub struct LifecycleBody {
+    /// Discriminant label: `Stopped`, `Running`, `Stopping`, `Errored`.
+    pub phase: String,
+    /// Uptime when `phase == "Running"`, else `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uptime_secs: Option<u64>,
+    /// Error message when `phase == "Errored"`, else `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Identity health summary for the status wire body.
+#[derive(Debug, Clone, serde::Serialize)]
+#[non_exhaustive]
+pub struct IdentityHealthBody {
+    /// Approved identities.
+    pub approved: usize,
+    /// Identities awaiting approval.
+    pub pending: usize,
+    /// Denied identities.
+    pub denied: usize,
+    /// Banned identities.
+    pub banned: usize,
+}
+
+/// Aggregate BPS for the status wire body.
+#[derive(Debug, Clone, serde::Serialize)]
+#[non_exhaustive]
+pub struct BpsBody {
+    /// Inbound bytes per second.
+    pub inbound: u64,
+    /// Outbound bytes per second.
+    pub outbound: u64,
+}
+
+impl From<StatusSnapshot> for StatusBody {
+    fn from(snapshot: StatusSnapshot) -> Self {
+        let (phase, uptime_secs, error) = match snapshot.lifecycle {
+            Lifecycle::Stopped => ("Stopped".to_owned(), None, None),
+            Lifecycle::Running { uptime } => ("Running".to_owned(), Some(uptime.as_secs()), None),
+            Lifecycle::Stopping => ("Stopping".to_owned(), None, None),
+            Lifecycle::Errored(ref msg) => ("Errored".to_owned(), None, Some(msg.clone())),
+        };
+        Self {
+            lifecycle: LifecycleBody {
+                phase,
+                uptime_secs,
+                error,
+            },
+            recent_events: snapshot
+                .recent_events
+                .iter()
+                .map(|event| match event {
+                    crate::tui::RecentEvent::Error(msg) => format!("error: {msg}"),
+                    crate::tui::RecentEvent::Denial(msg) => format!("denial: {msg}"),
+                    crate::tui::RecentEvent::Throttle(msg) => format!("throttle: {msg}"),
+                })
+                .collect(),
+            lease_count: snapshot.lease_count,
+            identity_health: IdentityHealthBody {
+                approved: snapshot.identity_health.approved,
+                pending: snapshot.identity_health.pending,
+                denied: snapshot.identity_health.denied,
+                banned: snapshot.identity_health.banned,
+            },
+            bps: BpsBody {
+                inbound: snapshot.bps.inbound,
+                outbound: snapshot.bps.outbound,
+            },
+        }
+    }
+}
+
+/// `GET /v1/admin/status` — live status snapshot.
+///
+/// Reads from the [`AdminState`]'s optional status receiver.
+/// Returns 200 OK with the current [`StatusSnapshot`] values,
+/// or the default snapshot when no status publisher is active.
+///
+/// # Errors
+///
+/// Infallible. Signature returns [`ApiResult`] for envelope
+/// uniformity with the rest of the admin surface.
+#[tracing::instrument(name = "admin.status", skip_all)]
+pub async fn status_handler(State(state): State<AdminState>) -> ApiResult<StatusBody> {
+    let snapshot = state
+        .status
+        .as_ref()
+        .map(|rx| rx.borrow().clone())
+        .unwrap_or_default();
+    Ok(ok(snapshot.into()))
+}
+
 /// `GET /v1/admin/policy/snapshot` — derived-policy observability.
 ///
 /// Reads from the [`crate::policy::PolicyRuntime`] held by
@@ -258,4 +372,112 @@ pub async fn policy_snapshot_handler(
         bps_cap_per_identity: state.policy.bps_cap_per_identity(),
         ip_ban_count: state.policy.ip_ban_count(),
     }))
+}
+
+#[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "test-only setup")]
+mod tests {
+    use super::*;
+    use crate::api::state::AdminState;
+    use crate::policy::PolicyRuntime;
+    use crate::state::LeaseRegistry;
+    use crate::tui::StatusSnapshot;
+    use axum::extract::State;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn status_returns_snapshot() {
+        let server = crate::server::Server::new();
+        let state = server.admin_state();
+        let resp = status_handler(State(state)).await;
+        assert!(resp.is_ok());
+        let body = resp.unwrap().data.clone();
+        assert_eq!(body.lease_count, 0);
+    }
+
+    #[tokio::test]
+    async fn status_running_includes_uptime() {
+        let leases = LeaseRegistry::new();
+        let policy = Arc::new(PolicyRuntime::new());
+        let (tx, rx) = tokio::sync::watch::channel(StatusSnapshot {
+            lifecycle: crate::tui::Lifecycle::Running {
+                uptime: std::time::Duration::from_secs(42),
+            },
+            recent_events: Vec::new(),
+            lease_count: 3,
+            identity_health: crate::tui::IdentityHealth {
+                approved: 1,
+                pending: 2,
+                denied: 3,
+                banned: 4,
+            },
+            bps: crate::tui::BpsAggregate {
+                inbound: 100,
+                outbound: 200,
+            },
+        });
+        // Keep tx alive so rx can borrow.
+        let _tx = tx;
+        let state = AdminState {
+            leases,
+            policy,
+            reload: None,
+            status: Some(rx),
+        };
+        let resp = status_handler(State(state)).await;
+        assert!(resp.is_ok());
+        let body = resp.unwrap().data.clone();
+        assert_eq!(body.lifecycle.phase, "Running");
+        assert_eq!(body.lifecycle.uptime_secs, Some(42));
+        assert_eq!(body.lease_count, 3);
+        assert_eq!(body.identity_health.approved, 1);
+        assert_eq!(body.identity_health.pending, 2);
+        assert_eq!(body.identity_health.denied, 3);
+        assert_eq!(body.identity_health.banned, 4);
+        assert_eq!(body.bps.inbound, 100);
+        assert_eq!(body.bps.outbound, 200);
+    }
+
+    #[tokio::test]
+    async fn status_errored_includes_message() {
+        let leases = LeaseRegistry::new();
+        let policy = Arc::new(PolicyRuntime::new());
+        let (tx, rx) = tokio::sync::watch::channel(StatusSnapshot {
+            lifecycle: crate::tui::Lifecycle::Errored("disk full".to_owned()),
+            recent_events: Vec::new(),
+            lease_count: 0,
+            identity_health: crate::tui::IdentityHealth::default(),
+            bps: crate::tui::BpsAggregate::default(),
+        });
+        let _tx = tx;
+        let state = AdminState {
+            leases,
+            policy,
+            reload: None,
+            status: Some(rx),
+        };
+        let resp = status_handler(State(state)).await;
+        assert!(resp.is_ok());
+        let body = resp.unwrap().data.clone();
+        assert_eq!(body.lifecycle.phase, "Errored");
+        assert_eq!(body.lifecycle.error, Some("disk full".to_owned()));
+        assert_eq!(body.lifecycle.uptime_secs, None);
+    }
+
+    #[tokio::test]
+    async fn status_no_receiver_returns_default() {
+        let leases = LeaseRegistry::new();
+        let policy = Arc::new(PolicyRuntime::new());
+        let state = AdminState {
+            leases,
+            policy,
+            reload: None,
+            status: None,
+        };
+        let resp = status_handler(State(state)).await;
+        assert!(resp.is_ok());
+        let body = resp.unwrap().data.clone();
+        assert_eq!(body.lifecycle.phase, "Stopped");
+        assert_eq!(body.lease_count, 0);
+    }
 }

@@ -670,6 +670,7 @@ impl Server {
             leases: self.leases(),
             policy: self.policy(),
             reload: self.reload_handle(),
+            status: Some(self.status_snapshot_rx()),
         }
     }
 

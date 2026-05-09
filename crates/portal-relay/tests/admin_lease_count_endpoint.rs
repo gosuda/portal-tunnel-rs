@@ -45,6 +45,7 @@ fn admin_state_with_leases(leases: LeaseRegistry) -> AdminState {
         leases,
         policy: Arc::new(PolicyRuntime::new()),
         reload: None,
+        status: None,
     }
 }
 

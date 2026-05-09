@@ -18,6 +18,8 @@ use secrecy::SecretBox;
 use crate::policy::{PolicyRuntime, ReputationEngine};
 use crate::reload::ReloadHandle;
 use crate::state::LeaseRegistry;
+use crate::tui::StatusSnapshot;
+use tokio::sync::watch;
 
 /// State carried by the SDK trust-boundary router.
 ///
@@ -124,6 +126,10 @@ pub struct AdminState {
     /// lease count reads from `AdminState.leases`, both
     /// independent of bundle load.
     pub reload: Option<Arc<ReloadHandle>>,
+    /// Live status snapshot receiver. Populated by
+    /// [`crate::server::Server::admin_state`] when the status publisher
+    /// is active.
+    pub status: Option<watch::Receiver<StatusSnapshot>>,
 }
 
 /// State carried by the discovery trust-boundary router. Discovery
