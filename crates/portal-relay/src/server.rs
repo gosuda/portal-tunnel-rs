@@ -76,15 +76,20 @@ use tokio::sync::{Mutex, watch};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
-use crate::api::{AdminState, SdkState, DiscoveryState};
+use crate::api::{AdminState, DiscoveryState, SdkState};
 use crate::error::RelayResult;
 use crate::policy::{PolicyRuntime, REPUTATION_PERSIST_INTERVAL, ReputationEngine};
 use crate::reload::ReloadHandle;
 use crate::state::LeaseRegistry;
+use crate::tui::StatusSnapshot;
 
 /// Janitor cadence — Phase 5 spec U7 calls for 5s ticks. The choice
 /// of constant matches Go's reference relay.
 pub const JANITOR_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Status-publish cadence — TUI refresh interval. 2s balances
+/// responsiveness with minimal CPU overhead.
+pub const STATUS_PUBLISH_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Top-level relay server. `Arc`-shareable.
 ///
@@ -181,6 +186,12 @@ struct ServerInner {
     /// sections only — never across `JoinSet::join_next` awaits
     /// or other long-lived operations.
     lifecycle: Mutex<Lifecycle>,
+    /// Live status snapshot channel.  Published every
+    /// [`STATUS_PUBLISH_INTERVAL`] by the status-publisher task
+    /// spawned in [`Server::start`].  Initialized to
+    /// [`StatusSnapshot::default()`] so TUI subscribers can
+    /// clone a receiver before `start()` is called.
+    status_tx: watch::Sender<StatusSnapshot>,
 }
 
 /// Paired lease-token signing key + derived verifier, held together
@@ -247,6 +258,7 @@ impl ServerInner {
                 .map(RelayProtocolPair::arc_clone),
             port_allocator: self.port_allocator.as_ref().map(Arc::clone),
             lifecycle: Mutex::new(Lifecycle::Stopped),
+            status_tx: self.status_tx.clone(),
         }
     }
 }
@@ -347,6 +359,7 @@ impl Server {
     /// [`Self::with_reload_handle`] to bind one before [`Self::start`].
     #[must_use]
     pub fn with_components(leases: LeaseRegistry, policy: PolicyRuntime) -> Self {
+        let (status_tx, _) = watch::channel(StatusSnapshot::default());
         Self {
             inner: Arc::new(ServerInner {
                 leases,
@@ -358,6 +371,7 @@ impl Server {
                 relay_protocol: None,
                 port_allocator: None,
                 lifecycle: Mutex::new(Lifecycle::Stopped),
+                status_tx,
             }),
         }
     }
@@ -725,6 +739,15 @@ impl Server {
         }
     }
 
+    /// Subscribe to live [`StatusSnapshot`] updates published by the
+    /// server every [`STATUS_PUBLISH_INTERVAL`].  The receiver
+    /// immediately yields [`StatusSnapshot::default()`] if called
+    /// before [`Server::start`].
+    #[must_use]
+    pub fn status_snapshot_rx(&self) -> watch::Receiver<StatusSnapshot> {
+        self.inner.status_tx.subscribe()
+    }
+
     /// Build the [`DiscoveryState`] consumed by
     /// [`crate::api::build_discovery_router`]. Canonical bridge between
     /// server orchestration and the discovery axum router: the bin
@@ -907,6 +930,32 @@ impl Server {
             });
         }
 
+        // Status-publisher task: drives the TUI watch channel.
+        let status_server = self.clone();
+        let status_cancel = cancel.clone();
+        let status_start = tokio::time::Instant::now();
+        tasks.spawn(async move {
+            let mut interval = tokio::time::interval(STATUS_PUBLISH_INTERVAL);
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tokio::select! {
+                    () = status_cancel.cancelled() => break,
+                    _ = interval.tick() => {
+                        let status = status_server.status().await;
+                        let mut snapshot = snapshot_from_status(&status);
+                        if matches!(snapshot.lifecycle, crate::tui::Lifecycle::Running { .. }) {
+                            snapshot.lifecycle = crate::tui::Lifecycle::Running {
+                                uptime: status_start.elapsed(),
+                            };
+                        }
+                        if status_server.inner.status_tx.send(snapshot).is_err() {
+                            break; // all receivers dropped, stop publishing
+                        }
+                    }
+                }
+            }
+        });
+
         *guard = Lifecycle::Running(RuntimeState { cancel, tasks });
         drop(guard);
         Ok(())
@@ -1017,6 +1066,30 @@ impl Server {
             lease_count: self.inner.leases.lease_count(),
             ip_filter_size: self.inner.policy.ip_filter.len(),
         }
+    }
+}
+
+/// Convert a [`ServerStatus`] into the TUI-renderable [`StatusSnapshot`].
+///
+/// The `uptime` field is intentionally left as [`Duration::ZERO`] here;
+/// the caller (the status-publisher task) overwrites it with the real
+/// elapsed time when the phase is [`LifecyclePhase::Running`].  Fields
+/// that are not yet tracked by `ServerStatus` (`recent_events`,
+/// `identity_health`, `bps`) default to their zero values.
+fn snapshot_from_status(status: &ServerStatus) -> StatusSnapshot {
+    use crate::tui::{BpsAggregate, IdentityHealth, Lifecycle};
+    StatusSnapshot {
+        lifecycle: match status.phase {
+            LifecyclePhase::Stopped => Lifecycle::Stopped,
+            LifecyclePhase::Running => Lifecycle::Running {
+                uptime: Duration::ZERO,
+            },
+            LifecyclePhase::Stopping => Lifecycle::Stopping,
+        },
+        recent_events: Vec::new(),
+        lease_count: status.lease_count,
+        identity_health: IdentityHealth::default(),
+        bps: BpsAggregate::default(),
     }
 }
 
@@ -1637,5 +1710,37 @@ mod tests {
             expires_at.as_second(),
             "decoded expiry must round-trip through issue/verify under the SdkState-carried pair",
         );
+    }
+
+    #[tokio::test]
+    async fn status_publisher_publishes_after_start() {
+        use crate::tui::Lifecycle;
+        use tokio::time::timeout;
+
+        let server = Server::new();
+        let mut rx = server.status_snapshot_rx();
+        assert_eq!(rx.borrow().lifecycle, Lifecycle::Stopped);
+
+        server.start().await.unwrap();
+
+        let snapshot = timeout(Duration::from_secs(5), async {
+            loop {
+                rx.changed().await.expect("watch sender dropped");
+                let snap = rx.borrow_and_update().clone();
+                if matches!(snap.lifecycle, Lifecycle::Running { .. }) {
+                    break snap;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for Running snapshot");
+
+        assert!(
+            matches!(snapshot.lifecycle, Lifecycle::Running { .. }),
+            "expected Running, got {:?}",
+            snapshot.lifecycle,
+        );
+
+        server.shutdown().await;
     }
 }
