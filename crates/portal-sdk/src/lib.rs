@@ -52,4 +52,5 @@ pub use identity::{
 pub use listener::Listener;
 pub use mitm::{MitmError, PROBE_EKM_LEN, derive_probe_ekm};
 pub use picker::{PickerConstraints, pick_relays};
+pub use portal_net::AcceptedStream;
 pub use relay_set::{AsnBin, MetadataProvenance, RelayCandidate, RelayMetadata, RelaySet};

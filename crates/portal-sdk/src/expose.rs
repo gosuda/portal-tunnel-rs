@@ -22,6 +22,7 @@ use portal_wire::api::{
 use portal_wire::descriptor::RelayDescriptor;
 use secrecy::SecretBox;
 use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
@@ -29,6 +30,7 @@ use crate::error::{SdkError, SdkResult};
 use crate::events::{TunnelEvent, TunnelState};
 use crate::identity::{generate_protocol_key, load_protocol_key, load_tenant_key};
 use crate::listener::Listener;
+use portal_net::AcceptedStream;
 
 // ---------------------------------------------------------------------------
 // Config
@@ -98,9 +100,9 @@ impl ExposeSession {
     pub async fn start(
         config: ExposeConfig,
         event_tx: broadcast::Sender<TunnelEvent>,
-    ) -> SdkResult<Self> {
+    ) -> SdkResult<(Self, mpsc::Receiver<AcceptedStream>)> {
         let cancel = CancellationToken::new();
-        let mut tasks = JoinSet::new();
+        let tasks = JoinSet::new();
 
         // Load tenant key.
         let tenant_key = load_tenant_key(&config.tenant_key_path)?;
@@ -188,34 +190,17 @@ impl ExposeSession {
 
         // Spawn listener accept loop.
         let listener_cancel = cancel.child_token();
-        let (listener, mut stream_rx) = Listener::start(conn, listener_cancel, 64)?;
+        let (listener, stream_rx) = Listener::start(conn, listener_cancel, 64)?;
 
-        // Spawn stream consumer task (v0.1: acknowledges streams; TLS
-        // termination + tenant forwarding is Phase 5/6a integration).
-        let stream_cancel = cancel.child_token();
-        tasks.spawn(async move {
-            loop {
-                tokio::select! {
-                    biased;
-                    () = stream_cancel.cancelled() => break Ok(()),
-                    maybe = stream_rx.recv() => {
-                        match maybe {
-                            Some(_stream) => {
-                                tracing::debug!("accepted stream from relay");
-                            }
-                            None => break Ok(()),
-                        }
-                    }
-                }
-            }
-        });
-
-        Ok(Self {
-            cancel,
-            tasks,
-            event_tx,
-            listener: Some(listener),
-        })
+        Ok((
+            Self {
+                cancel,
+                tasks,
+                event_tx,
+                listener: Some(listener),
+            },
+            stream_rx,
+        ))
     }
 
     /// Stop the session and wait for all tasks to finish.
