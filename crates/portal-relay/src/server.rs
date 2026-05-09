@@ -504,9 +504,11 @@ impl Server {
         );
         if let Some(handle) = &self.inner.reload_handle {
             let engine = engine.clone();
-            handle.on_reload(Box::new(move |_runtime: &crate::config::RuntimeConfig| {
+            // TODO(B8): derive ReputationConfig from RuntimeConfig once reputation
+            // fields are added to RuntimeConfig. Until then, reload resets to default.
+            handle.on_reload(move |_runtime: &crate::config::RuntimeConfig| {
                 engine.swap_config(crate::policy::ReputationConfig::default());
-            }));
+            });
         }
         Self {
             inner: Arc::new(ServerInner {

@@ -259,10 +259,10 @@ fn reload_invokes_registered_callbacks() {
     let handle = ReloadHandle::new(bootstrap.clone(), RuntimeConfig::default());
     let called = Arc::new(AtomicBool::new(false));
     let called_clone = called.clone();
-    handle.on_reload(Box::new(move |runtime: &RuntimeConfig| {
+    handle.on_reload(move |runtime: &RuntimeConfig| {
         assert_eq!(runtime.bps_per_identity, 8192);
         called_clone.store(true, Ordering::SeqCst);
-    }));
+    });
     let new_runtime = RuntimeConfig::default().with_bps_per_identity(8192);
     handle
         .reload(&bootstrap, new_runtime)

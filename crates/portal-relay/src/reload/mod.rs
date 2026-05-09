@@ -36,7 +36,7 @@ use crate::config::{RelayServerConfig, RuntimeConfig};
 
 /// Type alias for a post-reload callback. Used to keep the field
 /// declaration readable and avoid clippy's "very complex type" lint.
-type ReloadCallback = Arc<dyn Fn(&RuntimeConfig) + Send + Sync>;
+type ReloadCallback = Arc<dyn Fn(&RuntimeConfig) + Send + Sync + 'static>;
 
 /// Reload-time errors.
 #[non_exhaustive]
@@ -73,6 +73,7 @@ impl core::fmt::Debug for ReloadHandle {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("ReloadHandle")
             .field("bootstrap", &self.bootstrap)
+            .field("callbacks", &self.callbacks.lock().map_or(0, |g| g.len()))
             .finish_non_exhaustive()
     }
 }
@@ -118,12 +119,12 @@ impl ReloadHandle {
     ///
     /// Callbacks are held in registration order and invoked
     /// synchronously on the thread that calls [`Self::reload`].
-    pub fn on_reload(&self, callback: Box<dyn Fn(&RuntimeConfig) + Send + Sync>) {
+    pub fn on_reload(&self, callback: impl Fn(&RuntimeConfig) + Send + Sync + 'static) {
         let mut guard = self
             .callbacks
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        guard.push(Arc::from(callback));
+        guard.push(Arc::new(callback));
     }
 
     /// Apply a new `(bootstrap_candidate, runtime)` pair atomically.
@@ -213,7 +214,14 @@ impl ReloadHandle {
             guard.clone()
         };
         for cb in &callbacks {
-            cb(&runtime_for_callbacks);
+            if let Err(_err) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                cb(&runtime_for_callbacks);
+            })) {
+                tracing::error!(
+                    event = "config.reload.callback_panic",
+                    "reload callback panicked; continuing with remaining callbacks",
+                );
+            }
         }
 
         tracing::info!(
