@@ -1,0 +1,12 @@
+---
+source: crates/portal-relay/src/tui/status.rs
+expression: rendered_text(&snapshot)
+---
+┌Lifecycle─────────────────────────────┐┌Recent Events─────────────────────────┐┌Leases / Identity─────────────────────┐┌BPS───────────────────────────────────┐
+│state: Running                        ││none                                  ││leases active: 7                      ││in: 1200000 B/s                       │
+│uptime: 1h 00m 00s                    ││                                      ││identity approved: 5                  ││out: 800000 B/s                       │
+│                                      ││                                      ││identity pending: 1                   ││total: 2000000 B/s                    │
+│                                      ││                                      ││identity denied: 2                    ││                                      │
+│                                      ││                                      ││identity banned: 3                    ││                                      │
+│                                      ││                                      ││                                      ││                                      │
+└──────────────────────────────────────┘└──────────────────────────────────────┘└──────────────────────────────────────┘└──────────────────────────────────────┘

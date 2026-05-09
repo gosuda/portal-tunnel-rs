@@ -1,0 +1,12 @@
+---
+source: crates/portal-relay/src/tui/status.rs
+expression: rendered_text(&snapshot)
+---
+┌Lifecycle─────────────────────────────┐┌Recent Events─────────────────────────┐┌Leases / Identity─────────────────────┐┌BPS───────────────────────────────────┐
+│state: Errored                        ││throttle: tenant exceeded bps cap     ││leases active: 0                      ││in: 1 B/s                             │
+│error: janitor task failed            ││error: reload parse failed            ││identity approved: 0                  ││out: 2 B/s                            │
+│                                      ││                                      ││identity pending: 0                   ││total: 3 B/s                          │
+│                                      ││                                      ││identity denied: 0                    ││                                      │
+│                                      ││                                      ││identity banned: 0                    ││                                      │
+│                                      ││                                      ││                                      ││                                      │
+└──────────────────────────────────────┘└──────────────────────────────────────┘└──────────────────────────────────────┘└──────────────────────────────────────┘

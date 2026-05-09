@@ -243,29 +243,149 @@ fn format_uptime(uptime: Duration) -> String {
     format!("{hours}h {minutes:02}m {seconds:02}s")
 }
 
-/// Run the status loop without binding a concrete terminal backend.
+/// Run the status loop backed by a crossterm terminal.
 ///
-/// CLI-owned terminal setup and teardown belongs to `portal-relay-bin`; this
-/// library entrypoint only owns the watch/cancel loop shape.
+/// Enables raw mode, enters the alternate screen, and renders the
+/// [`StatusView`] on every `snapshot_rx.changed()` tick.  Exits cleanly on
+/// `cancel.cancelled()`, `q` / `Q`, or `Ctrl-C`.
 ///
 /// # Errors
 ///
-/// This backend-free loop is infallible in v0.1.
+/// Returns [`TuiError::Draw`] if the terminal backend fails while drawing.
+#[expect(
+    clippy::too_many_lines,
+    reason = "terminal lifecycle is sequential by nature; splitting would obscure the setup→loop→teardown flow"
+)]
 pub async fn run(
     mut snapshot_rx: watch::Receiver<StatusSnapshot>,
     cancel: CancellationToken,
 ) -> Result<(), TuiError> {
-    loop {
-        tokio::select! {
-            () = cancel.cancelled() => return Ok(()),
-            changed = snapshot_rx.changed() => {
-                if changed.is_err() {
-                    return Ok(());
+    use std::io::stdout;
+    use std::time::Duration;
+
+    use ratatui_crossterm::crossterm::event;
+    use ratatui_crossterm::crossterm::terminal::{
+        disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+    };
+    use ratatui_crossterm::crossterm::execute;
+    use ratatui_crossterm::CrosstermBackend;
+
+    // -- Terminal setup -------------------------------------------------------
+
+    if let Err(e) = enable_raw_mode() {
+        return Err(TuiError::Draw(e.to_string()));
+    }
+
+    let mut stdout = stdout();
+    if let Err(e) = execute!(
+        stdout,
+        EnterAlternateScreen,
+        event::EnableMouseCapture,
+    ) {
+        let _ = disable_raw_mode();
+        return Err(TuiError::Draw(e.to_string()));
+    }
+
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = match Terminal::new(backend) {
+        Ok(t) => t,
+        Err(e) => {
+            let _ = execute!(
+                std::io::stdout(),
+                LeaveAlternateScreen,
+                event::DisableMouseCapture
+            );
+            let _ = disable_raw_mode();
+            return Err(TuiError::Draw(e.to_string()));
+        }
+    };
+
+    // -- Event reader task ----------------------------------------------------
+
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<event::Event>(16);
+    let event_cancel = cancel.child_token();
+    let event_cancel_for_task = event_cancel.clone();
+    let event_task = tokio::task::spawn_blocking(move || {
+        loop {
+            if event_cancel_for_task.is_cancelled() {
+                break;
+            }
+            match event::poll(Duration::from_millis(100)) {
+                Ok(true) => {
+                    let Ok(evt) = event::read() else { continue };
+                    if event_tx.blocking_send(evt).is_err() {
+                        break;
+                    }
                 }
+                Ok(false) => {}
+                Err(_) => break,
             }
         }
+    });
+
+    // -- Render loop ----------------------------------------------------------
+
+    let mut result = {
+        let snapshot = snapshot_rx.borrow();
+        render_snapshot(&mut terminal, &snapshot)
+    };
+
+    if result.is_ok() {
+        result = loop {
+            tokio::select! {
+                () = cancel.cancelled() => break Ok(()),
+                maybe_event = event_rx.recv() => {
+                    match maybe_event {
+                        Some(event::Event::Key(key)) => {
+                            if key.kind == event::KeyEventKind::Press {
+                                match key.code {
+                                    event::KeyCode::Char('q' | 'Q') => break Ok(()),
+                                    event::KeyCode::Char('c')
+                                        if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                                    {
+                                        break Ok(())
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        Some(_) => {}
+                        None => break Ok(()),
+                    }
+                }
+                changed = snapshot_rx.changed() => {
+                    if changed.is_err() {
+                        break Ok(());
+                    }
+                    let snapshot = snapshot_rx.borrow();
+                    if let Err(e) = render_snapshot(&mut terminal, &snapshot) {
+                        break Err(e);
+                    }
+                }
+            }
+        };
     }
+
+    // -- Teardown ---------------------------------------------------------------
+
+    event_cancel.cancel();
+    // Await the blocking task with a short timeout so we don't hang if the
+    // terminal driver is stuck, but we give it enough time to observe the
+    // cancellation and exit its poll loop.
+    let _ = tokio::time::timeout(Duration::from_millis(500), event_task).await;
+
+    let _ = execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        event::DisableMouseCapture,
+    );
+    let _ = disable_raw_mode();
+
+    result
 }
+
+// Forward-declare the backend-free loop so `portal-relay-bin` can call it
+// directly when it already owns a terminal (e.g. tests, future refactor).
 
 /// Run the status loop against an injected ratatui terminal backend.
 ///
@@ -284,7 +404,10 @@ where
     B: Backend,
     B::Error: Display,
 {
-    render_snapshot(terminal, &snapshot_rx.borrow())?;
+    {
+        let snapshot = snapshot_rx.borrow();
+        render_snapshot(terminal, &snapshot)?;
+    }
 
     loop {
         tokio::select! {
@@ -293,7 +416,8 @@ where
                 if changed.is_err() {
                     return Ok(());
                 }
-                render_snapshot(terminal, &snapshot_rx.borrow())?;
+                let snapshot = snapshot_rx.borrow();
+                render_snapshot(terminal, &snapshot)?;
             }
         }
     }
@@ -473,5 +597,68 @@ mod tests {
             result.is_ok(),
             "pre-cancelled status loop should exit cleanly: {result:?}",
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // Insta snapshot tests — stable diff of terminal buffer across renders.
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn snapshot_running() {
+        let snapshot = StatusSnapshot {
+            lifecycle: Lifecycle::Running {
+                uptime: Duration::from_secs(3_600),
+            },
+            recent_events: Vec::new(),
+            lease_count: 7,
+            identity_health: IdentityHealth {
+                approved: 5,
+                pending: 1,
+                denied: 2,
+                banned: 3,
+            },
+            bps: BpsAggregate {
+                inbound: 1_200_000,
+                outbound: 800_000,
+            },
+        };
+        insta::assert_snapshot!("running", rendered_text(&snapshot));
+    }
+
+    #[test]
+    fn snapshot_stopping() {
+        let snapshot = StatusSnapshot {
+            lifecycle: Lifecycle::Stopping,
+            recent_events: vec![RecentEvent::Denial(
+                "tenant denied by policy".to_owned(),
+            )],
+            lease_count: 2,
+            identity_health: IdentityHealth {
+                approved: 1,
+                pending: 0,
+                denied: 1,
+                banned: 0,
+            },
+            bps: BpsAggregate::default(),
+        };
+        insta::assert_snapshot!("stopping", rendered_text(&snapshot));
+    }
+
+    #[test]
+    fn snapshot_errored() {
+        let snapshot = StatusSnapshot {
+            lifecycle: Lifecycle::Errored("janitor task failed".to_owned()),
+            recent_events: vec![
+                RecentEvent::Throttle("tenant exceeded bps cap".to_owned()),
+                RecentEvent::Error("reload parse failed".to_owned()),
+            ],
+            lease_count: 0,
+            identity_health: IdentityHealth::default(),
+            bps: BpsAggregate {
+                inbound: 1,
+                outbound: 2,
+            },
+        };
+        insta::assert_snapshot!("errored", rendered_text(&snapshot));
     }
 }

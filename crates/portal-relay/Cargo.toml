@@ -141,6 +141,7 @@ portal-wire = { workspace = true }
 postcard = { workspace = true }
 rand_core = { workspace = true }
 ratatui = { workspace = true }
+ratatui-crossterm = { workspace = true }
 rustls = { workspace = true }
 rustls-pki-types = { workspace = true }
 rustls-pemfile = { workspace = true }
@@ -215,6 +216,9 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 # audit-event emission test's structural assertion path — substring
 # matching the text formatter's output is brittle to format toggles.
 tracing-subscriber = { workspace = true }
+# Snapshot testing for TUI buffer rendering — stable diff of terminal
+# output across ratatui versions.
+insta = { workspace = true }
 
 [lints]
 workspace = true

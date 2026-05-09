@@ -1,0 +1,12 @@
+---
+source: crates/portal-relay/src/tui/status.rs
+expression: rendered_text(&snapshot)
+---
+┌Lifecycle─────────────────────────────┐┌Recent Events─────────────────────────┐┌Leases / Identity─────────────────────┐┌BPS───────────────────────────────────┐
+│state: Stopping                       ││denial: tenant denied by policy       ││leases active: 2                      ││in: 0 B/s                             │
+│                                      ││                                      ││identity approved: 1                  ││out: 0 B/s                            │
+│                                      ││                                      ││identity pending: 0                   ││total: 0 B/s                          │
+│                                      ││                                      ││identity denied: 1                    ││                                      │
+│                                      ││                                      ││identity banned: 0                    ││                                      │
+│                                      ││                                      ││                                      ││                                      │
+└──────────────────────────────────────┘└──────────────────────────────────────┘└──────────────────────────────────────┘└──────────────────────────────────────┘
