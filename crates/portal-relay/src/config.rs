@@ -106,7 +106,10 @@ pub struct RelayServerConfig {
 impl RelayServerConfig {
     /// Construct a minimal bootstrap config. Phase 5 U13 follow-up
     /// replaces this with a figment-driven builder.
-    #[expect(clippy::too_many_arguments, reason = "bootstrap config constructor carries 8 required trust-boundary paths; builder is B8 follow-up")]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "bootstrap config constructor carries 8 required trust-boundary paths; builder is B8 follow-up"
+    )]
     #[must_use]
     pub const fn new(
         name: CompactString,

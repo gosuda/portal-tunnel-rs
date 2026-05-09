@@ -72,8 +72,6 @@ use portal_relay::keyless::{
     subject_from_extension,
 };
 use portal_relay::policy::{PolicyRuntime, ReputationEngine};
-use rustls::RootCertStore;
-use rustls::sign::SigningKey;
 use portal_relay::state::LeaseRegistry;
 use portal_relay::state::identity::{IdentityPaths, load_relay_protocol_only};
 use portal_relay::tui::run_with_terminal;
@@ -85,6 +83,8 @@ use portal_relay_bin::tui::initial_tui_snapshot;
 use ratatui_crossterm::CrosstermBackend;
 use ratatui_crossterm::crossterm::ExecutableCommand;
 use ratatui_crossterm::crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
+use rustls::RootCertStore;
+use rustls::sign::SigningKey;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
@@ -324,15 +324,19 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
     // the baseline of `serve` working without `init` first is
     // preserved.
     let bundle = load_bundle_if_present(&args.state_dir).await?;
-    let keyless_paths: Option<(std::path::PathBuf, std::path::PathBuf, std::path::PathBuf, std::path::PathBuf)> =
-        bundle.as_ref().map(|b| {
-            (
-                b.server.keyless_client_ca_path.clone(),
-                b.server.keyless_server_cert_path.clone(),
-                b.server.keyless_server_key_path.clone(),
-                b.server.keyless_signing_key_path.clone(),
-            )
-        });
+    let keyless_paths: Option<(
+        std::path::PathBuf,
+        std::path::PathBuf,
+        std::path::PathBuf,
+        std::path::PathBuf,
+    )> = bundle.as_ref().map(|b| {
+        (
+            b.server.keyless_client_ca_path.clone(),
+            b.server.keyless_server_cert_path.clone(),
+            b.server.keyless_server_key_path.clone(),
+            b.server.keyless_signing_key_path.clone(),
+        )
+    });
     let reload_handle: Option<Arc<portal_relay::ReloadHandle>> = bundle.map(|bundle| {
         let bundle_name = bundle.server.name.clone();
         let ip_ban_count = bundle.runtime.ip_ban_list.len();
@@ -498,7 +502,9 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
                 }
             }
             None => {
-                tracing::debug!("keyless paths not configured in bundle; skipping keyless listener");
+                tracing::debug!(
+                    "keyless paths not configured in bundle; skipping keyless listener"
+                );
                 None
             }
         };
@@ -652,13 +658,12 @@ async fn try_start_keyless_listener(
     }
 
     // Load PEM material using the same helpers the API TLS path uses.
-    let client_ca_certs =
-        portal_relay::tls::read_cert_chain(&client_ca_path).map_err(|e| {
-            eyre::eyre!(
-                "failed to read keyless client CA {}: {e}",
-                client_ca_path.display()
-            )
-        })?;
+    let client_ca_certs = portal_relay::tls::read_cert_chain(&client_ca_path).map_err(|e| {
+        eyre::eyre!(
+            "failed to read keyless client CA {}: {e}",
+            client_ca_path.display()
+        )
+    })?;
     if client_ca_certs.is_empty() {
         return Err(eyre::eyre!(
             "keyless client CA {} contains no certificates",
@@ -666,13 +671,12 @@ async fn try_start_keyless_listener(
         ));
     }
 
-    let server_cert_chain =
-        portal_relay::tls::read_cert_chain(&server_cert_path).map_err(|e| {
-            eyre::eyre!(
-                "failed to read keyless server cert {}: {e}",
-                server_cert_path.display()
-            )
-        })?;
+    let server_cert_chain = portal_relay::tls::read_cert_chain(&server_cert_path).map_err(|e| {
+        eyre::eyre!(
+            "failed to read keyless server cert {}: {e}",
+            server_cert_path.display()
+        )
+    })?;
     if server_cert_chain.is_empty() {
         return Err(eyre::eyre!(
             "keyless server cert {} contains no certificates",
@@ -691,26 +695,21 @@ async fn try_start_keyless_listener(
     // Build the mTLS-enabled rustls ServerConfig.
     let mut client_roots = RootCertStore::empty();
     for cert in client_ca_certs {
-        client_roots.add(cert).map_err(|e| {
-            eyre::eyre!("failed to add keyless client CA to root store: {e}")
-        })?;
+        client_roots
+            .add(cert)
+            .map_err(|e| eyre::eyre!("failed to add keyless client CA to root store: {e}"))?;
     }
-    let keyless_tls_cfg = build_keyless_server_config(
-        client_roots,
-        server_cert_chain,
-        server_private_key,
-    )
-    .map_err(|e| eyre::eyre!("failed to build keyless server config: {e}"))?;
+    let keyless_tls_cfg =
+        build_keyless_server_config(client_roots, server_cert_chain, server_private_key)
+            .map_err(|e| eyre::eyre!("failed to build keyless server config: {e}"))?;
 
     // Load the keyless signing key (the key the bridge will sign with).
-    let signing_key_pem = tokio::fs::read(&signing_key_path)
-        .await
-        .map_err(|e| {
-            eyre::eyre!(
-                "failed to read keyless signing key {}: {e}",
-                signing_key_path.display()
-            )
-        })?;
+    let signing_key_pem = tokio::fs::read(&signing_key_path).await.map_err(|e| {
+        eyre::eyre!(
+            "failed to read keyless signing key {}: {e}",
+            signing_key_path.display()
+        )
+    })?;
     let keyless_signing_key = load_keyless_signing_key(&signing_key_pem).map_err(|e| {
         eyre::eyre!(
             "failed to load keyless signing key from {}: {e}",
@@ -719,10 +718,8 @@ async fn try_start_keyless_listener(
     })?;
 
     // Build the signer adapter and policy.
-    let signer_adapter =
-        KeylessSignerAdapter::from_keyless_signing_key(keyless_signing_key).map_err(|e| {
-            eyre::eyre!("failed to construct keyless signer adapter: {e}")
-        })?;
+    let signer_adapter = KeylessSignerAdapter::from_keyless_signing_key(keyless_signing_key)
+        .map_err(|e| eyre::eyre!("failed to construct keyless signer adapter: {e}"))?;
     let algorithm = signer_adapter.algorithm();
     let signing_key_arc: Arc<dyn SigningKey> = Arc::new(signer_adapter);
 
@@ -733,20 +730,19 @@ async fn try_start_keyless_listener(
     // cheap — key is a few KiB).  This keeps the policy's known_keys
     // map holding the correct type while the bridge holds the trait
     // object.
-    let signing_key_pem_reload = tokio::fs::read(&signing_key_path)
-        .await
-        .map_err(|e| {
-            eyre::eyre!(
-                "failed to re-read keyless signing key {}: {e}",
-                signing_key_path.display()
-            )
-        })?;
-    let keyless_signing_key_reload = load_keyless_signing_key(&signing_key_pem_reload).map_err(|e| {
+    let signing_key_pem_reload = tokio::fs::read(&signing_key_path).await.map_err(|e| {
         eyre::eyre!(
-            "failed to reload keyless signing key from {}: {e}",
+            "failed to re-read keyless signing key {}: {e}",
             signing_key_path.display()
         )
     })?;
+    let keyless_signing_key_reload =
+        load_keyless_signing_key(&signing_key_pem_reload).map_err(|e| {
+            eyre::eyre!(
+                "failed to reload keyless signing key from {}: {e}",
+                signing_key_path.display()
+            )
+        })?;
     let known = KnownKey::new(Arc::new(keyless_signing_key_reload), algorithm);
     policy.register_key("default", known);
 
@@ -785,7 +781,9 @@ async fn try_start_keyless_listener(
         while let Some(_res) = joinset.join_next().await {}
     });
 
-    let bridge = bridge_rx.await.map_err(|_| eyre::eyre!("bridge oneshot dropped before send"))?;
+    let bridge = bridge_rx
+        .await
+        .map_err(|_| eyre::eyre!("bridge oneshot dropped before send"))?;
 
     // Build router + listener.
     let keyless_state = KeylessApiState {

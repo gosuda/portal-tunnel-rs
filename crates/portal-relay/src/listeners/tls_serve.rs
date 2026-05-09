@@ -43,8 +43,10 @@ async fn serve_connection<S>(
     service: S,
     handshake_label: &'static str,
 ) where
-    S: tower::Service<http::Request<hyper::body::Incoming>, Response = http::Response<axum::body::Body>>
-        + Clone
+    S: tower::Service<
+            http::Request<hyper::body::Incoming>,
+            Response = http::Response<axum::body::Body>,
+        > + Clone
         + Send
         + 'static,
     S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -149,7 +151,8 @@ where
     }
 
     fn call(&mut self, mut req: http::Request<ReqBody>) -> Self::Future {
-        req.extensions_mut().insert(SubjectExtension(self.subject.clone()));
+        req.extensions_mut()
+            .insert(SubjectExtension(self.subject.clone()));
         self.inner.call(req)
     }
 }
@@ -391,7 +394,7 @@ mod tests {
         rustls::ClientConfig,
         CertificateDer<'static>,
     ) {
-        use rcgen::{BasicConstraints, DnType, DistinguishedName, IsCa, KeyUsagePurpose};
+        use rcgen::{BasicConstraints, DistinguishedName, DnType, IsCa, KeyUsagePurpose};
 
         let alg = &rcgen::PKCS_ECDSA_P256_SHA256;
 
