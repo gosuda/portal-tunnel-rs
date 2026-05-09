@@ -502,6 +502,12 @@ impl Server {
             "Server::with_reputation_engine must be called before start(); \
              try_lock failed (contention) or lifecycle is not Stopped",
         );
+        if let Some(handle) = &self.inner.reload_handle {
+            let engine = engine.clone();
+            handle.on_reload(Box::new(move |_runtime: &crate::config::RuntimeConfig| {
+                engine.swap_config(crate::policy::ReputationConfig::default());
+            }));
+        }
         Self {
             inner: Arc::new(ServerInner {
                 reputation_engine: Some(engine),
