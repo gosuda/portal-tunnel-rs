@@ -151,6 +151,14 @@ struct ServeArgs {
     /// TCP port for the keyless mTLS oracle listener.
     #[arg(long, default_value = "8444")]
     keyless_port: u16,
+
+    /// Ethereum JSON-RPC URL for ENS resolution (e.g. https://mainnet.infura.io/v3/KEY).
+    /// When provided, the relay attempts SIWE+ENS Sybil-gating: identities
+    /// with a verified ENS name bypass the reputation block threshold.
+    /// Best-effort — if the resolver cannot be built, the relay starts
+    /// without ENS gating and logs a warning.
+    #[arg(long)]
+    ens_rpc_url: Option<String>,
 }
 
 fn main() -> eyre::Result<()> {
@@ -422,6 +430,28 @@ async fn serve(args: ServeArgs) -> eyre::Result<()> {
         .with_reputation_engine(reputation_engine.clone())
         .with_reputation_persistence(reputation_engine, reputation_path)
         .with_relay_protocol_key(relay_protocol_key);
+
+    // Wire ENS resolver when operator supplies an RPC URL.
+    let server = if let Some(ref url) = args.ens_rpc_url {
+        let redacted = redact_url(url);
+        match portal_relay::AlloyEnsResolver::from_rpc_url(url).await {
+            Ok(alloy) => {
+                let resolver = portal_relay::BoxedEnsResolver::new(alloy);
+                tracing::info!(ens_rpc_url = %redacted, "ENS resolver wired; SIWE+ENS Sybil-gating active");
+                server.with_ens_resolver(resolver)
+            }
+            Err(err) => {
+                tracing::warn!(
+                    ens_rpc_url = %redacted,
+                    error = %err,
+                    "failed to build ENS resolver; continuing without ENS Sybil-gating"
+                );
+                server
+            }
+        }
+    } else {
+        server
+    };
 
     server.start().await.context("start relay server")?;
     let status = server.status().await;
@@ -820,6 +850,42 @@ async fn try_start_keyless_listener(
     });
 
     Ok(Some((listener_handle, bridge_handle)))
+}
+
+/// Strip path, query, and fragment from a URL so only scheme + host
+/// remain — prevents API keys from leaking into logs.
+fn redact_url(url: &str) -> String {
+    // Split on "://" to isolate scheme and the rest.
+    let (scheme, rest) = match url.split_once("://") {
+        Some((s, r)) => (s, r),
+        None => return "<invalid-url>".to_owned(),
+    };
+    // The authority is everything before the next '/', '?', or '#'.
+    let authority = match rfind_any(rest, &['/', '?', '#']) {
+        Some(idx) => &rest[..idx],
+        None => rest,
+    };
+    // Drop any '@' Basic-auth prefix.
+    let authority = authority.split('@').next_back().unwrap_or(authority);
+    // For IPv6 literals the host is bracketed; do not split on ':' inside brackets.
+    let host = if authority.starts_with('[') {
+        // Find the closing bracket; port (if any) follows after ']:'.
+        match authority.find(']') {
+            Some(end) => &authority[..=end],
+            None => authority, // malformed, keep as-is
+        }
+    } else {
+        // Strip optional port.
+        authority.split(':').next().unwrap_or(authority)
+    };
+    format!("{scheme}://{host}")
+}
+
+/// Return the index of the first matching character from `needles` in `haystack`.
+fn rfind_any(haystack: &str, needles: &[char]) -> Option<usize> {
+    haystack
+        .char_indices()
+        .find_map(|(i, c)| if needles.contains(&c) { Some(i) } else { None })
 }
 
 #[cfg(test)]

@@ -120,3 +120,7 @@ pub use error::{RelayError, RelayResult};
 pub use reload::file_watch::{DEFAULT_DEBOUNCE, FileWatchError, watch_runtime_config};
 pub use reload::{ReloadError, ReloadHandle};
 pub use server::{JANITOR_INTERVAL, LifecyclePhase, Server, ServerStatus};
+
+// Re-export ENS resolver types so binaries can construct and bind
+// a resolver without adding a direct `portal-crypto` dependency.
+pub use portal_crypto::{AlloyEnsResolver, BoxedEnsResolver};
