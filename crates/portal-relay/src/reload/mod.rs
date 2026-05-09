@@ -27,12 +27,16 @@
 #[cfg(feature = "config_file_watch")]
 pub mod file_watch;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use arc_swap::ArcSwap;
 use thiserror::Error;
 
 use crate::config::{RelayServerConfig, RuntimeConfig};
+
+/// Type alias for a post-reload callback. Used to keep the field
+/// declaration readable and avoid clippy's "very complex type" lint.
+type ReloadCallback = Arc<dyn Fn(&RuntimeConfig) + Send + Sync>;
 
 /// Reload-time errors.
 #[non_exhaustive]
@@ -62,6 +66,7 @@ pub enum ReloadError {
 pub struct ReloadHandle {
     bootstrap: Arc<RelayServerConfig>,
     runtime: Arc<ArcSwap<RuntimeConfig>>,
+    callbacks: Arc<Mutex<Vec<ReloadCallback>>>,
 }
 
 impl core::fmt::Debug for ReloadHandle {
@@ -82,6 +87,7 @@ impl ReloadHandle {
         Self {
             bootstrap: Arc::new(bootstrap),
             runtime: Arc::new(ArcSwap::from_pointee(runtime)),
+            callbacks: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -104,6 +110,20 @@ impl ReloadHandle {
     #[must_use]
     pub fn current(&self) -> Arc<RuntimeConfig> {
         self.runtime.load_full()
+    }
+
+    /// Register a callback to be invoked after every successful
+    /// hot-reload. Callbacks receive a reference to the newly-stored
+    /// [`RuntimeConfig`].
+    ///
+    /// Callbacks are held in registration order and invoked
+    /// synchronously on the thread that calls [`Self::reload`].
+    pub fn on_reload(&self, callback: Box<dyn Fn(&RuntimeConfig) + Send + Sync>) {
+        let mut guard = self
+            .callbacks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        guard.push(Arc::from(callback));
     }
 
     /// Apply a new `(bootstrap_candidate, runtime)` pair atomically.
@@ -182,7 +202,19 @@ impl ReloadHandle {
             swapped_fields.push("tcp_max_leases");
         }
 
+        let runtime_for_callbacks = runtime_candidate.clone();
         self.runtime.store(Arc::new(runtime_candidate));
+
+        let callbacks: Vec<_> = {
+            let guard = self
+                .callbacks
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            guard.clone()
+        };
+        for cb in &callbacks {
+            cb(&runtime_for_callbacks);
+        }
 
         tracing::info!(
             event = "config.reload",

@@ -176,6 +176,13 @@ impl RuntimeConfig {
         }
     }
 
+    /// Return a copy with `bps_per_identity` set to `value`.
+    #[must_use]
+    pub const fn with_bps_per_identity(mut self, value: u64) -> Self {
+        self.bps_per_identity = value;
+        self
+    }
+
     /// Validate semantic invariants that serde cannot express.
     ///
     /// # Errors
